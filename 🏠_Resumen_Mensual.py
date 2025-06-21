@@ -15,6 +15,7 @@ st.set_page_config(
 )
 
 # --- DICCIONARIOS GLOBALES Y CONSTANTES ---
+# (Omitidos por brevedad para no repetir, pero son los mismos que ya teníamos)
 PRESUPUESTOS = {'154033':{'presupuesto':123873239, 'presupuestocartera':105287598}, '154044':{'presupuesto':80000000, 'presupuestocartera':300000000}, '154034':{'presupuesto':82753045, 'presupuestocartera':44854727}, '154014':{'presupuesto':268214737, 'presupuestocartera':307628243}, '154046':{'presupuesto':85469798, 'presupuestocartera':7129065}, '154012':{'presupuesto':246616193, 'presupuestocartera':295198667}, '154043':{'presupuesto':124885413, 'presupuestocartera':99488960}, '154035':{'presupuesto':80000000, 'presupuestocartera':300000000}, '154006':{'presupuesto':81250000, 'presupuestocartera':103945133}, '154049':{'presupuesto':56500000, 'presupuestocartera':70421127}, '154013':{'presupuesto':303422639, 'presupuestocartera':260017920}, '154011':{'presupuesto':447060250, 'presupuestocartera':428815923}, '154029':{'presupuesto':32500000, 'presupuestocartera':40000000}, '154040':{'presupuesto':0, 'presupuestocartera':0},'154053':{'presupuesto':0, 'presupuestocartera':0},'154048':{'presupuesto':0, 'presupuestocartera':0},'154042':{'presupuesto':0, 'presupuestocartera':0},'154031':{'presupuesto':0, 'presupuestocartera':0},'154039':{'presupuesto':0, 'presupuestocartera':0},'154051':{'presupuesto':0, 'presupuestocartera':0},'154008':{'presupuesto':0, 'presupuestocartera':0},'154052':{'presupuesto':0, 'presupuestocartera':0},'154050':{'presupuesto':0, 'presupuestocartera':0}}
 GRUPOS_VENDEDORES = {"MOSTRADOR PEREIRA": ["ALEJANDRO CARBALLO MARQUEZ", "GEORGINA A. GALVIS HERRERA"], "MOSTRADOR ARMENIA": ["CRISTIAN CAMILO RENDON MONTES", "FANDRY JOHANA ABRIL PENHA", "JAVIER ORLANDO PATINO HURTADO"], "MOSTRADOR MANIZALES": ["DAVID FELIPE MARTINEZ RIOS", "JHON JAIRO CASTAÑO MONTES"], "MOSTRADOR LAURELES": ["MAURICIO RIOS MORALES"]}
 MAPEO_MESES = {1:"Enero", 2:"Febrero", 3:"Marzo", 4:"Abril", 5:"Mayo", 6:"Junio", 7:"Julio", 8:"Agosto", 9:"Septiembre", 10:"Octubre", 11:"Noviembre", 12:"Diciembre"}
@@ -73,36 +74,26 @@ def render_dashboard():
     st.sidebar.header("Filtros de Periodo")
     df_ventas = st.session_state.df_ventas
     df_cobros = st.session_state.df_cobros
-    
     lista_anios = sorted(df_ventas['anio'].unique(), reverse=True)
     anio_sel = st.sidebar.selectbox("Elija el Año", lista_anios)
     lista_meses_num = sorted(df_ventas[df_ventas['anio'] == anio_sel]['mes'].unique())
     mes_sel_num = st.sidebar.selectbox("Elija el Mes", options=lista_meses_num, format_func=lambda x: MAPEO_MESES.get(x))
-    
     df_ventas_periodo = df_ventas[(df_ventas['anio'] == anio_sel) & (df_ventas['mes'] == mes_sel_num)]
-    if df_ventas_periodo.empty:
-        st.warning("No hay datos de ventas para el periodo seleccionado.")
-        st.stop()
+    if df_ventas_periodo.empty: st.warning("No hay datos de ventas para el periodo seleccionado."); st.stop()
     df_cobros_periodo = df_cobros[(df_cobros['anio'] == anio_sel) & (df_cobros['mes'] == mes_sel_num)]
 
-    # --- FLUJO DE PROCESAMIENTO CORREGIDO ---
-    # 1. Crear resumen base para individuos con todas las métricas
     resumen_ind = df_ventas_periodo.groupby(['codigo_vendedor', 'nomvendedor']).agg(ventas_totales=('valor_venta', 'sum'), impactos=('cliente_id', 'nunique')).reset_index()
     resumen_cobros = df_cobros_periodo.groupby('codigo_vendedor').agg(cobros_totales=('valor_cobro', 'sum')).reset_index()
     resumen_marquilla = calcular_marquilla(df_ventas_periodo)
-    
     df_resumen_completo = pd.merge(resumen_ind, resumen_cobros, on='codigo_vendedor', how='left')
     df_resumen_completo = pd.merge(df_resumen_completo, resumen_marquilla, on=['codigo_vendedor', 'nomvendedor'], how='left')
     df_resumen_completo['presupuesto'] = df_resumen_completo['codigo_vendedor'].map(lambda x: PRESUPUESTOS.get(x, {}).get('presupuesto', 0))
     df_resumen_completo['presupuestocartera'] = df_resumen_completo['codigo_vendedor'].map(lambda x: PRESUPUESTOS.get(x, {}).get('presupuestocartera', 0))
     df_resumen_completo.fillna(0, inplace=True)
     
-    # 2. Ahora, crear los grupos a partir de esta tabla completa y robusta
     registros_agrupados = []
     for grupo, lista_vendedores in GRUPOS_VENDEDORES.items():
-        # LA CORRECCIÓN ESTÁ AQUÍ: Usamos df_resumen_completo, no una variable antigua.
         df_grupo = df_resumen_completo[df_resumen_completo['nomvendedor'].isin(lista_vendedores)]
-        
         if not df_grupo.empty:
             suma_grupo = df_grupo[['ventas_totales', 'cobros_totales', 'impactos', 'presupuesto', 'presupuestocartera']].sum().to_dict()
             if 'promedio_marquilla' in df_grupo.columns and df_grupo['impactos'].sum() > 0:
@@ -112,13 +103,10 @@ def render_dashboard():
             registro_grupo = {'nomvendedor': grupo, 'codigo_vendedor': grupo, **suma_grupo, 'promedio_marquilla': promedio_marquilla_grupo}
             registros_agrupados.append(registro_grupo)
     df_agrupado = pd.DataFrame(registros_agrupados)
-
-    # 3. Concatenar
     vendedores_en_grupos_lista = [v for lista in GRUPOS_VENDEDORES.values() for v in lista]
     df_individuales = df_resumen_completo[~df_resumen_completo['nomvendedor'].isin(vendedores_en_grupos_lista)]
     df_final = pd.concat([df_agrupado, df_individuales], ignore_index=True)
-    
-    # El resto del código de filtrado y visualización
+
     usuario_actual = st.session_state.usuario
     if usuario_actual == "GERENTE":
         lista_filtro = sorted(df_final['nomvendedor'].unique())
@@ -134,10 +122,13 @@ def render_dashboard():
         return "🔴 Necesita Atención"
     dff['Estatus'] = dff.apply(asignar_estatus, axis=1)
     
-    st.title("🏠 Resumen de Rendimiento")
+    st.title(f"🏠 Resumen de Rendimiento")
     st.header(f"{MAPEO_MESES.get(mes_sel_num)} {anio_sel}")
+    st.markdown(f"**Vista para:** `{st.session_state.usuario if len(dff) == 1 else 'Múltiples Seleccionados'}`")
     st.markdown("---")
+    
     with st.container(border=True):
+        # ... (código del asesor virtual)
         ventas_total = dff['ventas_totales'].sum(); meta_ventas = dff['presupuesto'].sum()
         cobros_total = dff['cobros_totales'].sum(); meta_cobros = dff['presupuestocartera'].sum()
         marquilla_prom = np.average(dff['promedio_marquilla'], weights=dff['impactos']) if dff['impactos'].sum() > 0 else 0
@@ -146,8 +137,9 @@ def render_dashboard():
         st.subheader(f"👨‍💼 Asesor Virtual para: {st.session_state.usuario}")
         comentarios = generar_comentario_asesor(avance_ventas, avance_cobros, marquilla_prom)
         for comentario in comentarios: st.markdown(f"- {comentario}")
-    
+
     st.subheader("Métricas Clave del Periodo")
+    # ... (código de métricas y barras de progreso)
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric("Ventas Totales", f"${ventas_total:,.0f}", f"{ventas_total - meta_ventas:,.0f} vs Meta")
@@ -158,16 +150,74 @@ def render_dashboard():
     with col3:
         st.metric("Promedio Marquilla", f"{marquilla_prom:.2f}", f"{marquilla_prom - META_MARQUILLA:,.2f} vs Meta")
         st.progress(min((marquilla_prom / META_MARQUILLA), 1.0) if marquilla_prom > 0 else 0, text=f"Meta: {META_MARQUILLA}")
-    
+
     st.subheader("Desglose por Vendedor / Grupo")
+    # ... (código de la tabla con formato)
     st.dataframe(dff[['Estatus', 'nomvendedor', 'ventas_totales', 'presupuesto', 'cobros_totales', 'presupuestocartera', 'impactos', 'promedio_marquilla']], column_config={"Estatus": st.column_config.TextColumn("🚦", width="small"),"nomvendedor": st.column_config.TextColumn("Vendedor/Grupo", width="medium"), "ventas_totales": st.column_config.NumberColumn("Ventas", format="$ %d"), "presupuesto": st.column_config.NumberColumn("Meta Ventas", format="$ %d"), "cobros_totales": st.column_config.NumberColumn("Recaudo", format="$ %d"), "presupuestocartera": st.column_config.NumberColumn("Meta Recaudo", format="$ %d"), "impactos": st.column_config.NumberColumn("Clientes Únicos", format="%d"), "promedio_marquilla": st.column_config.ProgressColumn("Promedio Marquilla", format="%.2f", min_value=0, max_value=4)}, use_container_width=True, hide_index=True)
 
+    # --- INICIO DE LA NUEVA SECCIÓN DE ANÁLISIS DETALLADO ---
+    st.markdown("---")
+    st.header("🔬 Análisis Detallado del Periodo")
 
+    opciones_enfoque = ["Visión General"] + dff['nomvendedor'].tolist()
+    enfoque_sel = st.selectbox("Seleccione un Vendedor/Grupo para enfocar el análisis:", opciones_enfoque)
+    
+    df_ventas_enfocadas = pd.DataFrame()
+    if enfoque_sel == "Visión General":
+        nombres_vendedores_enfocados = dff['nomvendedor'].tolist()
+        df_enfocado_graficos = dff.copy()
+    else:
+        df_enfocado_graficos = dff[dff['nomvendedor'] == enfoque_sel]
+        nombres_vendedores_enfocados = GRUPOS_VENDEDORES.get(enfoque_sel, [enfoque_sel])
+    
+    df_ventas_enfocadas = df_ventas_periodo[df_ventas_periodo['nomvendedor'].isin(nombres_vendedores_enfocados)]
+    
+    col_graf1, col_graf2 = st.columns(2)
+    with col_graf1:
+        st.subheader("🏆 Composición de Ventas por Línea")
+        if not df_ventas_enfocadas.empty:
+            df_lineas = df_ventas_enfocadas.groupby('linea_producto')['valor_venta'].sum().reset_index()
+            fig_sunburst = px.sunburst(df_lineas, path=['linea_producto'], values='valor_venta', title="Distribución de Ingresos")
+            fig_sunburst.update_layout(margin=dict(t=40, l=0, r=0, b=0))
+            st.plotly_chart(fig_sunburst, use_container_width=True)
+        else: st.info("No hay datos de ventas de productos para mostrar.")
+
+    with col_graf2:
+        st.subheader("⭐ Top 10 Clientes del Periodo")
+        if not df_ventas_enfocadas.empty:
+            top_clientes = df_ventas_enfocadas.groupby('nombre_cliente')['valor_venta'].sum().nlargest(10).reset_index()
+            top_clientes['valor_venta'] = top_clientes['valor_venta'].astype(int)
+            st.dataframe(top_clientes, column_config={"nombre_cliente": "Cliente", "valor_venta": st.column_config.NumberColumn("Total Compra", format="$ %d")}, use_container_width=True, hide_index=True)
+        else: st.info("No hay datos de clientes para mostrar.")
+            
+    st.subheader("📊 Ranking de Cumplimiento de Meta")
+    if not df_enfocado_graficos.empty and 'presupuesto' in df_enfocado_graficos.columns:
+        df_ranking = df_enfocado_graficos[df_enfocado_graficos['presupuesto'] > 0].copy()
+        df_ranking['avance_ventas'] = (df_ranking['ventas_totales'] / df_ranking['presupuesto']) * 100
+        df_ranking = df_ranking.sort_values('avance_ventas', ascending=False)
+        fig_ranking = px.bar(df_ranking, x='avance_ventas', y='nomvendedor', orientation='h', title="Cumplimiento de Meta de Ventas (%)", text='avance_ventas')
+        fig_ranking.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
+        fig_ranking.update_layout(yaxis={'categoryorder':'total ascending'}, xaxis_title="Cumplimiento (%)", yaxis_title="Vendedor/Grupo")
+        st.plotly_chart(fig_ranking, use_container_width=True)
+
+# --- CONTROLADOR PRINCIPAL ---
 def main():
     if 'autenticado' not in st.session_state: st.session_state.autenticado = False
+    render_login_form()
+    if st.session_state.autenticado:
+        if 'df_ventas' not in st.session_state:
+            with st.spinner('Cargando datos maestros...'):
+                st.session_state.df_ventas = cargar_y_limpiar_datos(RUTA_VENTAS, NOMBRES_COLUMNAS_VENTAS)
+                st.session_state.df_cobros = cargar_y_limpiar_datos(RUTA_COBROS, NOMBRES_COLUMNAS_COBROS)
+        render_dashboard()
+    else:
+        st.image(URL_LOGO, width=300)
+        st.header("Bienvenido a la Plataforma de Inteligencia de Negocios")
+        st.info("Por favor, utilice el panel de la izquierda para ingresar sus credenciales de acceso.")
+
+def render_login_form():
     st.sidebar.image(URL_LOGO, use_container_width=True)
     st.sidebar.header("Control de Acceso")
-    
     @st.cache_data
     def obtener_lista_usuarios():
         df_base = cargar_y_limpiar_datos(RUTA_VENTAS, NOMBRES_COLUMNAS_VENTAS)
@@ -177,34 +227,21 @@ def main():
             vendedores_solos = [v for v in vendedores_individuales if v not in vendedores_en_grupos]
             return ["GERENTE"] + list(GRUPOS_VENDEDORES.keys()) + vendedores_solos
         return ["GERENTE"] + list(GRUPOS_VENDEDORES.keys())
-    
     todos_usuarios = obtener_lista_usuarios()
     usuarios_fijos = {"GERENTE": "1234", "MOSTRADOR PEREIRA": "2345", "MOSTRADOR ARMENIA": "3456", "MOSTRADOR MANIZALES": "4567", "MOSTRADOR LAURELES": "5678"}
     usuarios = usuarios_fijos.copy()
     codigo = 1001
     for u in todos_usuarios:
         if u not in usuarios: usuarios[u] = str(codigo); codigo += 1
-
     usuario_seleccionado = st.sidebar.selectbox("Seleccione su usuario", options=todos_usuarios)
     clave = st.sidebar.text_input("Contraseña", type="password")
-    
     if st.sidebar.button("Ingresar"):
         if usuario_seleccionado in usuarios and clave == usuarios[usuario_seleccionado]:
             st.session_state.autenticado = True
             st.session_state.usuario = usuario_seleccionado
-            with st.spinner('Cargando datos...'):
-                st.session_state.df_ventas = cargar_y_limpiar_datos(RUTA_VENTAS, NOMBRES_COLUMNAS_VENTAS)
-                st.session_state.df_cobros = cargar_y_limpiar_datos(RUTA_COBROS, NOMBRES_COLUMNAS_COBROS)
             st.rerun()
         else:
             st.sidebar.error("Usuario o contraseña incorrectos")
-
-    if st.session_state.autenticado:
-        render_dashboard()
-    else:
-        st.image(URL_LOGO, width=300)
-        st.header("Bienvenido a la Plataforma de Inteligencia de Negocios")
-        st.info("Por favor, utilice el panel de la izquierda para ingresar sus credenciales de acceso.")
 
 if __name__ == '__main__':
     main()
