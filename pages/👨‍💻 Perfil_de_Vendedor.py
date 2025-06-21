@@ -85,9 +85,10 @@ if df_ventas_historico.empty:
     st.session_state.df_ventas = df_ventas_historico
 
 # Selector de Vendedor/Grupo
+# Bloque Corregido
 lista_vendedores = sorted(list(df_ventas_historico['nomvendedor'].dropna().unique()))
 opciones_analisis = ["Seleccione un Vendedor o Grupo"] + list(GRUPOS_VENDEDORES.keys()) + lista_vendedores
-seleccion = st.selectbox("Seleccione el Vendedor o Grupo a analizar:", opciones_opciones_analisis)
+seleccion = st.selectbox("Seleccione el Vendedor o Grupo a analizar:", opciones_analisis) # <-- CORREGIDO
 
 if seleccion == "Seleccione un Vendedor o Grupo":
     st.info("Por favor, elija un vendedor o grupo para comenzar el análisis.")
