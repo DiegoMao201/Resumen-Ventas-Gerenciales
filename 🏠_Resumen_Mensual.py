@@ -99,18 +99,39 @@ def render_dashboard():
     df_resumen_completo['presupuestocartera'] = df_resumen_completo['codigo_vendedor'].map(lambda x: PRESUPUESTOS.get(x, {}).get('presupuestocartera', 0))
     df_resumen_completo.fillna(0, inplace=True)
     
-    registros_agrupados = []
-    for grupo, lista_vendedores in GRUPOS_VENDEDORES.items():
-        df_grupo = df_resumen_completo[df_resumen_completo['nomvendedor'].isin(lista_vendedores)]
-        if not df_grupo.empty:
-            suma_grupo = df_grupo[['ventas_totales', 'cobros_totales', 'impactos', 'presupuesto', 'presupuestocartera']].sum().to_dict()
-            promedio_marquilla_grupo = np.average(df_grupo['promedio_marquilla'], weights=df_grupo['impactos']) if df_grupo['impactos'].sum() > 0 else 0
-            registro_grupo = {'nomvendedor': grupo, **suma_grupo, 'promedio_marquilla': promedio_marquilla_grupo, 'codigo_vendedor': grupo}
-            registros_agrupados.append(registro_grupo)
-    df_agrupado = pd.DataFrame(registros_agrupados)
-    vendedores_en_grupos_lista = [v for lista in GRUPOS_VENDEDORES.values() for v in lista]
-    df_individuales = df_resumen_completo[~df_resumen_completo['nomvendedor'].isin(vendedores_en_grupos_lista)]
-    df_final = pd.concat([df_agrupado, df_individuales], ignore_index=True)
+# --- AGRUPACIÓN (VERSIÓN CORREGIDA Y ROBUSTA) ---
+registros_agrupados = []
+for grupo, lista_vendedores in GRUPOS_VENDEDORES.items():
+    df_grupo = df_resumen_completo[df_resumen_completo['nomvendedor'].isin(lista_vendedores)]
+    
+    if not df_grupo.empty:
+        # 1. Suma segura de las columnas numéricas que siempre existen
+        suma_grupo = df_grupo[['ventas_totales', 'cobros_totales', 'impactos', 'presupuesto', 'presupuestocartera']].sum().to_dict()
+        
+        # 2. Cálculo seguro de la marquilla, verificando que la columna exista
+        if 'promedio_marquilla' in df_grupo.columns and df_grupo['impactos'].sum() > 0:
+            promedio_marquilla_grupo = np.average(df_grupo['promedio_marquilla'], weights=df_grupo['impactos'])
+        else:
+            promedio_marquilla_grupo = 0
+        
+        # 3. Construir el registro del grupo
+        registro_grupo = {
+            'nomvendedor': grupo,
+            'codigo_vendedor': grupo,
+            **suma_grupo,
+            'promedio_marquilla': promedio_marquilla_grupo
+        }
+        registros_agrupados.append(registro_grupo)
+
+df_agrupado = pd.DataFrame(registros_agrupados)
+
+# Unir con los vendedores individuales que no están en grupos
+vendedores_en_grupos_lista = [v for lista in GRUPOS_VENDEDORES.values() for v in lista]
+df_individuales = df_resumen_completo[~df_resumen_completo['nomvendedor'].isin(vendedores_en_grupos_lista)]
+
+# Concatenar para obtener la tabla final
+df_final = pd.concat([df_agrupado, df_individuales], ignore_index=True)
+# ----------------------------------------------------
 
     usuario_actual = st.session_state.usuario
     if usuario_actual == "GERENTE":
