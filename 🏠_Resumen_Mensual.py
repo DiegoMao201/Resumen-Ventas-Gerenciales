@@ -6,15 +6,20 @@ import dropbox
 import io
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
-# Acción: Reemplaza la URL de ejemplo por la URL "cruda" de tu logo en GitHub
-URL_LOGO = "URL_DE_TU_LOGO_EN_GITHUB" 
+
+# URL ANTERIOR (la que da problemas): 
+# URL_LOGO = "https://github.com/DiegoMao201/Resumen-Ventas-Gerenciales/blob/main/LOGO%20FERREINOX%20SAS%20BIC%202024.png?raw=true"
+
+# URL NUEVA Y CORRECTA (la que funcionará):
+URL_LOGO = "https://raw.githubusercontent.com/DiegoMao201/Resumen-Ventas-Gerenciales/main/LOGO%20FERREINOX%20SAS%20BIC%202024.png"
 
 st.set_page_config(
     page_title="Resumen Mensual | Tablero de Ventas",
-    page_icon=URL_LOGO,
+    page_icon=URL_LOGO, # <--- Ahora usará la URL correcta
     layout="wide",
     initial_sidebar_state="expanded"
 )
+# El resto del código continúa igual...
 
 # --- DICCIONARIOS GLOBALES Y CONSTANTES ---
 PRESUPUESTOS = {'154033':{'presupuesto':123873239, 'presupuestocartera':105287598}, '154044':{'presupuesto':80000000, 'presupuestocartera':300000000}, '154034':{'presupuesto':82753045, 'presupuestocartera':44854727}, '154014':{'presupuesto':268214737, 'presupuestocartera':307628243}, '154046':{'presupuesto':85469798, 'presupuestocartera':7129065}, '154012':{'presupuesto':246616193, 'presupuestocartera':295198667}, '154043':{'presupuesto':124885413, 'presupuestocartera':99488960}, '154035':{'presupuesto':80000000, 'presupuestocartera':300000000}, '154006':{'presupuesto':81250000, 'presupuestocartera':103945133}, '154049':{'presupuesto':56500000, 'presupuestocartera':70421127}, '154013':{'presupuesto':303422639, 'presupuestocartera':260017920}, '154011':{'presupuesto':447060250, 'presupuestocartera':428815923}, '154029':{'presupuesto':32500000, 'presupuestocartera':40000000}}
