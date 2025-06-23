@@ -34,7 +34,6 @@ def calcular_kpis_globales(df_ventas):
     Calcula un set de KPIs para cada vendedor y el promedio general.
     Esta es la función más pesada y se cachea para un rendimiento óptimo.
     """
-    # Helper function para reutilizar la lógica de margen
     def preparar_datos_y_margen(df):
         filtro_descuento = (df['nombre_articulo'].str.contains('descuento', case=False, na=False)) & \
                            (df['nombre_articulo'].str.contains('comercial', case=False, na=False))
@@ -52,6 +51,13 @@ def calcular_kpis_globales(df_ventas):
         df_vendedor = df_ventas[df_ventas['nomvendedor'] == vendedor]
         df_productos, df_descuentos = preparar_datos_y_margen(df_vendedor)
         
+        # --- INICIO DE LA CORRECCIÓN ---
+        # Si el vendedor no tiene ventas de productos reales (solo descuentos),
+        # no podemos calcular sus KPIs, así que lo omitimos del análisis.
+        if df_productos.empty or df_productos['valor_venta'].sum() <= 0:
+            continue
+        # --- FIN DE LA CORRECCIÓN ---
+
         # Calcular KPIs
         venta_bruta = df_productos['valor_venta'].sum()
         margen_bruto_productos = df_productos['margen_bruto'].sum()
@@ -72,7 +78,6 @@ def calcular_kpis_globales(df_ventas):
         })
 
     df_kpis = pd.DataFrame(kpis_list)
-    df_kpis = df_kpis[df_kpis['Ventas Brutas'] > 0] # Excluir vendedores sin ventas
     promedios = df_kpis.select_dtypes(include=np.number).mean()
     
     return df_kpis, promedios
@@ -84,37 +89,34 @@ def calcular_kpis_globales(df_ventas):
 def render_radar_chart(df_kpis, promedios, vendedor_seleccionado):
     st.subheader(f"Radar de Competencias: {vendedor_seleccionado} vs. Promedio del Equipo")
     
-    # Normalizar datos para que sean comparables en el mismo gráfico
-    kpis_a_comparar = ['Ventas Brutas', 'Margen Operativo (%)', 'Clientes Únicos', 'Ticket Promedio']
-    df_normalizado = df_kpis.copy()
-    for kpi in kpis_a_comparar:
-        min_val, max_val = df_kpis[kpi].min(), df_kpis[kpi].max()
-        if (max_val - min_val) > 0:
-            df_normalizado[kpi] = (df_kpis[kpi] - min_val) / (max_val - min_val)
-        else:
-            df_normalizado[kpi] = 0.5 # Si todos tienen el mismo valor, ponerlo en el medio
+    kpis_a_comparar = ['Ventas Brutas', 'Margen Operativo (%)', 'Clientes Únicos', 'Ticket Promedio', 'Descuento Concedido (%)']
+    # Para el Descuento, un valor más bajo es mejor. Lo invertimos para el gráfico.
+    df_kpis_radar = df_kpis.copy()
+    df_kpis_radar['Descuento (Invertido)'] = df_kpis_radar['Descuento Concedido (%)'].max() - df_kpis_radar['Descuento Concedido (%)']
+    kpis_radar_theta = ['Ventas Brutas', 'Margen Operativo (%)', 'Clientes Únicos', 'Ticket Promedio', 'Descuento (Invertido)']
     
-    promedios_normalizados = (promedios - df_kpis.min()) / (df_kpis.max() - df_kpis.min())
+    promedios_radar = promedios.copy()
+    promedios_radar['Descuento (Invertido)'] = df_kpis_radar['Descuento Concedido (%)'].max() - promedios_radar['Descuento Concedido (%)']
 
-    datos_vendedor = df_normalizado[df_normalizado['Vendedor'] == vendedor_seleccionado].iloc[0]
+    datos_vendedor = df_kpis_radar[df_kpis_radar['Vendedor'] == vendedor_seleccionado].iloc[0]
     
     fig = go.Figure()
     fig.add_trace(go.Scatterpolar(
-        r=promedios_normalizados[kpis_a_comparar].values,
-        theta=kpis_a_comparar,
+        r=promedios_radar[kpis_radar_theta].values, theta=kpis_radar_theta,
         fill='toself', name='Promedio del Equipo', line=dict(color='lightgrey')
     ))
     fig.add_trace(go.Scatterpolar(
-        r=datos_vendedor[kpis_a_comparar].values,
-        theta=kpis_a_comparar,
+        r=datos_vendedor[kpis_radar_theta].values, theta=kpis_radar_theta,
         fill='toself', name=vendedor_seleccionado, line=dict(color='dodgerblue')
     ))
     st.plotly_chart(fig, use_container_width=True)
 
 def render_ranking_chart(df_kpis, kpi_seleccionado):
     st.subheader(f"Ranking de Vendedores por: {kpi_seleccionado}")
-    df_sorted = df_kpis.sort_values(by=kpi_seleccionado, ascending=True)
-    fig = px.bar(df_sorted, x=kpi_seleccionado, y='Vendedor', orientation='h', text_auto=True)
+    # Para descuento, ordenar de menor a mayor es mejor.
+    ascending_order = True if kpi_seleccionado == 'Descuento Concedido (%)' else False
+    df_sorted = df_kpis.sort_values(by=kpi_seleccionado, ascending=ascending_order)
+    fig = px.bar(df_sorted, x=kpi_seleccionado, y='Vendedor', orientation='h', text_auto=True, title=f"Ranking por {kpi_seleccionado}")
     fig.update_traces(texttemplate='%{x:,.2f}')
     st.plotly_chart(fig, use_container_width=True)
 
@@ -138,7 +140,6 @@ def render_matriz_equipo(df_kpis):
     fig.add_annotation(x=df_kpis['Ventas Brutas'].min(), y=df_kpis['Margen Operativo (%)'].max(), text="<b>Especialistas de Nicho</b>", showarrow=False, font_size=14, xanchor='left', yanchor='top', opacity=0.5)
     fig.add_annotation(x=df_kpis['Ventas Brutas'].max(), y=df_kpis['Margen Operativo (%)'].min(), text="<b>Constructores de Volumen</b>", showarrow=False, font_size=14, xanchor='right', yanchor='bottom', opacity=0.5)
     fig.add_annotation(x=df_kpis['Ventas Brutas'].min(), y=df_kpis['Margen Operativo (%)'].min(), text="<b>En Desarrollo</b>", showarrow=False, font_size=14, xanchor='left', yanchor='bottom', opacity=0.5)
-
     st.plotly_chart(fig, use_container_width=True)
 
 # ==============================================================================
@@ -152,7 +153,7 @@ st.markdown("---")
 df_kpis, promedios = calcular_kpis_globales(df_ventas_historico)
 
 if df_kpis.empty:
-    st.warning("No hay suficientes datos para generar una comparativa.")
+    st.warning("No hay suficientes datos de vendedores con ventas para generar una comparativa.")
     st.stop()
 
 # --- INTERFAZ DE USUARIO ---
@@ -163,7 +164,8 @@ with col2:
     kpi_ranking = st.selectbox("Seleccione una Métrica para el Ranking:", options=sorted(df_kpis.columns.drop('Vendedor')))
 
 # --- Módulos de Visualización ---
-render_radar_chart(df_kpis, promedios, vendedor_seleccionado)
+if vendedor_seleccionado:
+    render_radar_chart(df_kpis, promedios, vendedor_seleccionado)
 st.markdown("---")
 render_ranking_chart(df_kpis, kpi_ranking)
 st.markdown("---")
