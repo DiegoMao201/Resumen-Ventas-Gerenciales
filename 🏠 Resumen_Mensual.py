@@ -33,7 +33,6 @@ MARQUILLAS_CLAVE = ['VINILTEX', 'KORAZA', 'ESTUCOMASTIC', 'VINILICO']
 def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
     """Descarga y limpia datos desde Dropbox usando el refresh token."""
     try:
-        # LÓGICA DE CONEXIÓN DEFINITIVA USANDO EL REFRESH TOKEN
         with dropbox.Dropbox(
             app_key=st.secrets.dropbox.app_key,
             app_secret=st.secrets.dropbox.app_secret,
@@ -42,23 +41,16 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
             metadata, res = dbx.files_download(path=ruta_archivo)
             contenido_csv = res.content.decode('latin-1')
             df = pd.read_csv(io.StringIO(contenido_csv), header=None, sep=',', on_bad_lines='skip', dtype=str)
-            if df.shape[1] != len(nombres_columnas):
-                return pd.DataFrame(columns=nombres_columnas)
-
+            if df.shape[1] != len(nombres_columnas): return pd.DataFrame(columns=nombres_columnas)
             df.columns = nombres_columnas
             numeric_cols = ['anio', 'mes', 'valor_venta', 'valor_cobro', 'unidades_vendidas', 'costo_unitario', 'marca_producto']
             for col in numeric_cols:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
-            
+                if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce')
             df.dropna(subset=['anio', 'mes', 'codigo_vendedor'], inplace=True)
-            for col in ['anio', 'mes']:
-                df[col] = df[col].astype(int)
+            for col in ['anio', 'mes']: df[col] = df[col].astype(int)
             df['codigo_vendedor'] = df['codigo_vendedor'].astype(str)
-
             if 'fecha_venta' in df.columns:
                 df['fecha_venta'] = pd.to_datetime(df['fecha_venta'], errors='coerce')
-            
             if 'marca_producto' in df.columns:
                 df['nombre_marca'] = df['marca_producto'].map(MAPEO_MARCAS).fillna('No Especificada')
             return df
@@ -66,7 +58,6 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
         st.error(f"Error crítico al cargar {ruta_archivo}: {e}")
         return pd.DataFrame(columns=nombres_columnas)
 
-# (Aquí van el resto de funciones: calcular_marquilla, generar_comentario_asesor, etc. que no cambian)
 def calcular_marquilla(df_periodo):
     if df_periodo.empty: return pd.DataFrame(columns=['codigo_vendedor', 'nomvendedor', 'promedio_marquilla'])
     df_periodo['nombre_articulo'] = df_periodo['nombre_articulo'].astype(str)
@@ -89,50 +80,21 @@ def generar_comentario_asesor(avance_v, avance_c, marquilla_p):
     return comentarios
 
 def render_dashboard():
-    """Renderiza el tablero principal una vez que el usuario está autenticado."""
     st.sidebar.markdown("---")
     st.sidebar.header("Filtros de Periodo")
-    
     df_ventas = st.session_state.df_ventas
     df_cobros = st.session_state.df_cobros
-    
-    # --- LÓGICA DE FILTROS INTELIGENTES ---
-    # Encontrar el año y mes más reciente con datos
-    if not df_ventas.empty:
-        anio_reciente = df_ventas['anio'].max()
-        mes_reciente = df_ventas[df_ventas['anio'] == anio_reciente]['mes'].max()
-    
-        lista_anios = sorted(df_ventas['anio'].unique(), reverse=True)
-        # Encontrar el índice del año más reciente para ponerlo por defecto
-        index_anio = lista_anios.index(anio_reciente)
-        
-        anio_sel = st.sidebar.selectbox("Elija el Año", lista_anios, index=index_anio)
-        
-        lista_meses_num = sorted(df_ventas[df_ventas['anio'] == anio_sel]['mes'].unique())
-        # Encontrar el índice del mes más reciente para ponerlo por defecto
-        # Solo si estamos viendo el año más reciente, si no, por defecto es el primer mes del año seleccionado
-        index_mes = lista_meses_num.index(mes_reciente) if anio_sel == anio_reciente and mes_reciente in lista_meses_num else 0
-        
-        mes_sel_num = st.sidebar.selectbox("Elija el Mes", options=lista_meses_num, format_func=lambda x: MAPEO_MESES.get(x), index=index_mes)
-    else:
-        st.warning("No se encontraron datos históricos de ventas.")
-        st.stop()
-    # ---------------------------------------------
-
+    lista_anios = sorted(df_ventas['anio'].unique(), reverse=True)
+    anio_sel = st.sidebar.selectbox("Elija el Año", lista_anios)
+    lista_meses_num = sorted(df_ventas[df_ventas['anio'] == anio_sel]['mes'].unique())
+    mes_sel_num = st.sidebar.selectbox("Elija el Mes", options=lista_meses_num, format_func=lambda x: MAPEO_MESES.get(x))
     df_ventas_periodo = df_ventas[(df_ventas['anio'] == anio_sel) & (df_ventas['mes'] == mes_sel_num)]
-    
-    if df_ventas_periodo.empty:
-        st.warning("No hay datos de ventas para el periodo seleccionado.")
-        st.stop()
-        
+    if df_ventas_periodo.empty: st.warning("No hay datos de ventas para el periodo seleccionado."); st.stop()
     df_cobros_periodo = df_cobros[(df_cobros['anio'] == anio_sel) & (df_cobros['mes'] == mes_sel_num)]
-
-    # --- FLUJO DE PROCESAMIENTO REESTRUCTURADO ---
-    # (El resto de la función se mantiene igual)
+    
     resumen_ind = df_ventas_periodo.groupby(['codigo_vendedor', 'nomvendedor']).agg(ventas_totales=('valor_venta', 'sum'), impactos=('cliente_id', 'nunique')).reset_index()
     resumen_cobros = df_cobros_periodo.groupby('codigo_vendedor').agg(cobros_totales=('valor_cobro', 'sum')).reset_index()
     resumen_marquilla = calcular_marquilla(df_ventas_periodo)
-    
     df_resumen_completo = pd.merge(resumen_ind, resumen_cobros, on='codigo_vendedor', how='left')
     df_resumen_completo = pd.merge(df_resumen_completo, resumen_marquilla, on=['codigo_vendedor', 'nomvendedor'], how='left')
     df_resumen_completo['presupuesto'] = df_resumen_completo['codigo_vendedor'].map(lambda x: PRESUPUESTOS.get(x, {}).get('presupuesto', 0))
@@ -147,13 +109,11 @@ def render_dashboard():
             promedio_marquilla_grupo = np.average(df_grupo['promedio_marquilla'], weights=df_grupo['impactos']) if df_grupo['impactos'].sum() > 0 else 0
             registro_grupo = {'nomvendedor': grupo, 'codigo_vendedor': grupo, **suma_grupo, 'promedio_marquilla': promedio_marquilla_grupo}
             registros_agrupados.append(registro_grupo)
-            
     df_agrupado = pd.DataFrame(registros_agrupados)
     vendedores_en_grupos_lista = [v for lista in GRUPOS_VENDEDORES.values() for v in lista]
     df_individuales = df_resumen_completo[~df_resumen_completo['nomvendedor'].isin(vendedores_en_grupos_lista)]
     df_final = pd.concat([df_agrupado, df_individuales], ignore_index=True)
-    
-    # ... (El resto del código de filtrado y visualización se mantiene igual)
+
     usuario_actual = st.session_state.usuario
     if usuario_actual == "GERENTE":
         lista_filtro = sorted(df_final['nomvendedor'].unique())
@@ -170,7 +130,7 @@ def render_dashboard():
     dff['Estatus'] = dff.apply(asignar_estatus, axis=1)
     
     st.title(f"🏠 Resumen de Rendimiento")
-    st.header(f"{MAPEO_MESES.get(mes_sel_num)} {anio_sel}")
+    st.header(f"{MAPEO_MESES.get(mes_sel_num, '')} {anio_sel}")
     st.markdown(f"**Vista para:** `{st.session_state.usuario if len(dff['nomvendedor'].unique()) == 1 else 'Múltiples Seleccionados'}`")
     st.markdown("---")
     
@@ -198,19 +158,12 @@ def render_dashboard():
     
     st.subheader("Desglose por Vendedor / Grupo")
     st.dataframe(dff[['Estatus', 'nomvendedor', 'ventas_totales', 'presupuesto', 'cobros_totales', 'presupuestocartera', 'impactos', 'promedio_marquilla']], column_config={"Estatus": st.column_config.TextColumn("🚦", width="small"),"nomvendedor": st.column_config.TextColumn("Vendedor/Grupo", width="medium"), "ventas_totales": st.column_config.NumberColumn("Ventas", format="$ %d"), "presupuesto": st.column_config.NumberColumn("Meta Ventas", format="$ %d"), "cobros_totales": st.column_config.NumberColumn("Recaudo", format="$ %d"), "presupuestocartera": st.column_config.NumberColumn("Meta Recaudo", format="$ %d"), "impactos": st.column_config.NumberColumn("Clientes Únicos", format="%d"), "promedio_marquilla": st.column_config.ProgressColumn("Promedio Marquilla", format="%.2f", min_value=0, max_value=4)}, use_container_width=True, hide_index=True)
-    
-    st.markdown("---")
-    st.header("🔬 Análisis Detallado del Periodo")
-    # ... (El código de la sección de análisis detallado se mantiene igual)
 
-# --- CONTROLADOR PRINCIPAL ---
 def main():
     st.sidebar.image(URL_LOGO, use_container_width=True)
     st.sidebar.header("Control de Acceso")
-
-    if 'autenticado' not in st.session_state:
-        st.session_state.autenticado = False
-
+    if 'autenticado' not in st.session_state: st.session_state.autenticado = False
+    
     @st.cache_data
     def obtener_lista_usuarios():
         df_base = cargar_y_limpiar_datos(RUTA_VENTAS, NOMBRES_COLUMNAS_VENTAS)
@@ -220,7 +173,7 @@ def main():
             vendedores_solos = [v for v in vendedores_individuales if v not in vendedores_en_grupos]
             return ["GERENTE"] + list(GRUPOS_VENDEDORES.keys()) + vendedores_solos
         return ["GERENTE"] + list(GRUPOS_VENDEDORES.keys())
-
+    
     todos_usuarios = obtener_lista_usuarios()
     usuarios_fijos = {"GERENTE": "1234", "MOSTRADOR PEREIRA": "2345", "MOSTRADOR ARMENIA": "3456", "MOSTRADOR MANIZALES": "4567", "MOSTRADOR LAURELES": "5678"}
     usuarios = usuarios_fijos.copy()
@@ -243,7 +196,7 @@ def main():
             st.sidebar.error("Usuario o contraseña incorrectos")
 
     if st.session_state.get('autenticado'):
-        render_dashboard() # Llama a la función que renderiza el tablero
+        render_dashboard()
     else:
         st.title("Plataforma de Inteligencia de Negocios")
         st.image(URL_LOGO, width=400)
