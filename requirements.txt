@@ -6,3 +6,4 @@ pyjanitor
 dropbox
 plotly
 openpyxl
+xlsxwriter
