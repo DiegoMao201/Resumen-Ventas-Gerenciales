@@ -9,49 +9,40 @@ from dateutil.relativedelta import relativedelta
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 URL_LOGO = "https://raw.githubusercontent.com/DiegoMao201/Resumen-Ventas-Gerenciales/main/LOGO%20FERREINOX%20SAS%20BIC%202024.png"
-st.set_page_config(page_title="Resumen Mensual | Tablero de Ventas", page_icon=URL_LOGO, layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(
+    page_title="Resumen Mensual",
+    page_icon=URL_LOGO,
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 # --- DICCIONARIOS Y CONSTANTES ---
 PRESUPUESTOS = {'154033':{'presupuesto':123873239, 'presupuestocartera':105287598}, '154044':{'presupuesto':80000000, 'presupuestocartera':300000000}, '154034':{'presupuesto':82753045, 'presupuestocartera':44854727}, '154014':{'presupuesto':268214737, 'presupuestocartera':307628243}, '154046':{'presupuesto':85469798, 'presupuestocartera':7129065}, '154012':{'presupuesto':246616193, 'presupuestocartera':295198667}, '154043':{'presupuesto':124885413, 'presupuestocartera':99488960}, '154035':{'presupuesto':80000000, 'presupuestocartera':300000000}, '154006':{'presupuesto':81250000, 'presupuestocartera':103945133}, '154049':{'presupuesto':56500000, 'presupuestocartera':70421127}, '154013':{'presupuesto':303422639, 'presupuestocartera':260017920}, '154011':{'presupuesto':447060250, 'presupuestocartera':428815923}, '154029':{'presupuesto':32500000, 'presupuestocartera':40000000}, '154040':{'presupuesto':0, 'presupuestocartera':0},'154053':{'presupuesto':0, 'presupuestocartera':0},'154048':{'presupuesto':0, 'presupuestocartera':0},'154042':{'presupuesto':0, 'presupuestocartera':0},'154031':{'presupuesto':0, 'presupuestocartera':0},'154039':{'presupuesto':0, 'presupuestocartera':0},'154051':{'presupuesto':0, 'presupuestocartera':0},'154008':{'presupuesto':0, 'presupuestocartera':0},'154052':{'presupuesto':0, 'presupuestocartera':0},'154050':{'presupuesto':0, 'presupuestocartera':0}}
 GRUPOS_VENDEDORES = {"MOSTRADOR PEREIRA": ["ALEJANDRO CARBALLO MARQUEZ", "GEORGINA A. GALVIS HERRERA"], "MOSTRADOR ARMENIA": ["CRISTIAN CAMILO RENDON MONTES", "FANDRY JOHANA ABRIL PENHA", "JAVIER ORLANDO PATINO HURTADO"], "MOSTRADOR MANIZALES": ["DAVID FELIPE MARTINEZ RIOS", "JHON JAIRO CASTAÑO MONTES"], "MOSTRADOR LAURELES": ["MAURICIO RIOS MORALES"]}
 MAPEO_MESES = {1:"Enero", 2:"Febrero", 3:"Marzo", 4:"Abril", 5:"Mayo", 6:"Junio", 7:"Julio", 8:"Agosto", 9:"Septiembre", 10:"Octubre", 11:"Noviembre", 12:"Diciembre"}
-NOMBRES_COLUMNAS_VENTAS = ['anio', 'mes', 'fecha_venta', 'codigo_vendedor', 'nomvendedor', 'cliente_id', 'nombre_cliente', 'codigo_articulo', 'nombre_articulo','linea_producto', 'marca_producto', 'valor_venta', 'unidades_vendidas', 'costo_unitario', 'super_categoria']
+NOMBRES_COLUMNAS_VENTAS = ['anio', 'mes', 'fecha_venta', 'codigo_vendedor', 'nomvendedor', 'cliente_id', 'nombre_cliente', 'codigo_articulo', 'nombre_articulo','linea_producto', 'marca_producto', 'valor_venta', 'unidades_vendidas', 'costo_unitario']
 NOMBRES_COLUMNAS_COBROS = ['anio', 'mes', 'fecha_cobro', 'codigo_vendedor', 'valor_cobro']
 RUTA_VENTAS = "/data/ventas_detalle.csv"
 RUTA_COBROS = "/data/cobros_detalle.csv"
 META_MARQUILLA = 2.4
+# --- LÍNEA CORREGIDA Y AÑADIDA ---
+MARQUILLAS_CLAVE = ['VINILTEX', 'KORAZA', 'ESTUCOMASTIC', 'VINILICO']
 
-# --- FUNCIÓN DE CARGA DE DATOS DEFINITIVA Y ROBUSTA ---
+# --- FUNCIONES DE PROCESAMIENTO ---
 @st.cache_data(ttl=1800)
 def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
     try:
-        with dropbox.Dropbox(
-            app_key=st.secrets.dropbox.app_key,
-            app_secret=st.secrets.dropbox.app_secret,
-            oauth2_refresh_token=st.secrets.dropbox.refresh_token
-        ) as dbx:
+        with dropbox.Dropbox(app_key=st.secrets.dropbox.app_key, app_secret=st.secrets.dropbox.app_secret, oauth2_refresh_token=st.secrets.dropbox.refresh_token) as dbx:
             metadata, res = dbx.files_download(path=ruta_archivo)
             contenido_csv = res.content.decode('latin-1')
             df = pd.read_csv(io.StringIO(contenido_csv), header=None, sep=',', on_bad_lines='skip', dtype=str)
-            
-            # Mensaje de error mejorado si las columnas no coinciden
-            if df.shape[1] != len(nombres_columnas):
-                st.error(f"Error Crítico de Formato en '{ruta_archivo}': Se esperaban {len(nombres_columnas)} columnas pero el archivo tiene {df.shape[1]}. Por favor, regenere el archivo en el servidor con la consulta SQL correcta.", icon="🚨")
-                return pd.DataFrame(columns=nombres_columnas)
-
+            if df.shape[1] != len(nombres_columnas): return pd.DataFrame(columns=nombres_columnas)
             df.columns = nombres_columnas
             numeric_cols = ['anio', 'mes', 'valor_venta', 'valor_cobro', 'unidades_vendidas', 'costo_unitario']
             for col in numeric_cols:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
-            
-            rows_before_dropna = len(df)
+                if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce')
             df.dropna(subset=['anio', 'mes', 'codigo_vendedor'], inplace=True)
-            if len(df) < rows_before_dropna:
-                st.warning(f"Se eliminaron {rows_before_dropna - len(df)} filas con datos inválidos en fecha o código de vendedor.")
-
-            for col in ['anio', 'mes']:
-                df[col] = df[col].astype(int)
+            for col in ['anio', 'mes']: df[col] = df[col].astype(int)
             df['codigo_vendedor'] = df['codigo_vendedor'].astype(str)
             if 'fecha_venta' in df.columns:
                 df['fecha_venta'] = pd.to_datetime(df['fecha_venta'], errors='coerce')
@@ -60,8 +51,6 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
         st.error(f"Error crítico al cargar {ruta_archivo}: {e}")
         return pd.DataFrame(columns=nombres_columnas)
 
-# --- OTRAS FUNCIONES (sin cambios) ---
-
 def calcular_marquilla(df_periodo):
     if df_periodo.empty: return pd.DataFrame(columns=['codigo_vendedor', 'nomvendedor', 'promedio_marquilla'])
     df_periodo['nombre_articulo'] = df_periodo['nombre_articulo'].astype(str)
@@ -69,7 +58,10 @@ def calcular_marquilla(df_periodo):
         df_periodo[f'compro_{palabra.lower()}'] = df_periodo['nombre_articulo'].str.contains(palabra, case=False)
     df_marquilla_cliente = df_periodo.groupby(['codigo_vendedor', 'nomvendedor', 'cliente_id']).agg({f'compro_{palabra.lower()}': 'any' for palabra in MARQUILLAS_CLAVE}).reset_index()
     df_marquilla_cliente['puntaje_marquilla'] = df_marquilla_cliente[[f'compro_{p.lower()}' for p in MARQUILLAS_CLAVE]].sum(axis=1)
-    return df_marquilla_cliente.groupby(['codigo_vendedor', 'nomvendedor'])['puntaje_marquilla'].mean().reset_index().rename(columns={'puntaje_marquilla': 'promedio_marquilla'})
+    return df_marquilla_cliente.groupby(['codigo_vendedor', 'nomvendedor'])['puntaje_marquilla'].mean().reset_index().rename(columns={'promedio_marquilla': 'promedio_marquilla'})
+
+# (El resto del código se mantiene igual, se omite por brevedad)
+# ...
 
 def generar_comentario_asesor(avance_v, avance_c, marquilla_p):
     comentarios = []
