@@ -1,4 +1,3 @@
-# Contenido completo y final para 🏠 Resumen Mensual.py
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -8,22 +7,25 @@ import io
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
-st.set_page_config(page_title="Resumen Mensual", page_icon="🏠", layout="wide")
-# --- DICCIONARIOS Y CONSTANTES ---
+# --- CONFIGURACIÓN DE LA PÁGINA ---
 URL_LOGO = "https://raw.githubusercontent.com/DiegoMao201/Resumen-Ventas-Gerenciales/main/LOGO%20FERREINOX%20SAS%20BIC%202024.png"
+st.set_page_config(
+    page_title="Resumen Mensual",
+    page_icon=URL_LOGO,
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# --- DICCIONARIOS GLOBALES Y CONSTANTES ---
 PRESUPUESTOS = {'154033':{'presupuesto':123873239, 'presupuestocartera':105287598}, '154044':{'presupuesto':80000000, 'presupuestocartera':300000000}, '154034':{'presupuesto':82753045, 'presupuestocartera':44854727}, '154014':{'presupuesto':268214737, 'presupuestocartera':307628243}, '154046':{'presupuesto':85469798, 'presupuestocartera':7129065}, '154012':{'presupuesto':246616193, 'presupuestocartera':295198667}, '154043':{'presupuesto':124885413, 'presupuestocartera':99488960}, '154035':{'presupuesto':80000000, 'presupuestocartera':300000000}, '154006':{'presupuesto':81250000, 'presupuestocartera':103945133}, '154049':{'presupuesto':56500000, 'presupuestocartera':70421127}, '154013':{'presupuesto':303422639, 'presupuestocartera':260017920}, '154011':{'presupuesto':447060250, 'presupuestocartera':428815923}, '154029':{'presupuesto':32500000, 'presupuestocartera':40000000}, '154040':{'presupuesto':0, 'presupuestocartera':0},'154053':{'presupuesto':0, 'presupuestocartera':0},'154048':{'presupuesto':0, 'presupuestocartera':0},'154042':{'presupuesto':0, 'presupuestocartera':0},'154031':{'presupuesto':0, 'presupuestocartera':0},'154039':{'presupuesto':0, 'presupuestocartera':0},'154051':{'presupuesto':0, 'presupuestocartera':0},'154008':{'presupuesto':0, 'presupuestocartera':0},'154052':{'presupuesto':0, 'presupuestocartera':0},'154050':{'presupuesto':0, 'presupuestocartera':0}}
 GRUPOS_VENDEDORES = {"MOSTRADOR PEREIRA": ["ALEJANDRO CARBALLO MARQUEZ", "GEORGINA A. GALVIS HERRERA"], "MOSTRADOR ARMENIA": ["CRISTIAN CAMILO RENDON MONTES", "FANDRY JOHANA ABRIL PENHA", "JAVIER ORLANDO PATINO HURTADO"], "MOSTRADOR MANIZALES": ["DAVID FELIPE MARTINEZ RIOS", "JHON JAIRO CASTAÑO MONTES"], "MOSTRADOR LAURELES": ["MAURICIO RIOS MORALES"]}
 MAPEO_MESES = {1:"Enero", 2:"Febrero", 3:"Marzo", 4:"Abril", 5:"Mayo", 6:"Junio", 7:"Julio", 8:"Agosto", 9:"Septiembre", 10:"Octubre", 11:"Noviembre", 12:"Diciembre"}
-NOMBRES_COLUMNAS_VENTAS = ['anio', 'mes', 'fecha_venta', 'codigo_vendedor', 'nomvendedor', 'cliente_id', 'nombre_cliente', 'codigo_articulo', 'nombre_articulo','linea_producto', 'marca_producto', 'valor_venta', 'unidades_vendidas', 'costo_unitario']
+NOMBRES_COLUMNAS_VENTAS = ['anio', 'mes', 'fecha_venta', 'codigo_vendedor', 'nomvendedor', 'cliente_id', 'nombre_cliente', 'codigo_articulo', 'nombre_articulo','linea_producto', 'marca_producto', 'valor_venta', 'unidades_vendidas', 'costo_unitario', 'super_categoria']
 NOMBRES_COLUMNAS_COBROS = ['anio', 'mes', 'fecha_cobro', 'codigo_vendedor', 'valor_cobro']
 RUTA_VENTAS = "/data/ventas_detalle.csv"
 RUTA_COBROS = "/data/cobros_detalle.csv"
 META_MARQUILLA = 2.4
 MARQUILLAS_CLAVE = ['VINILTEX', 'KORAZA', 'ESTUCOMASTIC', 'VINILICO']
-
-# (Aquí van todas las funciones que ya teníamos: cargar_y_limpiar_datos, calcular_marquilla, etc. Se omiten por brevedad pero deben estar aquí)
-# ... El código completo que te di en la respuesta anterior, que incluye las funciones y el `main()` ...
-
 
 # --- FUNCIONES DE PROCESAMIENTO ---
 @st.cache_data(ttl=1800)
@@ -38,18 +40,20 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
             metadata, res = dbx.files_download(path=ruta_archivo)
             contenido_csv = res.content.decode('latin-1')
             df = pd.read_csv(io.StringIO(contenido_csv), header=None, sep=',', on_bad_lines='skip', dtype=str)
-            if df.shape[1] != len(nombres_columnas): return pd.DataFrame(columns=nombres_columnas)
+            if df.shape[1] != len(nombres_columnas):
+                st.warning(f"Advertencia de formato en {ruta_archivo}: Se esperaban {len(nombres_columnas)} columnas pero se encontraron {df.shape[1]}. El archivo puede estar desactualizado.")
+                return pd.DataFrame(columns=nombres_columnas)
             df.columns = nombres_columnas
-            numeric_cols = ['anio', 'mes', 'valor_venta', 'valor_cobro', 'unidades_vendidas', 'costo_unitario', 'marca_producto']
+            numeric_cols = ['anio', 'mes', 'valor_venta', 'valor_cobro', 'unidades_vendidas', 'costo_unitario']
             for col in numeric_cols:
-                if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce')
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
             df.dropna(subset=['anio', 'mes', 'codigo_vendedor'], inplace=True)
-            for col in ['anio', 'mes']: df[col] = df[col].astype(int)
+            for col in ['anio', 'mes']:
+                df[col] = df[col].astype(int)
             df['codigo_vendedor'] = df['codigo_vendedor'].astype(str)
             if 'fecha_venta' in df.columns:
                 df['fecha_venta'] = pd.to_datetime(df['fecha_venta'], errors='coerce')
-            if 'marca_producto' in df.columns:
-                df['nombre_marca'] = df['marca_producto'].map(MAPEO_MARCAS).fillna('No Especificada')
             return df
     except Exception as e:
         st.error(f"Error crítico al cargar {ruta_archivo}: {e}")
@@ -81,10 +85,19 @@ def render_dashboard():
     st.sidebar.header("Filtros de Periodo")
     df_ventas = st.session_state.df_ventas
     df_cobros = st.session_state.df_cobros
+    
     lista_anios = sorted(df_ventas['anio'].unique(), reverse=True)
-    anio_sel = st.sidebar.selectbox("Elija el Año", lista_anios)
+    if not lista_anios: st.error("No hay datos históricos para analizar."); st.stop()
+    
+    anio_reciente = df_ventas['anio'].max()
+    mes_reciente = df_ventas[df_ventas['anio'] == anio_reciente]['mes'].max()
+    index_anio = lista_anios.index(anio_reciente)
+    anio_sel = st.sidebar.selectbox("Elija el Año", lista_anios, index=index_anio)
+    
     lista_meses_num = sorted(df_ventas[df_ventas['anio'] == anio_sel]['mes'].unique())
-    mes_sel_num = st.sidebar.selectbox("Elija el Mes", options=lista_meses_num, format_func=lambda x: MAPEO_MESES.get(x))
+    index_mes = lista_meses_num.index(mes_reciente) if anio_sel == anio_reciente and mes_reciente in lista_meses_num else 0
+    mes_sel_num = st.sidebar.selectbox("Elija el Mes", options=lista_meses_num, format_func=lambda x: MAPEO_MESES.get(x), index=index_mes)
+    
     df_ventas_periodo = df_ventas[(df_ventas['anio'] == anio_sel) & (df_ventas['mes'] == mes_sel_num)]
     if df_ventas_periodo.empty: st.warning("No hay datos de ventas para el periodo seleccionado."); st.stop()
     df_cobros_periodo = df_cobros[(df_cobros['anio'] == anio_sel) & (df_cobros['mes'] == mes_sel_num)]
@@ -110,7 +123,7 @@ def render_dashboard():
     vendedores_en_grupos_lista = [v for lista in GRUPOS_VENDEDORES.values() for v in lista]
     df_individuales = df_resumen_completo[~df_resumen_completo['nomvendedor'].isin(vendedores_en_grupos_lista)]
     df_final = pd.concat([df_agrupado, df_individuales], ignore_index=True)
-
+    
     usuario_actual = st.session_state.usuario
     if usuario_actual == "GERENTE":
         lista_filtro = sorted(df_final['nomvendedor'].unique())
