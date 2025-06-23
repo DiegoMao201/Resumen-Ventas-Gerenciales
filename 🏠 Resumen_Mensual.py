@@ -31,13 +31,14 @@ MARQUILLAS_CLAVE = ['VINILTEX', 'KORAZA', 'ESTUCOMASTIC', 'VINILICO']
 # --- FUNCIONES DE PROCESAMIENTO ---
 @st.cache_data(ttl=1800)
 def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
+    """Descarga y limpia datos desde Dropbox usando el refresh token."""
     try:
         with dropbox.Dropbox(app_key=st.secrets.dropbox.app_key, app_secret=st.secrets.dropbox.app_secret, oauth2_refresh_token=st.secrets.dropbox.refresh_token) as dbx:
             metadata, res = dbx.files_download(path=ruta_archivo)
             contenido_csv = res.content.decode('latin-1')
             df = pd.read_csv(io.StringIO(contenido_csv), header=None, sep=',', on_bad_lines='skip', dtype=str)
             if df.shape[1] != len(nombres_columnas):
-                st.warning(f"Advertencia de formato en {ruta_archivo}: El número de columnas no coincide (Esperado: {len(nombres_columnas)}, Encontrado: {df.shape[1]}). El archivo de datos puede estar desactualizado.")
+                st.warning(f"Advertencia de formato en {ruta_archivo}: Se esperaban {len(nombres_columnas)} columnas pero se encontraron {df.shape[1]}. El archivo de datos puede estar desactualizado.")
                 return pd.DataFrame(columns=nombres_columnas)
             df.columns = nombres_columnas
             numeric_cols = ['anio', 'mes', 'valor_venta', 'valor_cobro', 'unidades_vendidas', 'costo_unitario', 'marca_producto']
@@ -46,8 +47,10 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
             df.dropna(subset=['anio', 'mes', 'codigo_vendedor'], inplace=True)
             for col in ['anio', 'mes']: df[col] = df[col].astype(int)
             df['codigo_vendedor'] = df['codigo_vendedor'].astype(str)
-            if 'fecha_venta' in df.columns: df['fecha_venta'] = pd.to_datetime(df['fecha_venta'], errors='coerce')
-            if 'marca_producto' in df.columns: df['nombre_marca'] = df['marca_producto'].map(MAPEO_MARCAS).fillna('No Especificada')
+            if 'fecha_venta' in df.columns:
+                df['fecha_venta'] = pd.to_datetime(df['fecha_venta'], errors='coerce')
+            if 'marca_producto' in df.columns:
+                df['nombre_marca'] = df['marca_producto'].map(MAPEO_MARCAS).fillna('No Especificada')
             return df
     except Exception as e:
         st.error(f"Error crítico al cargar {ruta_archivo}: {e}")
@@ -79,8 +82,10 @@ def render_dashboard():
     st.sidebar.header("Filtros de Periodo")
     df_ventas = st.session_state.df_ventas
     df_cobros = st.session_state.df_cobros
+    
     lista_anios = sorted(df_ventas['anio'].unique(), reverse=True)
     if not lista_anios: st.error("No hay datos históricos para analizar."); st.stop()
+    
     anio_reciente = int(df_ventas['anio'].max())
     mes_reciente = int(df_ventas[df_ventas['anio'] == anio_reciente]['mes'].max())
     index_anio = lista_anios.index(anio_reciente) if anio_reciente in lista_anios else 0
@@ -92,7 +97,7 @@ def render_dashboard():
     df_ventas_periodo = df_ventas[(df_ventas['anio'] == anio_sel) & (df_ventas['mes'] == mes_sel_num)]
     if df_ventas_periodo.empty: st.warning("No hay datos de ventas para el periodo seleccionado."); st.stop()
     df_cobros_periodo = df_cobros[(df_cobros['anio'] == anio_sel) & (df_cobros['mes'] == mes_sel_num)]
-
+    
     resumen_ind = df_ventas_periodo.groupby(['codigo_vendedor', 'nomvendedor']).agg(ventas_totales=('valor_venta', 'sum'), impactos=('cliente_id', 'nunique')).reset_index()
     resumen_cobros = df_cobros_periodo.groupby('codigo_vendedor').agg(cobros_totales=('valor_cobro', 'sum')).reset_index()
     resumen_marquilla = calcular_marquilla(df_ventas_periodo)
@@ -135,7 +140,6 @@ def render_dashboard():
     
     st.title("🏠 Resumen de Rendimiento")
     st.header(f"{MAPEO_MESES.get(mes_sel_num, '')} {anio_sel}")
-    st.markdown(f"**Vista para:** `{st.session_state.usuario if len(dff['nomvendedor'].unique()) == 1 else 'Múltiples Seleccionados'}`")
     st.markdown("---")
     
     with st.container(border=True):
@@ -144,13 +148,11 @@ def render_dashboard():
         avance_ventas = (ventas_total / meta_ventas * 100) if meta_ventas > 0 else 0
         avance_cobros = (cobros_total / meta_cobros * 100) if meta_cobros > 0 else 0
         
-        # --- CÁLCULO ROBUSTO DE MARQUILLA PROMEDIO ---
         dff_marquilla_valida = dff.dropna(subset=['promedio_marquilla', 'impactos'])
         if not dff_marquilla_valida.empty and dff_marquilla_valida['impactos'].sum() > 0:
             marquilla_prom = np.average(dff_marquilla_valida['promedio_marquilla'], weights=dff_marquilla_valida['impactos'])
         else:
             marquilla_prom = 0.0
-        # ---------------------------------------------
             
         st.subheader(f"👨‍💼 Asesor Virtual para: {st.session_state.usuario}")
         comentarios = generar_comentario_asesor(avance_ventas, avance_cobros, marquilla_prom)
