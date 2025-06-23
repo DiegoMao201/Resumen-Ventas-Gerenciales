@@ -28,10 +28,11 @@ RUTA_COBROS = "/data/cobros_detalle.csv"
 META_MARQUILLA = 2.4
 MARQUILLAS_CLAVE = ['VINILTEX', 'KORAZA', 'ESTUCOMASTIC', 'VINILICO']
 
-# --- FUNCIONES DE PROCESAMIENTO ---
-@st.cache_data(ttl=1800)
+# --- FUNCIÓN DE CARGA DE DATOS (VERSIÓN DE DEPURACIÓN FINAL) ---
+@st.cache_data(ttl=10) # Usamos una caché corta para depurar
 def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
-    """Descarga y limpia datos desde Dropbox usando el refresh token."""
+    """Descarga, limpia y reporta el estado de los datos desde Dropbox."""
+    st.info(f"--- 🕵️‍♂️ Iniciando depuración para {ruta_archivo} ---")
     try:
         with dropbox.Dropbox(
             app_key=st.secrets.dropbox.app_key,
@@ -40,22 +41,47 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
         ) as dbx:
             metadata, res = dbx.files_download(path=ruta_archivo)
             contenido_csv = res.content.decode('latin-1')
-            df = pd.read_csv(io.StringIO(contenido_csv), header=None, sep=',', on_bad_lines='skip', dtype=str)
-            if df.shape[1] != len(nombres_columnas): return pd.DataFrame(columns=nombres_columnas)
+            
+            st.write("PASO 1: Archivo descargado. Primeras 3 líneas de texto crudo:")
+            st.code('\n'.join(contenido_csv.splitlines()[:3]), language="text")
+
+            df = pd.read_csv(io.StringIO(contenido_csv), header=None, sep=',', on_bad_lines='warn', dtype=str)
+            st.write(f"PASO 2: Archivo leído por Pandas. El DataFrame inicial tiene **{df.shape[0]} filas** y **{df.shape[1]} columnas**.")
+
+            if df.shape[1] != len(nombres_columnas):
+                st.error(f"¡FALLO EN PASO 3! El número de columnas no coincide.")
+                st.error(f"Se esperaban {len(nombres_columnas)} columnas (definidas en 'NOMBRES_COLUMNAS_VENTAS').")
+                st.error(f"Pero se encontraron {df.shape[1]} columnas en el archivo CSV.")
+                st.info("SOLUCIÓN: La consulta SQL en el servidor no está exportando el número de columnas correcto. Debe coincidir con la lista en el código.")
+                return pd.DataFrame(columns=nombres_columnas)
+            
             df.columns = nombres_columnas
-            numeric_cols = ['anio', 'mes', 'valor_venta', 'valor_cobro', 'unidades_vendidas', 'costo_unitario', 'marca_producto']
+            st.write("PASO 3: Nombres de columna asignados. Así se ven las primeras 2 filas ANTES de la limpieza:")
+            st.dataframe(df.head(2))
+
+            numeric_cols = ['anio', 'mes', 'valor_venta', 'valor_cobro', 'unidades_vendidas', 'costo_unitario']
             for col in numeric_cols:
-                if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce')
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+            st.write("PASO 4: Columnas numéricas convertidas (los errores se vuelven 'NaN').")
+
+            rows_before_dropna = len(df)
             df.dropna(subset=['anio', 'mes', 'codigo_vendedor'], inplace=True)
-            for col in ['anio', 'mes']: df[col] = df[col].astype(int)
-            df['codigo_vendedor'] = df['codigo_vendedor'].astype(str)
-            if 'fecha_venta' in df.columns:
-                df['fecha_venta'] = pd.to_datetime(df['fecha_venta'], errors='coerce')
-            if 'marca_producto' in df.columns:
-                df['nombre_marca'] = df['marca_producto'].map(MAPEO_MARCAS).fillna('No Especificada')
+            rows_after_dropna = len(df)
+            st.write(f"PASO 5: Se eliminaron filas con datos nulos en columnas clave ('anio', 'mes', 'codigo_vendedor').")
+            st.write(f"Filas antes: {rows_before_dropna} | Filas después: {rows_after_dropna}")
+
+            if df.empty:
+                st.error("¡FALLO EN PASO 5! Después de la limpieza, el DataFrame quedó vacío.")
+                st.info("SOLUCIÓN: Revisa los datos en las columnas 'anio', 'mes', 'codigo_vendedor' en tu archivo CSV. Probablemente tienen un formato que Python no puede reconocer (ej. texto en lugar de números).")
+            else:
+                st.success("✅ ¡Depuración exitosa! El DataFrame final tiene datos válidos.")
+            
+            st.info(f"--- Fin de la depuración para {ruta_archivo} ---")
             return df
+
     except Exception as e:
-        st.error(f"Error crítico al cargar {ruta_archivo}: {e}")
+        st.error(f"Error crítico durante el proceso de carga y limpieza: {e}")
         return pd.DataFrame(columns=nombres_columnas)
 
 def calcular_marquilla(df_periodo):
