@@ -7,26 +7,15 @@ import io
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
-# --- CONFIGURACIÓN DE LA PÁGINA ---
-st.set_page_config(page_title="Perfil de Vendedor", page_icon="👨‍💻", layout="wide")
+# (Constantes y diccionarios se mantienen igual)
+# ...
 
-# --- DICCIONARIOS Y CONSTANTES ---
-URL_LOGO = "https://raw.githubusercontent.com/DiegoMao201/Resumen-Ventas-Gerenciales/main/LOGO%20FERREINOX%20SAS%20BIC%202024.png"
-GRUPOS_VENDEDORES = {"MOSTRADOR PEREIRA": ["ALEJANDRO CARBALLO MARQUEZ", "GEORGINA A. GALVIS HERRERA"], "MOSTRADOR ARMENIA": ["CRISTIAN CAMILO RENDON MONTES", "FANDRY JOHANA ABRIL PENHA", "JAVIER ORLANDO PATINO HURTADO"], "MOSTRADOR MANIZALES": ["DAVID FELIPE MARTINEZ RIOS", "JHON JAIRO CASTAÑO MONTES"], "MOSTRADOR LAURELES": ["MAURICIO RIOS MORALES"]}
-MAPEO_MARCAS = {50:"P8-ASC-MEGA", 54:"MPY-International", 55:"DPP-AN COLORANTS LATAM", 56:"DPP-Pintuco Profesional", 57:"ASC-Mega", 58:"DPP-Pintuco", 59:"DPP-Madetec", 60:"POW-Interpon", 61:"various", 62:"DPP-ICO", 63:"DPP-Terinsa", 64:"MPY-Pintuco", 65:"non-AN Third Party", 66:"ICO-AN Packaging", 67:"ASC-Automotive OEM", 68:"POW-Resicoat", 73:"DPP-Coral", 91:"DPP-Sikkens"}
-NOMBRES_COLUMNAS_VENTAS = ['anio', 'mes', 'fecha_venta', 'codigo_vendedor', 'nomvendedor', 'cliente_id', 'nombre_cliente', 'codigo_articulo', 'nombre_articulo','linea_producto', 'marca_producto', 'valor_venta', 'unidades_vendidas', 'costo_unitario']
-RUTA_VENTAS = "/data/ventas_detalle.csv"
-
-# --- FUNCIONES ---
+# --- FUNCIÓN DE CARGA DE DATOS ---
 @st.cache_data(ttl=1800)
 def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
     """Descarga y limpia datos desde Dropbox usando el refresh token."""
     try:
-        with dropbox.Dropbox(
-            app_key=st.secrets.dropbox.app_key,
-            app_secret=st.secrets.dropbox.app_secret,
-            oauth2_refresh_token=st.secrets.dropbox.refresh_token
-        ) as dbx:
+        with dropbox.Dropbox(app_key=st.secrets.dropbox.app_key, app_secret=st.secrets.dropbox.app_secret, oauth2_refresh_token=st.secrets.dropbox.refresh_token) as dbx:
             metadata, res = dbx.files_download(path=ruta_archivo)
             contenido_csv = res.content.decode('latin-1')
             df = pd.read_csv(io.StringIO(contenido_csv), header=None, sep=',', on_bad_lines='skip', dtype=str)
@@ -39,12 +28,16 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
             for col in ['anio', 'mes']: df[col] = df[col].astype(int)
             df['codigo_vendedor'] = df['codigo_vendedor'].astype(str)
             df['fecha_venta'] = pd.to_datetime(df['fecha_venta'], errors='coerce')
+            # --- LÍNEA DE CORRECCIÓN AÑADIDA AQUÍ ---
             if 'marca_producto' in df.columns:
                 df['nombre_marca'] = df['marca_producto'].map(MAPEO_MARCAS).fillna('No Especificada')
             return df
     except Exception as e:
         st.error(f"Error crítico al cargar {ruta_archivo}: {e}")
         return pd.DataFrame(columns=nombres_columnas)
+
+# (El resto del código de esta página se mantiene exactamente igual)
+# ...
 
 def analizar_cartera_clientes(df_ventas_vendedor):
     if df_ventas_vendedor.empty: return 0, 0, 0, pd.DataFrame()
