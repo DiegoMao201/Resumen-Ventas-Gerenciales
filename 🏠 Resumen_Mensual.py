@@ -46,10 +46,8 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
             df.dropna(subset=['anio', 'mes', 'codigo_vendedor'], inplace=True)
             for col in ['anio', 'mes']: df[col] = df[col].astype(int)
             df['codigo_vendedor'] = df['codigo_vendedor'].astype(str)
-            if 'fecha_venta' in df.columns:
-                df['fecha_venta'] = pd.to_datetime(df['fecha_venta'], errors='coerce')
-            if 'marca_producto' in df.columns:
-                df['nombre_marca'] = df['marca_producto'].map(MAPEO_MARCAS).fillna('No Especificada')
+            if 'fecha_venta' in df.columns: df['fecha_venta'] = pd.to_datetime(df['fecha_venta'], errors='coerce')
+            if 'marca_producto' in df.columns: df['nombre_marca'] = df['marca_producto'].map(MAPEO_MARCAS).fillna('No Especificada')
             return df
     except Exception as e:
         st.error(f"Error crítico al cargar {ruta_archivo}: {e}")
@@ -81,10 +79,8 @@ def render_dashboard():
     st.sidebar.header("Filtros de Periodo")
     df_ventas = st.session_state.df_ventas
     df_cobros = st.session_state.df_cobros
-    
     lista_anios = sorted(df_ventas['anio'].unique(), reverse=True)
     if not lista_anios: st.error("No hay datos históricos para analizar."); st.stop()
-    
     anio_reciente = int(df_ventas['anio'].max())
     mes_reciente = int(df_ventas[df_ventas['anio'] == anio_reciente]['mes'].max())
     index_anio = lista_anios.index(anio_reciente) if anio_reciente in lista_anios else 0
@@ -96,7 +92,7 @@ def render_dashboard():
     df_ventas_periodo = df_ventas[(df_ventas['anio'] == anio_sel) & (df_ventas['mes'] == mes_sel_num)]
     if df_ventas_periodo.empty: st.warning("No hay datos de ventas para el periodo seleccionado."); st.stop()
     df_cobros_periodo = df_cobros[(df_cobros['anio'] == anio_sel) & (df_cobros['mes'] == mes_sel_num)]
-    
+
     resumen_ind = df_ventas_periodo.groupby(['codigo_vendedor', 'nomvendedor']).agg(ventas_totales=('valor_venta', 'sum'), impactos=('cliente_id', 'nunique')).reset_index()
     resumen_cobros = df_cobros_periodo.groupby('codigo_vendedor').agg(cobros_totales=('valor_cobro', 'sum')).reset_index()
     resumen_marquilla = calcular_marquilla(df_ventas_periodo)
@@ -137,7 +133,7 @@ def render_dashboard():
         return "🔴 Necesita Atención"
     dff['Estatus'] = dff.apply(asignar_estatus, axis=1)
     
-    st.title(f"🏠 Resumen de Rendimiento")
+    st.title("🏠 Resumen de Rendimiento")
     st.header(f"{MAPEO_MESES.get(mes_sel_num, '')} {anio_sel}")
     st.markdown(f"**Vista para:** `{st.session_state.usuario if len(dff['nomvendedor'].unique()) == 1 else 'Múltiples Seleccionados'}`")
     st.markdown("---")
@@ -145,9 +141,17 @@ def render_dashboard():
     with st.container(border=True):
         ventas_total = dff['ventas_totales'].sum(); meta_ventas = dff['presupuesto'].sum()
         cobros_total = dff['cobros_totales'].sum(); meta_cobros = dff['presupuestocartera'].sum()
-        marquilla_prom = np.average(dff['promedio_marquilla'], weights=dff['impactos']) if dff['impactos'].sum() > 0 else 0
         avance_ventas = (ventas_total / meta_ventas * 100) if meta_ventas > 0 else 0
         avance_cobros = (cobros_total / meta_cobros * 100) if meta_cobros > 0 else 0
+        
+        # --- CÁLCULO ROBUSTO DE MARQUILLA PROMEDIO ---
+        dff_marquilla_valida = dff.dropna(subset=['promedio_marquilla', 'impactos'])
+        if not dff_marquilla_valida.empty and dff_marquilla_valida['impactos'].sum() > 0:
+            marquilla_prom = np.average(dff_marquilla_valida['promedio_marquilla'], weights=dff_marquilla_valida['impactos'])
+        else:
+            marquilla_prom = 0.0
+        # ---------------------------------------------
+            
         st.subheader(f"👨‍💼 Asesor Virtual para: {st.session_state.usuario}")
         comentarios = generar_comentario_asesor(avance_ventas, avance_cobros, marquilla_prom)
         for comentario in comentarios: st.markdown(f"- {comentario}")
@@ -167,70 +171,11 @@ def render_dashboard():
     st.subheader("Desglose por Vendedor / Grupo")
     st.dataframe(dff[['Estatus', 'nomvendedor', 'ventas_totales', 'presupuesto', 'cobros_totales', 'presupuestocartera', 'impactos', 'promedio_marquilla']], column_config={"Estatus": st.column_config.TextColumn("🚦", width="small"),"nomvendedor": st.column_config.TextColumn("Vendedor/Grupo", width="medium"), "ventas_totales": st.column_config.NumberColumn("Ventas", format="$ %d"), "presupuesto": st.column_config.NumberColumn("Meta Ventas", format="$ %d"), "cobros_totales": st.column_config.NumberColumn("Recaudo", format="$ %d"), "presupuestocartera": st.column_config.NumberColumn("Meta Recaudo", format="$ %d"), "impactos": st.column_config.NumberColumn("Clientes Únicos", format="%d"), "promedio_marquilla": st.column_config.ProgressColumn("Promedio Marquilla", format="%.2f", min_value=0, max_value=4)}, use_container_width=True, hide_index=True)
 
-    st.markdown("---")
-    st.header("🔬 Análisis Detallado del Periodo")
-
-    opciones_enfoque = ["Visión General"] + sorted(dff['nomvendedor'].unique())
-    if len(opciones_enfoque) > 2:
-        enfoque_sel = st.selectbox("Enfocar análisis en:", opciones_enfoque)
-    else:
-        enfoque_sel = dff['nomvendedor'].iloc[0]
-
-    if enfoque_sel == "Visión General":
-        df_enfocado_graficos = dff.copy()
-        nombres_vendedores_enfocados = []
-        for vendedor in dff['nomvendedor']:
-            nombres_vendedores_enfocados.extend(GRUPOS_VENDEDORES.get(vendedor, [vendedor]))
-    else:
-        df_enfocado_graficos = dff[dff['nomvendedor'] == enfoque_sel]
-        nombres_vendedores_enfocados = GRUPOS_VENDEDORES.get(enfoque_sel, [enfoque_sel])
-    
-    df_ventas_enfocadas = df_ventas_periodo[df_ventas_periodo['nomvendedor'].isin(nombres_vendedores_enfocados)]
-    
-    tab1, tab2, tab3 = st.tabs(["📊 Análisis de Portafolio", "🏆 Ranking de Rendimiento", "⭐ Clientes Clave"])
-
-    with tab1:
-        st.subheader("Análisis de Marcas y Categorías Estratégicas")
-        col_graf1, col_graf2 = st.columns(2)
-        with col_graf1:
-            st.markdown("##### Ventas por Super Categoría")
-            if not df_ventas_enfocadas.empty and 'super_categoria' in df_ventas_enfocadas.columns:
-                df_super_cat = df_ventas_enfocadas.groupby('super_categoria')['valor_venta'].sum().reset_index().sort_values('valor_venta', ascending=False)
-                fig_super_cat = px.bar(df_super_cat, x='super_categoria', y='valor_venta', text_auto='.2s', title="Ventas por Categoría Estratégica")
-                st.plotly_chart(fig_super_cat, use_container_width=True)
-            else: st.info("No hay datos de Super Categoría para mostrar.")
-        with col_graf2:
-            st.markdown("##### Ventas de Marquillas Clave")
-            if not df_ventas_enfocadas.empty:
-                ventas_marquillas = {palabra: df_ventas_enfocadas[df_ventas_enfocadas['nombre_articulo'].str.contains(palabra, case=False)]['valor_venta'].sum() for palabra in MARQUILLAS_CLAVE}
-                df_ventas_marquillas = pd.DataFrame(list(ventas_marquillas.items()), columns=['Marquilla', 'Ventas']).sort_values('Ventas', ascending=False)
-                fig_marquillas = px.pie(df_ventas_marquillas, names='Marquilla', values='Ventas', title="Distribución Venta Marquillas", hole=0.4)
-                st.plotly_chart(fig_marquillas, use_container_width=True)
-            else: st.info("No hay datos de marquillas.")
-
-    with tab2:
-        st.subheader("Ranking de Cumplimiento de Metas")
-        if not df_enfocado_graficos.empty and 'presupuesto' in df_enfocado_graficos.columns:
-            df_ranking = df_enfocado_graficos[df_enfocado_graficos['presupuesto'] > 0].copy()
-            df_ranking['avance_ventas'] = (df_ranking['ventas_totales'] / df_ranking['presupuesto']) * 100
-            df_ranking = df_ranking.sort_values('avance_ventas', ascending=True)
-            fig_ranking = px.bar(df_ranking, x='avance_ventas', y='nomvendedor', orientation='h', text='avance_ventas', title="Cumplimiento de Meta de Ventas (%)")
-            fig_ranking.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
-            fig_ranking.update_layout(xaxis_title="Cumplimiento (%)", yaxis_title=None)
-            st.plotly_chart(fig_ranking, use_container_width=True)
-        else: st.info("No hay datos de presupuesto para generar el ranking.")
-
-    with tab3:
-        st.subheader("Top 10 Clientes del Periodo")
-        if not df_ventas_enfocadas.empty:
-            top_clientes = df_ventas_enfocadas.groupby('nombre_cliente')['valor_venta'].sum().nlargest(10).reset_index().sort_values('valor_venta', ascending=False)
-            st.dataframe(top_clientes, column_config={"nombre_cliente": "Cliente", "valor_venta": st.column_config.NumberColumn("Total Compra", format="$ %d")}, use_container_width=True, hide_index=True)
-        else: st.info("No hay datos de clientes para mostrar.")
-
 def main():
-    if 'autenticado' not in st.session_state: st.session_state.autenticado = False
     st.sidebar.image(URL_LOGO, use_container_width=True)
     st.sidebar.header("Control de Acceso")
+    if 'autenticado' not in st.session_state: st.session_state.autenticado = False
+    
     @st.cache_data
     def obtener_lista_usuarios():
         df_base = cargar_y_limpiar_datos(RUTA_VENTAS, NOMBRES_COLUMNAS_VENTAS)
