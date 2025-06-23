@@ -35,8 +35,6 @@ if df_ventas_historico is None or df_ventas_historico.empty or not APP_CONFIG or
 # ==============================================================================
 # 2. LÓGICA DE ANÁLISIS DEL PERFIL (El "Cerebro" de la Página)
 # ==============================================================================
-# (Las funciones de análisis no cambian, se omite su código por brevedad,
-# ya que son las mismas de la versión anterior que te entregué)
 
 def calcular_margen(df):
     """Calcula el margen bruto y el porcentaje de margen para cada venta."""
@@ -110,8 +108,8 @@ def analizar_rentabilidad_y_productos(df_vendedor):
     bottom_productos_margen = df_vendedor.groupby('nombre_articulo')['margen_bruto'].sum().nsmallest(5).reset_index()
     top_clientes_margen = df_vendedor.groupby(['cliente_id', 'nombre_cliente'])['margen_bruto'].sum().nlargest(10).reset_index()
     distribucion_margen = df_vendedor[df_vendedor['porcentaje_margen'].between(-50, 100)]['porcentaje_margen']
-    mix_super_categoria = df_vendedor.groupby('super_categoria')['valor_venta'].sum().reset_index() if 'super_categoria' in df_vendedor else pd.DataFrame()
-    mix_marcas = df_vendedor.groupby('nombre_marca')['valor_venta'].sum().reset_index() if 'nombre_marca' in df_vendedor else pd.DataFrame()
+    mix_super_categoria = df_vendedor.groupby('super_categoria')['valor_venta'].sum().reset_index() if 'super_categoria' in df_vendedor.columns else pd.DataFrame()
+    mix_marcas = df_vendedor.groupby('nombre_marca')['valor_venta'].sum().reset_index() if 'nombre_marca' in df_vendedor.columns else pd.DataFrame()
     return {
         "top_productos_margen": top_productos_margen, "bottom_productos_margen": bottom_productos_margen,
         "top_clientes_margen": top_clientes_margen, "distribucion_margen": distribucion_margen,
@@ -135,7 +133,6 @@ def generar_resumen_ejecutivo(vendedor, analisis):
 # ==============================================================================
 # 3. LÓGICA DE LA INTERFAZ DE USUARIO (UI)
 # ==============================================================================
-# (Las funciones de renderizado de pestañas no cambian)
 
 def render_pestañas_analisis(analisis, vendedor):
     """Renderiza las pestañas con todos los gráficos y tablas de análisis."""
@@ -190,16 +187,30 @@ def render_pestañas_analisis(analisis, vendedor):
             with col1:
                 st.markdown("##### Ventas por Super Categoría")
                 if not analisis_mix['mix_super_categoria'].empty:
-                    fig = px.pie(analisis_mix['mix_super_categoria'], names='super_categoria', values='valor_venta', hole=0.4)
+                    # =============================================================
+                    # INICIO DEL CAMBIO: Gráfico de Pastel a Gráfico Treemap
+                    # =============================================================
+                    fig = px.treemap(
+                        analisis_mix['mix_super_categoria'],
+                        path=[px.Constant("Todas las Categorías"), 'super_categoria'],
+                        values='valor_venta',
+                        title='Composición de Ventas por Super Categoría'
+                    )
+                    fig.update_layout(margin=dict(t=50, l=25, r=25, b=25))
+                    # =============================================================
+                    # FIN DEL CAMBIO
+                    # =============================================================
                     st.plotly_chart(fig, use_container_width=True)
-                else: st.info("No hay datos de 'Super Categoría' para mostrar.")
+                else: 
+                    st.info("No hay datos de 'Super Categoría' para mostrar.")
             with col2:
                 st.markdown("##### Ventas por Nombre de Marca")
                 if not analisis_mix['mix_marcas'].empty:
                     df_marcas = analisis_mix['mix_marcas'].nlargest(10, 'valor_venta')
                     fig = px.bar(df_marcas, x='nombre_marca', y='valor_venta', text_auto='.2s')
                     st.plotly_chart(fig, use_container_width=True)
-                else: st.info("No hay datos de 'Marca' para mostrar.")
+                else: 
+                    st.info("No hay datos de 'Marca' para mostrar.")
 
 # ==============================================================================
 # 4. EJECUCIÓN PRINCIPAL DE LA PÁGINA
@@ -226,51 +237,37 @@ def render_pagina_perfil():
     seleccion = st.selectbox("Seleccione el Vendedor o Grupo a analizar:", opciones_analisis, index=default_index)
     if seleccion == "Seleccione un Vendedor o Grupo": st.info("Por favor, elija un vendedor o grupo para comenzar el análisis."); st.stop()
 
-    # --- INICIO DEL NUEVO FILTRO DE MESES ---
+    # --- Filtro de Meses ---
     st.markdown("##### Seleccione el rango de meses para el análisis:")
-    
-    # 1. Preparar la lista de meses disponibles para el slider
     df_ventas_historico['periodo'] = df_ventas_historico['fecha_venta'].dt.to_period('M')
     meses_disponibles = sorted(df_ventas_historico['periodo'].unique())
-    
-    # Crear un diccionario para mapear el texto amigable al objeto de periodo
-    # Texto amigable: "Ene 2024", Objeto: Period('2024-01', 'M')
-    mapa_meses = {
-        f"{DATA_CONFIG['mapeo_meses'][p.month]} {p.year}": p 
-        for p in meses_disponibles
-    }
+    mapa_meses = {f"{DATA_CONFIG['mapeo_meses'][p.month]} {p.year}": p for p in meses_disponibles}
     opciones_slider = list(mapa_meses.keys())
-
-    # 2. Determinar el rango por defecto (últimos 12 meses o los disponibles si son menos)
     start_index = max(0, len(opciones_slider) - 12)
     end_index = len(opciones_slider) - 1
     
-    # 3. Crear el st.select_slider
+    if start_index > end_index: # Evita error si hay menos de 1 mes de datos
+        start_index = end_index
+
     mes_inicio_str, mes_fin_str = st.select_slider(
         "Rango de Meses:",
         options=opciones_slider,
         value=(opciones_slider[start_index], opciones_slider[end_index])
     )
-
-    # 4. Convertir la selección del slider a fechas de inicio y fin de mes
     periodo_inicio = mapa_meses[mes_inicio_str]
     periodo_fin = mapa_meses[mes_fin_str]
     fecha_inicio = periodo_inicio.start_time.date()
     fecha_fin = periodo_fin.end_time.date()
-    # --- FIN DEL NUEVO FILTRO DE MESES ---
 
-
-    # --- Filtrado de Datos basado en la selección ---
+    # --- Filtrado de Datos ---
     if seleccion in DATA_CONFIG['grupos_vendedores']:
         df_base = df_ventas_historico[df_ventas_historico['nomvendedor'].isin(DATA_CONFIG['grupos_vendedores'][seleccion])]
     else:
         df_base = df_ventas_historico[df_ventas_historico['nomvendedor'] == seleccion]
-
     df_vendedor = df_base[(df_base['fecha_venta'].dt.date >= fecha_inicio) & (df_base['fecha_venta'].dt.date <= fecha_fin)]
-
     if df_vendedor.empty: st.warning(f"No se encontraron datos para '{seleccion}' en el rango de meses seleccionado."); st.stop()
     
-    # --- Ejecutar todos los análisis ---
+    # --- Ejecutar Análisis ---
     with st.spinner(f"Analizando perfil de {seleccion} de {mes_inicio_str} a {mes_fin_str}..."):
         df_vendedor_con_margen = calcular_margen(df_vendedor.copy())
         venta_total, margen_total = df_vendedor_con_margen['valor_venta'].sum(), df_vendedor_con_margen['margen_bruto'].sum()
