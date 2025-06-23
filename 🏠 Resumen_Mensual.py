@@ -354,6 +354,10 @@ def render_dashboard():
     )
     
     render_analisis_detallado(df_vista, df_ventas_periodo)
+    # AÑADE ESTE BLOQUE AL FINAL DE LA FUNCIÓN render_dashboard()
+    with st.expander("🔍 CAJA DE DIAGNÓSTICO - PÁGINA PRINCIPAL"):
+        st.subheader("Estado de la Sesión Actual:")
+        st.write(st.session_state)
 
 # ==============================================================================
 # 4. LÓGICA DE AUTENTICACIÓN Y EJECUCIÓN PRINCIPAL
