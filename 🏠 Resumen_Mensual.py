@@ -9,30 +9,26 @@ from dateutil.relativedelta import relativedelta
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 URL_LOGO = "https://raw.githubusercontent.com/DiegoMao201/Resumen-Ventas-Gerenciales/main/LOGO%20FERREINOX%20SAS%20BIC%202024.png"
-st.set_page_config(
-    page_title="Resumen Mensual",
-    page_icon=URL_LOGO,
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="Resumen Mensual", page_icon=URL_LOGO, layout="wide")
 
 # --- DICCIONARIOS Y CONSTANTES ---
 PRESUPUESTOS = {'154033':{'presupuesto':123873239, 'presupuestocartera':105287598}, '154044':{'presupuesto':80000000, 'presupuestocartera':300000000}, '154034':{'presupuesto':82753045, 'presupuestocartera':44854727}, '154014':{'presupuesto':268214737, 'presupuestocartera':307628243}, '154046':{'presupuesto':85469798, 'presupuestocartera':7129065}, '154012':{'presupuesto':246616193, 'presupuestocartera':295198667}, '154043':{'presupuesto':124885413, 'presupuestocartera':99488960}, '154035':{'presupuesto':80000000, 'presupuestocartera':300000000}, '154006':{'presupuesto':81250000, 'presupuestocartera':103945133}, '154049':{'presupuesto':56500000, 'presupuestocartera':70421127}, '154013':{'presupuesto':303422639, 'presupuestocartera':260017920}, '154011':{'presupuesto':447060250, 'presupuestocartera':428815923}, '154029':{'presupuesto':32500000, 'presupuestocartera':40000000}, '154040':{'presupuesto':0, 'presupuestocartera':0},'154053':{'presupuesto':0, 'presupuestocartera':0},'154048':{'presupuesto':0, 'presupuestocartera':0},'154042':{'presupuesto':0, 'presupuestocartera':0},'154031':{'presupuesto':0, 'presupuestocartera':0},'154039':{'presupuesto':0, 'presupuestocartera':0},'154051':{'presupuesto':0, 'presupuestocartera':0},'154008':{'presupuesto':0, 'presupuestocartera':0},'154052':{'presupuesto':0, 'presupuestocartera':0},'154050':{'presupuesto':0, 'presupuestocartera':0}}
 GRUPOS_VENDEDORES = {"MOSTRADOR PEREIRA": ["ALEJANDRO CARBALLO MARQUEZ", "GEORGINA A. GALVIS HERRERA"], "MOSTRADOR ARMENIA": ["CRISTIAN CAMILO RENDON MONTES", "FANDRY JOHANA ABRIL PENHA", "JAVIER ORLANDO PATINO HURTADO"], "MOSTRADOR MANIZALES": ["DAVID FELIPE MARTINEZ RIOS", "JHON JAIRO CASTAÑO MONTES"], "MOSTRADOR LAURELES": ["MAURICIO RIOS MORALES"]}
 MAPEO_MESES = {1:"Enero", 2:"Febrero", 3:"Marzo", 4:"Abril", 5:"Mayo", 6:"Junio", 7:"Julio", 8:"Agosto", 9:"Septiembre", 10:"Octubre", 11:"Noviembre", 12:"Diciembre"}
 MAPEO_MARCAS = {50:"P8-ASC-MEGA", 54:"MPY-International", 55:"DPP-AN COLORANTS LATAM", 56:"DPP-Pintuco Profesional", 57:"ASC-Mega", 58:"DPP-Pintuco", 59:"DPP-Madetec", 60:"POW-Interpon", 61:"various", 62:"DPP-ICO", 63:"DPP-Terinsa", 64:"MPY-Pintuco", 65:"non-AN Third Party", 66:"ICO-AN Packaging", 67:"ASC-Automotive OEM", 68:"POW-Resicoat", 73:"DPP-Coral", 91:"DPP-Sikkens"}
-NOMBRES_COLUMNAS_VENTAS = ['anio', 'mes', 'fecha_venta', 'codigo_vendedor', 'nomvendedor', 'cliente_id', 'nombre_cliente', 'codigo_articulo', 'nombre_articulo','linea_producto', 'marca_producto', 'valor_venta', 'unidades_vendidas', 'costo_unitario']
+# --- LA LÍNEA CLAVE CORREGIDA ---
+NOMBRES_COLUMNAS_VENTAS = ['anio', 'mes', 'fecha_venta', 'codigo_vendedor', 'nomvendedor', 'cliente_id', 'nombre_cliente', 'codigo_articulo', 'nombre_articulo','linea_producto', 'marca_producto', 'valor_venta', 'unidades_vendidas', 'costo_unitario', 'super_categoria']
 NOMBRES_COLUMNAS_COBROS = ['anio', 'mes', 'fecha_cobro', 'codigo_vendedor', 'valor_cobro']
 RUTA_VENTAS = "/data/ventas_detalle.csv"
 RUTA_COBROS = "/data/cobros_detalle.csv"
 META_MARQUILLA = 2.4
 MARQUILLAS_CLAVE = ['VINILTEX', 'KORAZA', 'ESTUCOMASTIC', 'VINILICO']
 
-# --- FUNCIÓN DE CARGA DE DATOS (VERSIÓN DE DEPURACIÓN FINAL) ---
-@st.cache_data(ttl=10) # Usamos una caché corta para depurar
+# --- FUNCIONES ---
+# (Aquí van todas las funciones que ya teníamos: cargar_y_limpiar_datos, calcular_marquilla, etc. Se omiten por brevedad pero deben estar aquí, sin cambios)
+@st.cache_data(ttl=1800)
 def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
-    """Descarga, limpia y reporta el estado de los datos desde Dropbox."""
-    st.info(f"--- 🕵️‍♂️ Iniciando depuración para {ruta_archivo} ---")
+    """Descarga y limpia datos desde Dropbox usando el refresh token."""
     try:
         with dropbox.Dropbox(
             app_key=st.secrets.dropbox.app_key,
@@ -41,48 +37,25 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
         ) as dbx:
             metadata, res = dbx.files_download(path=ruta_archivo)
             contenido_csv = res.content.decode('latin-1')
-            
-            st.write("PASO 1: Archivo descargado. Primeras 3 líneas de texto crudo:")
-            st.code('\n'.join(contenido_csv.splitlines()[:3]), language="text")
-
-            df = pd.read_csv(io.StringIO(contenido_csv), header=None, sep=',', on_bad_lines='warn', dtype=str)
-            st.write(f"PASO 2: Archivo leído por Pandas. El DataFrame inicial tiene **{df.shape[0]} filas** y **{df.shape[1]} columnas**.")
-
-            if df.shape[1] != len(nombres_columnas):
-                st.error(f"¡FALLO EN PASO 3! El número de columnas no coincide.")
-                st.error(f"Se esperaban {len(nombres_columnas)} columnas (definidas en 'NOMBRES_COLUMNAS_VENTAS').")
-                st.error(f"Pero se encontraron {df.shape[1]} columnas en el archivo CSV.")
-                st.info("SOLUCIÓN: La consulta SQL en el servidor no está exportando el número de columnas correcto. Debe coincidir con la lista en el código.")
-                return pd.DataFrame(columns=nombres_columnas)
-            
+            df = pd.read_csv(io.StringIO(contenido_csv), header=None, sep=',', on_bad_lines='skip', dtype=str)
+            if df.shape[1] != len(nombres_columnas): return pd.DataFrame(columns=nombres_columnas)
             df.columns = nombres_columnas
-            st.write("PASO 3: Nombres de columna asignados. Así se ven las primeras 2 filas ANTES de la limpieza:")
-            st.dataframe(df.head(2))
-
-            numeric_cols = ['anio', 'mes', 'valor_venta', 'valor_cobro', 'unidades_vendidas', 'costo_unitario']
+            numeric_cols = ['anio', 'mes', 'valor_venta', 'valor_cobro', 'unidades_vendidas', 'costo_unitario', 'marca_producto']
             for col in numeric_cols:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
-            st.write("PASO 4: Columnas numéricas convertidas (los errores se vuelven 'NaN').")
-
-            rows_before_dropna = len(df)
+                if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce')
             df.dropna(subset=['anio', 'mes', 'codigo_vendedor'], inplace=True)
-            rows_after_dropna = len(df)
-            st.write(f"PASO 5: Se eliminaron filas con datos nulos en columnas clave ('anio', 'mes', 'codigo_vendedor').")
-            st.write(f"Filas antes: {rows_before_dropna} | Filas después: {rows_after_dropna}")
-
-            if df.empty:
-                st.error("¡FALLO EN PASO 5! Después de la limpieza, el DataFrame quedó vacío.")
-                st.info("SOLUCIÓN: Revisa los datos en las columnas 'anio', 'mes', 'codigo_vendedor' en tu archivo CSV. Probablemente tienen un formato que Python no puede reconocer (ej. texto en lugar de números).")
-            else:
-                st.success("✅ ¡Depuración exitosa! El DataFrame final tiene datos válidos.")
-            
-            st.info(f"--- Fin de la depuración para {ruta_archivo} ---")
+            for col in ['anio', 'mes']: df[col] = df[col].astype(int)
+            df['codigo_vendedor'] = df['codigo_vendedor'].astype(str)
+            if 'fecha_venta' in df.columns:
+                df['fecha_venta'] = pd.to_datetime(df['fecha_venta'], errors='coerce')
+            if 'marca_producto' in df.columns:
+                df['nombre_marca'] = df['marca_producto'].map(MAPEO_MARCAS).fillna('No Especificada')
             return df
-
     except Exception as e:
-        st.error(f"Error crítico durante el proceso de carga y limpieza: {e}")
+        st.error(f"Error crítico al cargar {ruta_archivo}: {e}")
         return pd.DataFrame(columns=nombres_columnas)
+
+# (El resto del código completo que ya teníamos, incluyendo el main(), render_dashboard(), autenticación, etc.)
 
 def calcular_marquilla(df_periodo):
     if df_periodo.empty: return pd.DataFrame(columns=['codigo_vendedor', 'nomvendedor', 'promedio_marquilla'])
