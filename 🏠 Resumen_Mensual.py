@@ -16,11 +16,12 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- DICCIONARIOS GLOBALES Y CONSTANTES ---
+# --- DICCIONARIOS Y CONSTANTES ---
 PRESUPUESTOS = {'154033':{'presupuesto':123873239, 'presupuestocartera':105287598}, '154044':{'presupuesto':80000000, 'presupuestocartera':300000000}, '154034':{'presupuesto':82753045, 'presupuestocartera':44854727}, '154014':{'presupuesto':268214737, 'presupuestocartera':307628243}, '154046':{'presupuesto':85469798, 'presupuestocartera':7129065}, '154012':{'presupuesto':246616193, 'presupuestocartera':295198667}, '154043':{'presupuesto':124885413, 'presupuestocartera':99488960}, '154035':{'presupuesto':80000000, 'presupuestocartera':300000000}, '154006':{'presupuesto':81250000, 'presupuestocartera':103945133}, '154049':{'presupuesto':56500000, 'presupuestocartera':70421127}, '154013':{'presupuesto':303422639, 'presupuestocartera':260017920}, '154011':{'presupuesto':447060250, 'presupuestocartera':428815923}, '154029':{'presupuesto':32500000, 'presupuestocartera':40000000}, '154040':{'presupuesto':0, 'presupuestocartera':0},'154053':{'presupuesto':0, 'presupuestocartera':0},'154048':{'presupuesto':0, 'presupuestocartera':0},'154042':{'presupuesto':0, 'presupuestocartera':0},'154031':{'presupuesto':0, 'presupuestocartera':0},'154039':{'presupuesto':0, 'presupuestocartera':0},'154051':{'presupuesto':0, 'presupuestocartera':0},'154008':{'presupuesto':0, 'presupuestocartera':0},'154052':{'presupuesto':0, 'presupuestocartera':0},'154050':{'presupuesto':0, 'presupuestocartera':0}}
 GRUPOS_VENDEDORES = {"MOSTRADOR PEREIRA": ["ALEJANDRO CARBALLO MARQUEZ", "GEORGINA A. GALVIS HERRERA"], "MOSTRADOR ARMENIA": ["CRISTIAN CAMILO RENDON MONTES", "FANDRY JOHANA ABRIL PENHA", "JAVIER ORLANDO PATINO HURTADO"], "MOSTRADOR MANIZALES": ["DAVID FELIPE MARTINEZ RIOS", "JHON JAIRO CASTAÑO MONTES"], "MOSTRADOR LAURELES": ["MAURICIO RIOS MORALES"]}
 MAPEO_MESES = {1:"Enero", 2:"Febrero", 3:"Marzo", 4:"Abril", 5:"Mayo", 6:"Junio", 7:"Julio", 8:"Agosto", 9:"Septiembre", 10:"Octubre", 11:"Noviembre", 12:"Diciembre"}
-NOMBRES_COLUMNAS_VENTAS = ['anio', 'mes', 'fecha_venta', 'codigo_vendedor', 'nomvendedor', 'cliente_id', 'nombre_cliente', 'codigo_articulo', 'nombre_articulo','linea_producto', 'marca_producto', 'valor_venta', 'unidades_vendidas', 'costo_unitario', 'super_categoria']
+MAPEO_MARCAS = {50:"P8-ASC-MEGA", 54:"MPY-International", 55:"DPP-AN COLORANTS LATAM", 56:"DPP-Pintuco Profesional", 57:"ASC-Mega", 58:"DPP-Pintuco", 59:"DPP-Madetec", 60:"POW-Interpon", 61:"various", 62:"DPP-ICO", 63:"DPP-Terinsa", 64:"MPY-Pintuco", 65:"non-AN Third Party", 66:"ICO-AN Packaging", 67:"ASC-Automotive OEM", 68:"POW-Resicoat", 73:"DPP-Coral", 91:"DPP-Sikkens"}
+NOMBRES_COLUMNAS_VENTAS = ['anio', 'mes', 'fecha_venta', 'codigo_vendedor', 'nomvendedor', 'cliente_id', 'nombre_cliente', 'codigo_articulo', 'nombre_articulo','linea_producto', 'marca_producto', 'valor_venta', 'unidades_vendidas', 'costo_unitario']
 NOMBRES_COLUMNAS_COBROS = ['anio', 'mes', 'fecha_cobro', 'codigo_vendedor', 'valor_cobro']
 RUTA_VENTAS = "/data/ventas_detalle.csv"
 RUTA_COBROS = "/data/cobros_detalle.csv"
@@ -40,20 +41,18 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
             metadata, res = dbx.files_download(path=ruta_archivo)
             contenido_csv = res.content.decode('latin-1')
             df = pd.read_csv(io.StringIO(contenido_csv), header=None, sep=',', on_bad_lines='skip', dtype=str)
-            if df.shape[1] != len(nombres_columnas):
-                st.warning(f"Advertencia de formato en {ruta_archivo}: Se esperaban {len(nombres_columnas)} columnas pero se encontraron {df.shape[1]}. El archivo puede estar desactualizado.")
-                return pd.DataFrame(columns=nombres_columnas)
+            if df.shape[1] != len(nombres_columnas): return pd.DataFrame(columns=nombres_columnas)
             df.columns = nombres_columnas
-            numeric_cols = ['anio', 'mes', 'valor_venta', 'valor_cobro', 'unidades_vendidas', 'costo_unitario']
+            numeric_cols = ['anio', 'mes', 'valor_venta', 'valor_cobro', 'unidades_vendidas', 'costo_unitario', 'marca_producto']
             for col in numeric_cols:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
+                if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce')
             df.dropna(subset=['anio', 'mes', 'codigo_vendedor'], inplace=True)
-            for col in ['anio', 'mes']:
-                df[col] = df[col].astype(int)
+            for col in ['anio', 'mes']: df[col] = df[col].astype(int)
             df['codigo_vendedor'] = df['codigo_vendedor'].astype(str)
             if 'fecha_venta' in df.columns:
                 df['fecha_venta'] = pd.to_datetime(df['fecha_venta'], errors='coerce')
+            if 'marca_producto' in df.columns:
+                df['nombre_marca'] = df['marca_producto'].map(MAPEO_MARCAS).fillna('No Especificada')
             return df
     except Exception as e:
         st.error(f"Error crítico al cargar {ruta_archivo}: {e}")
@@ -70,14 +69,14 @@ def calcular_marquilla(df_periodo):
 
 def generar_comentario_asesor(avance_v, avance_c, marquilla_p):
     comentarios = []
-    if avance_v >= 100: comentarios.append("📈 **Ventas:** ¡Felicitaciones! Has superado la meta de ventas. ¡Excelente trabajo!")
-    elif avance_v >= 80: comentarios.append("📈 **Ventas:** ¡Estás muy cerca de la meta! Un último esfuerzo para lograrlo.")
+    if avance_v >= 100: comentarios.append("📈 **Ventas:** ¡Felicitaciones! Has superado la meta de ventas.")
+    elif avance_v >= 80: comentarios.append("📈 **Ventas:** ¡Estás muy cerca de la meta! Un último esfuerzo.")
     else: comentarios.append("📈 **Ventas:** Planifica tus visitas y aprovecha cada oportunidad.")
-    if avance_c >= 100: comentarios.append("💰 **Cartera:** Objetivo de recaudo cumplido. Una gestión impecable.")
-    else: comentarios.append("💰 **Cartera:** Recuerda hacer seguimiento a la cartera pendiente. Una buena gestión de cobro es clave.")
+    if avance_c >= 100: comentarios.append("💰 **Cartera:** Objetivo de recaudo cumplido. ¡Gestión impecable!")
+    else: comentarios.append("💰 **Cartera:** Recuerda hacer seguimiento a la cartera pendiente.")
     if marquilla_p >= META_MARQUILLA: comentarios.append(f"🎨 **Marquilla:** Tu promedio de {marquilla_p:.2f} es excelente.")
-    elif marquilla_p > 0: comentarios.append(f"🎨 **Marquilla:** Tu promedio es {marquilla_p:.2f}. Recuerda ofrecer todo el portafolio de marcas clave.")
-    else: comentarios.append("🎨 **Marquilla:** Aún no registras ventas en las marcas clave. ¡Son una gran oportunidad de crecimiento!")
+    elif marquilla_p > 0: comentarios.append(f"🎨 **Marquilla:** Tu promedio es {marquilla_p:.2f}. Oportunidad de crecimiento ofreciendo el portafolio completo.")
+    else: comentarios.append("🎨 **Marquilla:** Aún no registras ventas en las marcas clave. ¡Son una gran oportunidad!")
     return comentarios
 
 def render_dashboard():
@@ -91,7 +90,8 @@ def render_dashboard():
     
     anio_reciente = df_ventas['anio'].max()
     mes_reciente = df_ventas[df_ventas['anio'] == anio_reciente]['mes'].max()
-    index_anio = lista_anios.index(anio_reciente)
+    
+    index_anio = lista_anios.index(anio_reciente) if anio_reciente in lista_anios else 0
     anio_sel = st.sidebar.selectbox("Elija el Año", lista_anios, index=index_anio)
     
     lista_meses_num = sorted(df_ventas[df_ventas['anio'] == anio_sel]['mes'].unique())
@@ -123,7 +123,7 @@ def render_dashboard():
     vendedores_en_grupos_lista = [v for lista in GRUPOS_VENDEDORES.values() for v in lista]
     df_individuales = df_resumen_completo[~df_resumen_completo['nomvendedor'].isin(vendedores_en_grupos_lista)]
     df_final = pd.concat([df_agrupado, df_individuales], ignore_index=True)
-    
+
     usuario_actual = st.session_state.usuario
     if usuario_actual == "GERENTE":
         lista_filtro = sorted(df_final['nomvendedor'].unique())
@@ -169,6 +169,7 @@ def render_dashboard():
     st.subheader("Desglose por Vendedor / Grupo")
     st.dataframe(dff[['Estatus', 'nomvendedor', 'ventas_totales', 'presupuesto', 'cobros_totales', 'presupuestocartera', 'impactos', 'promedio_marquilla']], column_config={"Estatus": st.column_config.TextColumn("🚦", width="small"),"nomvendedor": st.column_config.TextColumn("Vendedor/Grupo", width="medium"), "ventas_totales": st.column_config.NumberColumn("Ventas", format="$ %d"), "presupuesto": st.column_config.NumberColumn("Meta Ventas", format="$ %d"), "cobros_totales": st.column_config.NumberColumn("Recaudo", format="$ %d"), "presupuestocartera": st.column_config.NumberColumn("Meta Recaudo", format="$ %d"), "impactos": st.column_config.NumberColumn("Clientes Únicos", format="%d"), "promedio_marquilla": st.column_config.ProgressColumn("Promedio Marquilla", format="%.2f", min_value=0, max_value=4)}, use_container_width=True, hide_index=True)
 
+# --- CONTROLADOR PRINCIPAL ---
 def main():
     st.sidebar.image(URL_LOGO, use_container_width=True)
     st.sidebar.header("Control de Acceso")
