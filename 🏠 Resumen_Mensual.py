@@ -88,8 +88,10 @@ def render_dashboard():
     
     anio_reciente = int(df_ventas['anio'].max())
     mes_reciente = int(df_ventas[df_ventas['anio'] == anio_reciente]['mes'].max())
+    
     index_anio = lista_anios.index(anio_reciente) if anio_reciente in lista_anios else 0
     anio_sel = st.sidebar.selectbox("Elija el Año", lista_anios, index=index_anio)
+    
     lista_meses_num = sorted(df_ventas[df_ventas['anio'] == anio_sel]['mes'].unique())
     index_mes = lista_meses_num.index(mes_reciente) if anio_sel == anio_reciente and mes_reciente in lista_meses_num else 0
     mes_sel_num = st.sidebar.selectbox("Elija el Mes", options=lista_meses_num, format_func=lambda x: MAPEO_MESES.get(x), index=index_mes)
@@ -101,6 +103,7 @@ def render_dashboard():
     resumen_ind = df_ventas_periodo.groupby(['codigo_vendedor', 'nomvendedor']).agg(ventas_totales=('valor_venta', 'sum'), impactos=('cliente_id', 'nunique')).reset_index()
     resumen_cobros = df_cobros_periodo.groupby('codigo_vendedor').agg(cobros_totales=('valor_cobro', 'sum')).reset_index()
     resumen_marquilla = calcular_marquilla(df_ventas_periodo)
+    
     df_resumen_completo = pd.merge(resumen_ind, resumen_cobros, on='codigo_vendedor', how='left')
     df_resumen_completo = pd.merge(df_resumen_completo, resumen_marquilla, on=['codigo_vendedor', 'nomvendedor'], how='left')
     df_resumen_completo['presupuesto'] = df_resumen_completo['codigo_vendedor'].map(lambda x: PRESUPUESTOS.get(x, {}).get('presupuesto', 0))
@@ -115,10 +118,11 @@ def render_dashboard():
             if 'promedio_marquilla' in df_grupo.columns and df_grupo['impactos'].sum() > 0:
                 promedio_marquilla_grupo = np.average(df_grupo['promedio_marquilla'], weights=df_grupo['impactos'])
             else:
-                promedio_marquilla_grupo = 0
+                promedio_marquilla_grupo = 0.0
             registro_grupo = {'nomvendedor': grupo, 'codigo_vendedor': grupo, **suma_grupo, 'promedio_marquilla': promedio_marquilla_grupo}
             registros_agrupados.append(registro_grupo)
     df_agrupado = pd.DataFrame(registros_agrupados)
+    
     vendedores_en_grupos_lista = [v for lista in GRUPOS_VENDEDORES.values() for v in lista]
     df_individuales = df_resumen_completo[~df_resumen_completo['nomvendedor'].isin(vendedores_en_grupos_lista)]
     df_final = pd.concat([df_agrupado, df_individuales], ignore_index=True)
@@ -128,8 +132,12 @@ def render_dashboard():
         lista_filtro = sorted(df_final['nomvendedor'].unique())
         vendedores_sel = st.sidebar.multiselect("Filtrar Vendedores/Grupos", options=lista_filtro, default=lista_filtro)
         dff = df_final[df_final['nomvendedor'].isin(vendedores_sel)]
-    else: dff = df_final[df_final['nomvendedor'] == usuario_actual]
-    if dff.empty: st.warning("No hay datos para mostrar para tu selección."); st.stop()
+    else: 
+        dff = df_final[df_final['nomvendedor'] == usuario_actual]
+    
+    if dff.empty: 
+        st.warning("No hay datos para mostrar para tu selección.")
+        st.stop()
     
     def asignar_estatus(row):
         avance_v = (row['ventas_totales'] / row['presupuesto'] * 100) if row['presupuesto'] > 0 else 0
@@ -140,6 +148,7 @@ def render_dashboard():
     
     st.title("🏠 Resumen de Rendimiento")
     st.header(f"{MAPEO_MESES.get(mes_sel_num, '')} {anio_sel}")
+    st.markdown(f"**Vista para:** `{st.session_state.usuario if len(dff['nomvendedor'].unique()) == 1 else 'Múltiples Seleccionados'}`")
     st.markdown("---")
     
     with st.container(border=True):
@@ -147,13 +156,11 @@ def render_dashboard():
         cobros_total = dff['cobros_totales'].sum(); meta_cobros = dff['presupuestocartera'].sum()
         avance_ventas = (ventas_total / meta_ventas * 100) if meta_ventas > 0 else 0
         avance_cobros = (cobros_total / meta_cobros * 100) if meta_cobros > 0 else 0
-        
         dff_marquilla_valida = dff.dropna(subset=['promedio_marquilla', 'impactos'])
         if not dff_marquilla_valida.empty and dff_marquilla_valida['impactos'].sum() > 0:
             marquilla_prom = np.average(dff_marquilla_valida['promedio_marquilla'], weights=dff_marquilla_valida['impactos'])
         else:
             marquilla_prom = 0.0
-            
         st.subheader(f"👨‍💼 Asesor Virtual para: {st.session_state.usuario}")
         comentarios = generar_comentario_asesor(avance_ventas, avance_cobros, marquilla_prom)
         for comentario in comentarios: st.markdown(f"- {comentario}")
@@ -172,6 +179,58 @@ def render_dashboard():
     
     st.subheader("Desglose por Vendedor / Grupo")
     st.dataframe(dff[['Estatus', 'nomvendedor', 'ventas_totales', 'presupuesto', 'cobros_totales', 'presupuestocartera', 'impactos', 'promedio_marquilla']], column_config={"Estatus": st.column_config.TextColumn("🚦", width="small"),"nomvendedor": st.column_config.TextColumn("Vendedor/Grupo", width="medium"), "ventas_totales": st.column_config.NumberColumn("Ventas", format="$ %d"), "presupuesto": st.column_config.NumberColumn("Meta Ventas", format="$ %d"), "cobros_totales": st.column_config.NumberColumn("Recaudo", format="$ %d"), "presupuestocartera": st.column_config.NumberColumn("Meta Recaudo", format="$ %d"), "impactos": st.column_config.NumberColumn("Clientes Únicos", format="%d"), "promedio_marquilla": st.column_config.ProgressColumn("Promedio Marquilla", format="%.2f", min_value=0, max_value=4)}, use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+    st.header("🔬 Análisis Detallado del Periodo")
+    opciones_enfoque = ["Visión General"] + sorted(dff['nomvendedor'].unique())
+    if len(opciones_enfoque) > 2:
+        enfoque_sel = st.selectbox("Enfocar análisis en:", opciones_enfoque)
+    else:
+        enfoque_sel = dff['nomvendedor'].iloc[0]
+    
+    if enfoque_sel == "Visión General":
+        df_enfocado_graficos = dff.copy()
+        nombres_vendedores_enfocados_temp = []
+        for vendedor in df_enfocado_graficos['nomvendedor']:
+            nombres_vendedores_enfocados_temp.extend(GRUPOS_VENDEDORES.get(vendedor, [vendedor]))
+        df_ventas_enfocadas = df_ventas_periodo[df_ventas_periodo['nomvendedor'].isin(nombres_vendedores_enfocados_temp)]
+    else:
+        df_enfocado_graficos = dff[dff['nomvendedor'] == enfoque_sel]
+        nombres_vendedores_enfocados = GRUPOS_VENDEDORES.get(enfoque_sel, [enfoque_sel])
+        df_ventas_enfocadas = df_ventas_periodo[df_ventas_periodo['nomvendedor'].isin(nombres_vendedores_enfocados)]
+    
+    tab1, tab2, tab3 = st.tabs(["📊 Análisis de Portafolio", "🏆 Ranking de Rendimiento", "⭐ Clientes Clave"])
+    with tab1:
+        st.subheader("Análisis de Marcas y Categorías Estratégicas")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("##### Ventas por Super Categoría")
+            if not df_ventas_enfocadas.empty and 'super_categoria' in df_ventas_enfocadas.columns:
+                df_super_cat = df_ventas_enfocadas.groupby('super_categoria')['valor_venta'].sum().reset_index().sort_values('valor_venta', ascending=False)
+                fig_super_cat = px.bar(df_super_cat, x='super_categoria', y='valor_venta', text_auto='.2s', title="Ventas por Categoría Estratégica")
+                st.plotly_chart(fig_super_cat, use_container_width=True)
+        with col2:
+            st.markdown("##### Ventas de Marquillas Clave")
+            if not df_ventas_enfocadas.empty:
+                ventas_marquillas = {palabra: df_ventas_enfocadas[df_ventas_enfocadas['nombre_articulo'].str.contains(palabra, case=False)]['valor_venta'].sum() for palabra in MARQUILLAS_CLAVE}
+                df_ventas_marquillas = pd.DataFrame(list(ventas_marquillas.items()), columns=['Marquilla', 'Ventas']).sort_values('Ventas', ascending=False)
+                fig_marquillas = px.pie(df_ventas_marquillas, names='Marquilla', values='Ventas', title="Distribución Venta Marquillas", hole=0.4)
+                st.plotly_chart(fig_marquillas, use_container_width=True)
+    with tab2:
+        st.subheader("Ranking de Cumplimiento de Metas")
+        if not df_enfocado_graficos.empty and 'presupuesto' in df_enfocado_graficos.columns:
+            df_ranking = df_enfocado_graficos[df_enfocado_graficos['presupuesto'] > 0].copy()
+            df_ranking['avance_ventas'] = (df_ranking['ventas_totales'] / df_ranking['presupuesto']) * 100
+            df_ranking = df_ranking.sort_values('avance_ventas', ascending=True)
+            fig_ranking = px.bar(df_ranking, x='avance_ventas', y='nomvendedor', orientation='h', text='avance_ventas', title="Cumplimiento de Meta de Ventas (%)")
+            fig_ranking.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
+            fig_ranking.update_layout(xaxis_title="Cumplimiento (%)", yaxis_title=None)
+            st.plotly_chart(fig_ranking, use_container_width=True)
+    with tab3:
+        st.subheader("Top 10 Clientes del Periodo")
+        if not df_ventas_enfocadas.empty:
+            top_clientes = df_ventas_enfocadas.groupby('nombre_cliente')['valor_venta'].sum().nlargest(10).reset_index().sort_values('valor_venta', ascending=False)
+            st.dataframe(top_clientes, column_config={"nombre_cliente": "Cliente", "valor_venta": st.column_config.NumberColumn("Total Compra", format="$ %d")}, use_container_width=True, hide_index=True)
 
 def main():
     st.sidebar.image(URL_LOGO, use_container_width=True)
