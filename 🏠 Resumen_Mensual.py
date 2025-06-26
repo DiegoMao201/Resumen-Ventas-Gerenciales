@@ -34,7 +34,6 @@ APP_CONFIG = {
         "presupuesto_pct": 0.10
     },
     "categorias_clave_venta": ['ABRACOL', 'YALE', 'SAINT GOBAIN', 'GOYA', 'ALLEGION', 'SEGUREX'],
-    # << NUEVO >> Configuración para el cálculo de presupuesto dinámico de mostradores
     "presupuesto_mostradores": {
         "incremento_anual_pct": 0.10
     }
@@ -42,7 +41,14 @@ APP_CONFIG = {
 
 DATA_CONFIG = {
     "presupuestos": {'154033':{'presupuesto':123873239, 'presupuestocartera':105287598}, '154044':{'presupuesto':80000000, 'presupuestocartera':300000000}, '154034':{'presupuesto':82753045, 'presupuestocartera':44854727}, '154014':{'presupuesto':268214737, 'presupuestocartera':307628243}, '154046':{'presupuesto':85469798, 'presupuestocartera':7129065}, '154012':{'presupuesto':246616193, 'presupuestocartera':295198667}, '154043':{'presupuesto':124885413, 'presupuestocartera':99488960}, '154035':{'presupuesto':80000000, 'presupuestocartera':300000000}, '154006':{'presupuesto':81250000, 'presupuestocartera':103945133}, '154049':{'presupuesto':56500000, 'presupuestocartera':70421127}, '154013':{'presupuesto':303422639, 'presupuestocartera':260017920}, '154011':{'presupuesto':447060250, 'presupuestocartera':428815923}, '154029':{'presupuesto':32500000, 'presupuestocartera':40000000}, '154040':{'presupuesto':0, 'presupuestocartera':0},'154053':{'presupuesto':0, 'presupuestocartera':0},'154048':{'presupuesto':0, 'presupuestocartera':0},'154042':{'presupuesto':0, 'presupuestocartera':0},'154031':{'presupuesto':0, 'presupuestocartera':0},'154039':{'presupuesto':0, 'presupuestocartera':0},'154051':{'presupuesto':0, 'presupuestocartera':0},'154008':{'presupuesto':0, 'presupuestocartera':0},'154052':{'presupuesto':0, 'presupuestocartera':0},'154050':{'presupuesto':0, 'presupuestocartera':0}},
-    "grupos_vendedores": {"MOSTRADOR PEREIRA": ["ALEJANDRO CARBALLO MARQUEZ", "GEORGINA A. GALVIS HERRERA"], "MOSTRADOR ARMENIA": ["CRISTIAN CAMILO RENDON MONTES", "FANDRY JOHANA ABRIL PENHA", "JAVIER ORLANDO PATINO HURTADO"], "MOSTRADOR MANIZALES": ["DAVID FELIPE MARTINEZ RIOS", "JHON JAIRO CASTAÑO MONTES"], "MOSTRADOR LAURELES": ["MAURICIO RIOS MORALES"]},
+    # << MODIFICADO >> Se añade el nuevo grupo "MOSTRADOR OPALO"
+    "grupos_vendedores": {
+        "MOSTRADOR PEREIRA": ["ALEJANDRO CARBALLO MARQUEZ", "GEORGINA A. GALVIS HERRERA"], 
+        "MOSTRADOR ARMENIA": ["CRISTIAN CAMILO RENDON MONTES", "FANDRY JOHANA ABRIL PENHA", "JAVIER ORLANDO PATINO HURTADO"], 
+        "MOSTRADOR MANIZALES": ["DAVID FELIPE MARTINEZ RIOS", "JHON JAIRO CASTAÑO MONTES"], 
+        "MOSTRADOR LAURELES": ["MAURICIO RIOS MORALES"],
+        "MOSTRADOR OPALO": ["MARIA PAULA"]
+    },
     "mapeo_meses": {1:"Enero", 2:"Febrero", 3:"Marzo", 4:"Abril", 5:"Mayo", 6:"Junio", 7:"Julio", 8:"Agosto", 9:"Septiembre", 10:"Octubre", 11:"Noviembre", 12:"Diciembre"},
     "mapeo_marcas": {50:"P8-ASC-MEGA", 54:"MPY-International", 55:"DPP-AN COLORANTS LATAM", 56:"DPP-Pintuco Profesional", 57:"ASC-Mega", 58:"DPP-Pintuco", 59:"DPP-Madetec", 60:"POW-Interpon", 61:"various", 62:"DPP-ICO", 63:"DPP-Terinsa", 64:"MPY-Pintuco", 65:"non-AN Third Party", 66:"ICO-AN Packaging", 67:"ASC-Automotive OEM", 68:"POW-Resicoat", 73:"DPP-Coral", 91:"DPP-Sikkens"}
 }
@@ -100,7 +106,6 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
         return pd.DataFrame(columns=nombres_columnas)
 
 def calcular_marquilla_optimizado(df_periodo):
-    # (Sin cambios en esta función)
     if df_periodo.empty or 'nombre_articulo' not in df_periodo.columns:
         return pd.DataFrame(columns=['codigo_vendedor', 'nomvendedor', 'promedio_marquilla'])
     df_temp = df_periodo[['codigo_vendedor', 'nomvendedor', 'cliente_id', 'nombre_articulo']].copy()
@@ -112,36 +117,31 @@ def calcular_marquilla_optimizado(df_periodo):
     df_final_marquilla = df_cliente_marcas.groupby(['codigo_vendedor', 'nomvendedor'])['puntaje_marquilla'].mean().reset_index()
     return df_final_marquilla.rename(columns={'puntaje_marquilla': 'promedio_marquilla'})
 
-# << MODIFICADO >> La función ahora necesita más argumentos para el cálculo dinámico.
 def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel):
-    """Procesa datos con presupuesto dinámico para mostradores."""
-    # Los resúmenes del periodo actual se calculan como siempre
     resumen_ventas = df_ventas_periodo.groupby(['codigo_vendedor', 'nomvendedor']).agg(
         ventas_totales=('valor_venta', 'sum'), impactos=('cliente_id', 'nunique')).reset_index()
     
     resumen_cobros = df_cobros_periodo.groupby('codigo_vendedor').agg(cobros_totales=('valor_cobro', 'sum')).reset_index()
     
-    # Lógica de complementarios y sub-meta (sin cambios)
     df_ventas_comp = df_ventas_periodo[df_ventas_periodo['super_categoria'] != APP_CONFIG['complementarios']['exclude_super_categoria']]
-    resumen_complementarios = df_ventas_comp.groupby('codigo_vendedor').agg(ventas_complementarios=('valor_venta', 'sum')).reset_index()
+    resumen_complementarios = df_ventas_comp.groupby(['codigo_vendedor','nomvendedor']).agg(ventas_complementarios=('valor_venta', 'sum')).reset_index()
+    
     marca_sub_meta = APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo']
     df_ventas_sub_meta = df_ventas_periodo[df_ventas_periodo['nombre_marca'] == marca_sub_meta]
-    resumen_sub_meta = df_ventas_sub_meta.groupby('codigo_vendedor').agg(ventas_sub_meta=('valor_venta', 'sum')).reset_index()
+    resumen_sub_meta = df_ventas_sub_meta.groupby(['codigo_vendedor','nomvendedor']).agg(ventas_sub_meta=('valor_venta', 'sum')).reset_index()
+    
     resumen_marquilla = calcular_marquilla_optimizado(df_ventas_periodo)
     
-    # Merge de todos los resúmenes
     df_resumen = pd.merge(resumen_ventas, resumen_cobros, on='codigo_vendedor', how='left')
     df_resumen = pd.merge(df_resumen, resumen_marquilla, on=['codigo_vendedor', 'nomvendedor'], how='left')
-    df_resumen = pd.merge(df_resumen, resumen_complementarios, on='codigo_vendedor', how='left')
-    df_resumen = pd.merge(df_resumen, resumen_sub_meta, on='codigo_vendedor', how='left')
+    df_resumen = pd.merge(df_resumen, resumen_complementarios, on=['codigo_vendedor', 'nomvendedor'], how='left')
+    df_resumen = pd.merge(df_resumen, resumen_sub_meta, on=['codigo_vendedor', 'nomvendedor'], how='left')
 
-    # Asignación de presupuestos fijos para TODOS los vendedores inicialmente
     presupuestos_fijos = DATA_CONFIG['presupuestos']
     df_resumen['presupuesto'] = df_resumen['codigo_vendedor'].map(lambda x: presupuestos_fijos.get(x, {}).get('presupuesto', 0))
     df_resumen['presupuestocartera'] = df_resumen['codigo_vendedor'].map(lambda x: presupuestos_fijos.get(x, {}).get('presupuestocartera', 0))
     df_resumen.fillna(0, inplace=True)
 
-    # Agregación de grupos (donde ocurre la magia del presupuesto dinámico)
     registros_agrupados = []
     incremento_mostradores = 1 + APP_CONFIG['presupuesto_mostradores']['incremento_anual_pct']
     
@@ -150,9 +150,7 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
         df_grupo_actual = df_resumen[df_resumen['nomvendedor'].isin(lista_vendedores_norm)]
         
         if not df_grupo_actual.empty:
-            # << NUEVO >> Lógica para calcular el presupuesto dinámico del grupo
             anio_anterior = anio_sel - 1
-            # Filtrar ventas del mismo mes del año anterior para los vendedores de este grupo
             df_grupo_historico = df_ventas_historicas[
                 (df_ventas_historicas['anio'] == anio_anterior) &
                 (df_ventas_historicas['mes'] == mes_sel) &
@@ -161,28 +159,27 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
             ventas_anio_anterior = df_grupo_historico['valor_venta'].sum()
             presupuesto_dinamico = ventas_anio_anterior * incremento_mostradores
             
-            # Sumar las métricas de rendimiento del mes ACTUAL
-            cols_a_sumar = ['ventas_totales', 'cobros_totales', 'impactos', 'presupuestocartera']
+            # << CORREGIDO >> Se añaden 'ventas_complementarios' y 'ventas_sub_meta' a la lista de columnas a sumar.
+            cols_a_sumar = ['ventas_totales', 'cobros_totales', 'impactos', 'presupuestocartera',
+                            'ventas_complementarios', 'ventas_sub_meta']
             suma_grupo = df_grupo_actual[cols_a_sumar].sum().to_dict()
             
-            # Crear el registro del grupo
             total_impactos = df_grupo_actual['impactos'].sum()
             promedio_marquilla_grupo = np.average(df_grupo_actual['promedio_marquilla'], weights=df_grupo_actual['impactos']) if total_impactos > 0 else 0.0
             registro = {'nomvendedor': normalizar_texto(grupo), 'codigo_vendedor': normalizar_texto(grupo), **suma_grupo, 'promedio_marquilla': promedio_marquilla_grupo}
             
-            # << MODIFICADO >> Se asigna el presupuesto dinámico calculado al registro del grupo
             registro['presupuesto'] = presupuesto_dinamico
             
             registros_agrupados.append(registro)
             
     df_agrupado = pd.DataFrame(registros_agrupados)
     
-    # Combinar los grupos con los vendedores individuales
     vendedores_en_grupos = [v for lista in DATA_CONFIG['grupos_vendedores'].values() for v in [normalizar_texto(i) for i in lista]]
     df_individuales = df_resumen[~df_resumen['nomvendedor'].isin(vendedores_en_grupos)]
     df_final = pd.concat([df_agrupado, df_individuales], ignore_index=True)
     
-    # Calcular presupuestos de complementarios DESPUÉS de tener el presupuesto final de ventas
+    df_final.fillna(0, inplace=True) # Rellenar NaNs que puedan surgir de los merges
+    
     df_final['presupuesto_complementarios'] = df_final['presupuesto'] * APP_CONFIG['complementarios']['presupuesto_pct']
     df_final['presupuesto_sub_meta'] = df_final['presupuesto_complementarios'] * APP_CONFIG['sub_meta_complementarios']['presupuesto_pct']
     
@@ -193,7 +190,6 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
 # ==============================================================================
 
 def generar_comentario_asesor(avance_v, avance_c, marquilla_p, avance_comp, avance_sub_meta):
-    # (Sin cambios en esta función)
     comentarios = []
     if avance_v >= 100: comentarios.append("📈 **Ventas:** ¡Felicitaciones! Has superado la meta de ventas.")
     elif avance_v >= 80: comentarios.append("📈 **Ventas:** ¡Estás muy cerca de la meta! Un último esfuerzo.")
@@ -216,7 +212,6 @@ def generar_comentario_asesor(avance_v, avance_c, marquilla_p, avance_comp, avan
     return comentarios
 
 def render_analisis_detallado(df_vista, df_ventas_periodo):
-    # (Sin cambios en esta función)
     st.markdown("---")
     st.header("🔬 Análisis Detallado del Periodo")
 
@@ -226,18 +221,23 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
     if enfoque_sel == "Visión General":
         nombres_a_filtrar = []
         for vendedor in df_vista['nomvendedor']:
-            nombres_a_filtrar.extend(DATA_CONFIG['grupos_vendedores'].get(vendedor, [vendedor]))
+            # Se normaliza el nombre del grupo para buscar los vendedores
+            vendedor_norm = normalizar_texto(vendedor)
+            lista_vendedores = DATA_CONFIG['grupos_vendedores'].get(vendedor, [vendedor]) if vendedor_norm not in DATA_CONFIG['grupos_vendedores'] else DATA_CONFIG['grupos_vendedores'][vendedor]
+            nombres_a_filtrar.extend([normalizar_texto(v) for v in lista_vendedores])
         df_ventas_enfocadas = df_ventas_periodo[df_ventas_periodo['nomvendedor'].isin(nombres_a_filtrar)]
         df_ranking = df_vista
     else:
         # Se normaliza el nombre del grupo seleccionado para que coincida
-        nombres_a_filtrar = [normalizar_texto(n) for n in DATA_CONFIG['grupos_vendedores'].get(enfoque_sel, [enfoque_sel])]
+        enfoque_sel_norm = normalizar_texto(enfoque_sel)
+        # Se busca el nombre original del grupo para obtener la lista de vendedores
+        nombre_grupo_orig = next((k for k in DATA_CONFIG['grupos_vendedores'] if normalizar_texto(k) == enfoque_sel_norm), enfoque_sel_norm)
+        nombres_a_filtrar = [normalizar_texto(n) for n in DATA_CONFIG['grupos_vendedores'].get(nombre_grupo_orig, [enfoque_sel_norm])]
         df_ventas_enfocadas = df_ventas_periodo[df_ventas_periodo['nomvendedor'].isin(nombres_a_filtrar)]
-        df_ranking = df_vista[df_vista['nomvendedor'] == enfoque_sel]
+        df_ranking = df_vista[df_vista['nomvendedor'] == enfoque_sel_norm]
     
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Análisis de Portafolio", "🏆 Ranking de Rendimiento", "⭐ Clientes Clave", "⚙️ Ventas por Categoría"])
 
-    # (El contenido de las pestañas no necesita cambios)
     with tab1:
         st.subheader("Análisis de Marcas y Categorías Estratégicas")
         col1, col2 = st.columns(2)
@@ -286,7 +286,10 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
                 st.markdown("##### Ventas por Categoría")
                 resumen_cat = df_ventas_cat.groupby('categoria_producto').agg(Ventas=('valor_venta', 'sum')).reset_index()
                 total_ventas_enfocadas = df_ventas_enfocadas['valor_venta'].sum()
-                resumen_cat['Participacion (%)'] = (resumen_cat['Ventas'] / total_ventas_enfocadas) * 100
+                if total_ventas_enfocadas > 0:
+                    resumen_cat['Participacion (%)'] = (resumen_cat['Ventas'] / total_ventas_enfocadas) * 100
+                else:
+                    resumen_cat['Participacion (%)'] = 0
                 resumen_cat = resumen_cat.sort_values('Ventas', ascending=False)
                 st.dataframe(resumen_cat,
                              column_config={"categoria_producto": "Categoría", "Ventas": st.column_config.NumberColumn("Total Venta", format="$ %d"),"Participacion (%)": st.column_config.ProgressColumn("Part. sobre Venta Total", format="%.2f%%", min_value=0, max_value=resumen_cat['Participacion (%)'].max())},
@@ -298,7 +301,6 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
                 st.plotly_chart(fig, use_container_width=True)
 
 def render_dashboard():
-    """<< MODIFICADO >> Orquesta la renderización pasando los datos históricos a la función de procesamiento."""
     st.sidebar.markdown("---"); st.sidebar.header("Filtros de Periodo")
     df_ventas_historicas = st.session_state.df_ventas
     df_cobros_historicos = st.session_state.df_cobros
@@ -317,10 +319,8 @@ def render_dashboard():
     df_cobros_periodo = df_cobros_historicos[(df_cobros_historicos['anio'] == anio_sel) & (df_cobros_historicos['mes'] == mes_sel_num)]
     if df_ventas_periodo.empty: st.warning("No hay datos de ventas para el periodo seleccionado."); st.stop()
     
-    # << MODIFICADO >> Se pasa el dataframe histórico completo a la función de procesamiento.
     df_resumen_final = procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel_num)
     
-    # El resto de la función sigue la misma lógica de visualización
     usuario_actual = normalizar_texto(st.session_state.usuario)
     if usuario_actual == "GERENTE":
         lista_filtro = sorted(df_resumen_final['nomvendedor'].unique())
@@ -331,9 +331,10 @@ def render_dashboard():
     if df_vista.empty: st.warning("No hay datos para mostrar para tu selección."); st.stop()
 
     def asignar_estatus(row):
-        avance = (row['ventas_totales'] / row['presupuesto'] * 100) if row['presupuesto'] > 0 else 0
-        if avance >= 95: return "🟢 En Objetivo"
-        if avance >= 70: return "🟡 Cerca del Objetivo"
+        if row['presupuesto'] > 0:
+            avance = (row['ventas_totales'] / row['presupuesto']) * 100
+            if avance >= 95: return "🟢 En Objetivo"
+            if avance >= 70: return "🟡 Cerca del Objetivo"
         return "🔴 Necesita Atención"
     df_vista['Estatus'] = df_vista.apply(asignar_estatus, axis=1)
 
@@ -399,7 +400,6 @@ def main():
         def obtener_lista_usuarios():
             df = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["ventas"], APP_CONFIG["column_names"]["ventas"])
             if not df.empty:
-                # Normaliza los nombres de los grupos para la lista de usuarios
                 grupos_norm = [normalizar_texto(g) for g in DATA_CONFIG['grupos_vendedores'].keys()]
                 vendedores_individuales = sorted(list(df['nomvendedor'].dropna().unique()))
                 vendedores_en_grupos = [v for lista in DATA_CONFIG['grupos_vendedores'].values() for v in [normalizar_texto(i) for i in lista]]
@@ -409,18 +409,24 @@ def main():
 
         todos_usuarios = obtener_lista_usuarios()
         
-        # << MODIFICADO >> Las claves del diccionario de usuarios también se normalizan
         usuarios_fijos_orig = {"GERENTE": "1234", "MOSTRADOR PEREIRA": "2345", "MOSTRADOR ARMENIA": "3456", "MOSTRADOR MANIZALES": "4567", "MOSTRADOR LAURELES": "5678"}
+        # << NUEVO >> Se añade contraseña para el nuevo mostrador.
+        if "MOSTRADOR OPALO" not in usuarios_fijos_orig:
+            usuarios_fijos_orig["MOSTRADOR OPALO"] = "opalo123" # Puedes cambiar esta contraseña
+
         usuarios_fijos = {normalizar_texto(k): v for k, v in usuarios_fijos_orig.items()}
         usuarios = usuarios_fijos.copy(); codigo = 1001
         for u in todos_usuarios:
-            if u not in usuarios: usuarios[u] = str(codigo); codigo += 1
+            # Asegurarse de que el usuario normalizado no esté ya en el diccionario
+            u_norm = normalizar_texto(u)
+            if u_norm not in usuarios: usuarios[u_norm] = str(codigo); codigo += 1
         
         usuario_seleccionado = st.sidebar.selectbox("Seleccione su usuario", options=todos_usuarios)
         clave = st.sidebar.text_input("Contraseña", type="password")
 
         if st.sidebar.button("Ingresar"):
-            if usuario_seleccionado in usuarios and clave == usuarios[usuario_seleccionado]:
+            usuario_sel_norm = normalizar_texto(usuario_seleccionado)
+            if usuario_sel_norm in usuarios and clave == usuarios[usuario_sel_norm]:
                 st.session_state.autenticado = True
                 st.session_state.usuario = usuario_seleccionado
                 with st.spinner('Cargando datos maestros, por favor espere...'):
