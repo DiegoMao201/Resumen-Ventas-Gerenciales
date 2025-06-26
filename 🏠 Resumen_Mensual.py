@@ -1,3 +1,7 @@
+# ==============================================================================
+# SCRIPT COMPLETO Y DEFINITIVO PARA: 🏠 Resumen Mensual.py
+# ==============================================================================
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -41,7 +45,6 @@ APP_CONFIG = {
 
 DATA_CONFIG = {
     "presupuestos": {'154033':{'presupuesto':123873239, 'presupuestocartera':105287598}, '154044':{'presupuesto':80000000, 'presupuestocartera':300000000}, '154034':{'presupuesto':82753045, 'presupuestocartera':44854727}, '154014':{'presupuesto':268214737, 'presupuestocartera':307628243}, '154046':{'presupuesto':85469798, 'presupuestocartera':7129065}, '154012':{'presupuesto':246616193, 'presupuestocartera':295198667}, '154043':{'presupuesto':124885413, 'presupuestocartera':99488960}, '154035':{'presupuesto':80000000, 'presupuestocartera':300000000}, '154006':{'presupuesto':81250000, 'presupuestocartera':103945133}, '154049':{'presupuesto':56500000, 'presupuestocartera':70421127}, '154013':{'presupuesto':303422639, 'presupuestocartera':260017920}, '154011':{'presupuesto':447060250, 'presupuestocartera':428815923}, '154029':{'presupuesto':32500000, 'presupuestocartera':40000000}, '154040':{'presupuesto':0, 'presupuestocartera':0},'154053':{'presupuesto':0, 'presupuestocartera':0},'154048':{'presupuesto':0, 'presupuestocartera':0},'154042':{'presupuesto':0, 'presupuestocartera':0},'154031':{'presupuesto':0, 'presupuestocartera':0},'154039':{'presupuesto':0, 'presupuestocartera':0},'154051':{'presupuesto':0, 'presupuestocartera':0},'154008':{'presupuesto':0, 'presupuestocartera':0},'154052':{'presupuesto':0, 'presupuestocartera':0},'154050':{'presupuesto':0, 'presupuestocartera':0}},
-    # Se incluye a "MOSTRADOR OPALO" con su vendedora correcta.
     "grupos_vendedores": {
         "MOSTRADOR PEREIRA": ["ALEJANDRO CARBALLO MARQUEZ", "GEORGINA A. GALVIS HERRERA"], 
         "MOSTRADOR ARMENIA": ["CRISTIAN CAMILO RENDON MONTES", "FANDRY JOHANA ABRIL PENHA", "JAVIER ORLANDO PATINO HURTADO"], 
@@ -55,7 +58,7 @@ DATA_CONFIG = {
 
 st.set_page_config(
     page_title=APP_CONFIG["page_title"],
-    page_icon=APP_CONFIG["url_logo"],
+    page_icon="🏠",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -67,8 +70,11 @@ st.set_page_config(
 def normalizar_texto(texto):
     if not isinstance(texto, str):
         return texto
-    texto_sin_tildes = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
-    return texto_sin_tildes.upper().replace('-', ' ').strip().replace('  ', ' ')
+    try:
+        texto_sin_tildes = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
+        return texto_sin_tildes.upper().replace('-', ' ').strip().replace('  ', ' ')
+    except (TypeError, AttributeError):
+        return texto
 
 APP_CONFIG['complementarios']['exclude_super_categoria'] = normalizar_texto(APP_CONFIG['complementarios']['exclude_super_categoria'])
 APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo'] = normalizar_texto(APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo'])
@@ -118,7 +124,6 @@ def calcular_marquilla_optimizado(df_periodo):
     return df_final_marquilla.rename(columns={'puntaje_marquilla': 'promedio_marquilla'})
 
 def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel):
-    # Paso 1: Resumir métricas a nivel de vendedor individual
     resumen_ventas = df_ventas_periodo.groupby(['codigo_vendedor', 'nomvendedor']).agg(
         ventas_totales=('valor_venta', 'sum'), impactos=('cliente_id', 'nunique')).reset_index()
     
@@ -133,19 +138,16 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     
     resumen_marquilla = calcular_marquilla_optimizado(df_ventas_periodo)
     
-    # Unir todos los resúmenes individuales
     df_resumen = pd.merge(resumen_ventas, resumen_cobros, on='codigo_vendedor', how='left')
     df_resumen = pd.merge(df_resumen, resumen_marquilla, on=['codigo_vendedor', 'nomvendedor'], how='left')
     df_resumen = pd.merge(df_resumen, resumen_complementarios, on=['codigo_vendedor', 'nomvendedor'], how='left')
     df_resumen = pd.merge(df_resumen, resumen_sub_meta, on=['codigo_vendedor', 'nomvendedor'], how='left')
 
-    # Asignar presupuestos fijos de cartera
     presupuestos_fijos = DATA_CONFIG['presupuestos']
     df_resumen['presupuesto'] = df_resumen['codigo_vendedor'].map(lambda x: presupuestos_fijos.get(x, {}).get('presupuesto', 0))
     df_resumen['presupuestocartera'] = df_resumen['codigo_vendedor'].map(lambda x: presupuestos_fijos.get(x, {}).get('presupuestocartera', 0))
     df_resumen.fillna(0, inplace=True)
 
-    # Paso 2: Procesar y agregar los grupos (mostradores)
     registros_agrupados = []
     incremento_mostradores = 1 + APP_CONFIG['presupuesto_mostradores']['incremento_anual_pct']
     
@@ -154,7 +156,6 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
         df_grupo_actual = df_resumen[df_resumen['nomvendedor'].isin(lista_vendedores_norm)]
         
         if not df_grupo_actual.empty:
-            # Calcular presupuesto dinámico basado en historial
             anio_anterior = anio_sel - 1
             df_grupo_historico = df_ventas_historicas[
                 (df_ventas_historicas['anio'] == anio_anterior) &
@@ -164,31 +165,26 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
             ventas_anio_anterior = df_grupo_historico['valor_venta'].sum()
             presupuesto_dinamico = ventas_anio_anterior * incremento_mostradores
             
-            # Sumar TODAS las métricas relevantes para el grupo
             cols_a_sumar = ['ventas_totales', 'cobros_totales', 'impactos', 'presupuestocartera',
                             'ventas_complementarios', 'ventas_sub_meta']
             suma_grupo = df_grupo_actual[cols_a_sumar].sum().to_dict()
             
-            # Calcular promedio ponderado de marquilla
             total_impactos = df_grupo_actual['impactos'].sum()
             promedio_marquilla_grupo = np.average(df_grupo_actual['promedio_marquilla'], weights=df_grupo_actual['impactos']) if total_impactos > 0 else 0.0
-            
-            # Crear el registro final para el grupo
             registro = {'nomvendedor': normalizar_texto(grupo), 'codigo_vendedor': normalizar_texto(grupo), **suma_grupo, 'promedio_marquilla': promedio_marquilla_grupo}
+            
             registro['presupuesto'] = presupuesto_dinamico
             
             registros_agrupados.append(registro)
             
     df_agrupado = pd.DataFrame(registros_agrupados)
     
-    # Paso 3: Combinar vendedores individuales y grupos
     vendedores_en_grupos = [v for lista in DATA_CONFIG['grupos_vendedores'].values() for v in [normalizar_texto(i) for i in lista]]
     df_individuales = df_resumen[~df_resumen['nomvendedor'].isin(vendedores_en_grupos)]
     df_final = pd.concat([df_agrupado, df_individuales], ignore_index=True)
     
     df_final.fillna(0, inplace=True)
     
-    # Paso 4: Calcular presupuestos derivados (complementarios, sub-meta)
     df_final['presupuesto_complementarios'] = df_final['presupuesto'] * APP_CONFIG['complementarios']['presupuesto_pct']
     df_final['presupuesto_sub_meta'] = df_final['presupuesto_complementarios'] * APP_CONFIG['sub_meta_complementarios']['presupuesto_pct']
     
@@ -258,7 +254,7 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
             else: st.info("No hay datos de marcas de productos para mostrar.")
         with col2:
             st.markdown("##### Ventas de Marquillas Clave")
-            if not df_ventas_enfocadas.empty:
+            if not df_ventas_enfocadas.empty and 'nombre_articulo' in df_ventas_enfocadas:
                 ventas_marquillas = {p: df_ventas_enfocadas[df_ventas_enfocadas['nombre_articulo'].str.contains(p, case=False)]['valor_venta'].sum() for p in APP_CONFIG['marquillas_clave']}
                 df_ventas_marquillas = pd.DataFrame(list(ventas_marquillas.items()), columns=['Marquilla', 'Ventas']).sort_values('Ventas', ascending=False)
                 fig = px.pie(df_ventas_marquillas, names='Marquilla', values='Ventas', title="Distribución Venta Marquillas", hole=0.4)
@@ -396,6 +392,10 @@ def render_dashboard():
 # 4. LÓGICA DE AUTENTICACIÓN Y EJECUCIÓN PRINCIPAL
 # ==============================================================================
 def main():
+    """Función principal que controla el flujo de la aplicación."""
+    # << CORREGIDO >> Se añade el debugger al principio para monitorear
+    st.expander("🔍 VER ESTADO DE LA SESIÓN (DEBUG)").write(st.session_state)
+
     st.sidebar.image(APP_CONFIG["url_logo"], use_container_width=True)
     st.sidebar.header("Control de Acceso")
 
@@ -406,12 +406,11 @@ def main():
         def obtener_lista_usuarios():
             df = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["ventas"], APP_CONFIG["column_names"]["ventas"])
             if not df.empty:
-                grupos_norm = [normalizar_texto(g) for g in DATA_CONFIG['grupos_vendedores'].keys()]
-                vendedores_individuales = sorted(list(df['nomvendedor'].dropna().unique()))
-                vendedores_en_grupos = [v for lista in DATA_CONFIG['grupos_vendedores'].values() for v in [normalizar_texto(i) for i in lista]]
-                vendedores_solos = [v for v in vendedores_individuales if v not in vendedores_en_grupos]
-                # Se devuelven los nombres originales de los grupos para el selectbox
-                return ["GERENTE"] + list(DATA_CONFIG['grupos_vendedores'].keys()) + vendedores_solos
+                # Se devuelven los nombres originales para el selectbox
+                grupos_orig = list(DATA_CONFIG['grupos_vendedores'].keys())
+                vendedores_en_grupos_norm = [normalizar_texto(v) for lista in DATA_CONFIG['grupos_vendedores'].values() for v in lista]
+                vendedores_solos_orig = sorted([v_orig for v_orig in df['nomvendedor'].unique() if normalizar_texto(v_orig) not in vendedores_en_grupos_norm])
+                return ["GERENTE"] + grupos_orig + vendedores_solos
             return ["GERENTE"] + list(DATA_CONFIG['grupos_vendedores'].keys())
 
         todos_usuarios = obtener_lista_usuarios()
@@ -420,8 +419,8 @@ def main():
         if "MOSTRADOR OPALO" not in usuarios_fijos_orig:
             usuarios_fijos_orig["MOSTRADOR OPALO"] = "opalo123"
 
-        usuarios_fijos = {normalizar_texto(k): v for k, v in usuarios_fijos_orig.items()}
-        usuarios = usuarios_fijos.copy(); codigo = 1001
+        usuarios = {normalizar_texto(k): v for k, v in usuarios_fijos_orig.items()}
+        codigo = 1001
         for u in todos_usuarios:
             u_norm = normalizar_texto(u)
             if u_norm not in usuarios: usuarios[u_norm] = str(codigo); codigo += 1
@@ -433,11 +432,13 @@ def main():
             usuario_sel_norm = normalizar_texto(usuario_seleccionado)
             if usuario_sel_norm in usuarios and clave == usuarios[usuario_sel_norm]:
                 st.session_state.autenticado = True
-                # Guardamos el nombre original para mostrarlo en el dashboard
                 st.session_state.usuario = usuario_seleccionado
                 with st.spinner('Cargando datos maestros, por favor espere...'):
                     st.session_state.df_ventas = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["ventas"], APP_CONFIG["column_names"]["ventas"])
                     st.session_state.df_cobros = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["cobros"], APP_CONFIG["column_names"]["cobros"])
+                    # << CORRECCIÓN CLAVE AÑADIDA AQUÍ >>
+                    st.session_state['APP_CONFIG'] = APP_CONFIG
+                    st.session_state['DATA_CONFIG'] = DATA_CONFIG
                 st.rerun()
             else:
                 st.sidebar.error("Usuario o contraseña incorrectos")
@@ -454,3 +455,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+estos son mis codigos necesito que los revises y corrijas y me envies el codigo corregido de cada pagina recuerda que la pagina principal es resumen mensual
