@@ -1,7 +1,3 @@
-# Pega esto al inicio de CADA archivo .py
-import streamlit as st
-st.expander("🔍 VER ESTADO DE LA SESIÓN (Herramienta de depuración)").write(st.session_state)
-# ... el resto de tu código continúa debajo ...
 import streamlit as st
 import pandas as pd
 import numpy as np
