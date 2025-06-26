@@ -1,6 +1,6 @@
 # ==============================================================================
 # SCRIPT COMPLETO Y DEFINITIVO PARA: 🏠 Resumen Mensual.py
-# VERSIÓN FINAL CON TODAS LAS CORRECCIONES
+# VERSIÓN FINAL CON CORRECCIÓN DE TypeError en render_analisis_detallado
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -41,13 +41,11 @@ st.set_page_config(page_title=APP_CONFIG["page_title"], page_icon="🏠", layout
 # 2. LÓGICA DE PROCESAMIENTO DE DATOS
 # ==============================================================================
 def normalizar_texto(texto):
-    if not isinstance(texto, str):
-        return texto
+    if not isinstance(texto, str): return texto
     try:
         texto_sin_tildes = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
         return texto_sin_tildes.upper().replace('-', ' ').strip().replace('  ', ' ')
-    except (TypeError, AttributeError):
-        return texto
+    except (TypeError, AttributeError): return texto
 
 APP_CONFIG['complementarios']['exclude_super_categoria'] = normalizar_texto(APP_CONFIG['complementarios']['exclude_super_categoria'])
 APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo'] = normalizar_texto(APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo'])
@@ -189,7 +187,8 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
         with col2:
             st.markdown("##### Ventas de Marquillas Clave")
             if not df_ventas_enfocadas.empty and 'nombre_articulo' in df_ventas_enfocadas:
-                ventas_marquillas = {p: df_ventas_enfocadas[df_ventas_enfocadas['nombre_articulo'].str.contains(p, case=False)].sum()['valor_venta'] for p in APP_CONFIG['marquillas_clave']}
+                # << CORRECCIÓN CLAVE >> Se selecciona la columna 'valor_venta' ANTES de sumar.
+                ventas_marquillas = {p: df_ventas_enfocadas[df_ventas_enfocadas['nombre_articulo'].str.contains(p, case=False, na=False)]['valor_venta'].sum() for p in APP_CONFIG['marquillas_clave']}
                 df_ventas_marquillas = pd.DataFrame(list(ventas_marquillas.items()), columns=['Marquilla', 'Ventas']).sort_values('Ventas', ascending=False)
                 fig = px.pie(df_ventas_marquillas, names='Marquilla', values='Ventas', title="Distribución Venta Marquillas", hole=0.4)
                 st.plotly_chart(fig, use_container_width=True)
@@ -249,13 +248,13 @@ def render_dashboard():
     df_cobros_periodo = df_cobros_historicos[(df_cobros_historicos['anio'] == anio_sel) & (df_cobros_historicos['mes'] == mes_sel_num)]
     if df_ventas_periodo.empty: st.warning("No hay datos de ventas para el periodo seleccionado."); st.stop()
     df_resumen_final = procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel_num)
-    usuario_actual = normalizar_texto(st.session_state.usuario)
-    if usuario_actual == "GERENTE":
+    usuario_actual_norm = normalizar_texto(st.session_state.usuario)
+    if usuario_actual_norm == "GERENTE":
         lista_filtro = sorted(df_resumen_final['nomvendedor'].unique())
         vendedores_sel = st.sidebar.multiselect("Filtrar Vendedores/Grupos", options=lista_filtro, default=lista_filtro)
         df_vista = df_resumen_final[df_resumen_final['nomvendedor'].isin(vendedores_sel)]
     else:
-        df_vista = df_resumen_final[df_resumen_final['nomvendedor'] == usuario_actual]
+        df_vista = df_resumen_final[df_resumen_final['nomvendedor'] == usuario_actual_norm]
     if df_vista.empty: st.warning("No hay datos para mostrar para tu selección."); st.stop()
     def asignar_estatus(row):
         if row['presupuesto'] > 0:
