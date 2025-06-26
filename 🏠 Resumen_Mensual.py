@@ -1,5 +1,6 @@
 # ==============================================================================
 # SCRIPT COMPLETO Y DEFINITIVO PARA: 🏠 Resumen Mensual.py
+# VERSIÓN FINAL CON TODAS LAS CORRECCIONES
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -15,10 +16,7 @@ import unicodedata
 APP_CONFIG = {
     "page_title": "Resumen Mensual | Tablero de Ventas",
     "url_logo": "https://raw.githubusercontent.com/DiegoMao201/Resumen-Ventas-Gerenciales/main/LOGO%20FERREINOX%20SAS%20BIC%202024.png",
-    "dropbox_paths": {
-        "ventas": "/data/ventas_detalle.csv",
-        "cobros": "/data/cobros_detalle.csv"
-    },
+    "dropbox_paths": {"ventas": "/data/ventas_detalle.csv", "cobros": "/data/cobros_detalle.csv"},
     "column_names": {
         "ventas": ['anio', 'mes', 'fecha_venta', 'codigo_vendedor', 'nomvendedor', 'cliente_id', 'nombre_cliente', 'codigo_articulo', 'nombre_articulo', 'categoria_producto', 'linea_producto', 'marca_producto', 'valor_venta', 'unidades_vendidas', 'costo_unitario', 'super_categoria'],
         "cobros": ['anio', 'mes', 'fecha_cobro', 'codigo_vendedor', 'valor_cobro']
@@ -43,11 +41,13 @@ st.set_page_config(page_title=APP_CONFIG["page_title"], page_icon="🏠", layout
 # 2. LÓGICA DE PROCESAMIENTO DE DATOS
 # ==============================================================================
 def normalizar_texto(texto):
-    if not isinstance(texto, str): return texto
+    if not isinstance(texto, str):
+        return texto
     try:
         texto_sin_tildes = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
         return texto_sin_tildes.upper().replace('-', ' ').strip().replace('  ', ' ')
-    except (TypeError, AttributeError): return texto
+    except (TypeError, AttributeError):
+        return texto
 
 APP_CONFIG['complementarios']['exclude_super_categoria'] = normalizar_texto(APP_CONFIG['complementarios']['exclude_super_categoria'])
 APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo'] = normalizar_texto(APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo'])
@@ -321,10 +321,11 @@ def main():
             if not df.empty:
                 grupos_orig = list(DATA_CONFIG['grupos_vendedores'].keys())
                 vendedores_en_grupos_norm = [normalizar_texto(v) for lista in DATA_CONFIG['grupos_vendedores'].values() for v in lista]
-                mapa_norm_a_orig = {normalizar_texto(v): v for v in df['nomvendedor'].unique()}
-                vendedores_solos_norm = [v_norm for v_norm in df['nomvendedor'].unique() if v_norm not in vendedores_en_grupos_norm]
+                vendedores_unicos_df = df['nomvendedor'].dropna().unique()
+                mapa_norm_a_orig = {normalizar_texto(v): v for v in vendedores_unicos_df}
+                vendedores_solos_norm = [v_norm for v_norm in [normalizar_texto(v) for v in vendedores_unicos_df] if v_norm not in vendedores_en_grupos_norm]
                 vendedores_solos_orig = sorted([mapa_norm_a_orig.get(v_norm) for v_norm in vendedores_solos_norm if mapa_norm_a_orig.get(v_norm)])
-                return ["GERENTE"] + grupos_orig + vendedores_solos_orig
+                return ["GERENTE"] + sorted(grupos_orig) + vendedores_solos_orig
             return ["GERENTE"] + list(DATA_CONFIG['grupos_vendedores'].keys())
         todos_usuarios = obtener_lista_usuarios()
         usuarios_fijos_orig = {"GERENTE": "1234", "MOSTRADOR PEREIRA": "2345", "MOSTRADOR ARMENIA": "3456", "MOSTRADOR MANIZALES": "4567", "MOSTRADOR LAURELES": "5678"}
