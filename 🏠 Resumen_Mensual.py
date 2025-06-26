@@ -455,5 +455,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-estos son mis codigos necesito que los revises y corrijas y me envies el codigo corregido de cada pagina recuerda que la pagina principal es resumen mensual
