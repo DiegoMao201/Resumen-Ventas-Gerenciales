@@ -355,57 +355,57 @@ def render_dashboard():
 # ==============================================================================
 # 4. LÓGICA DE AUTENTICACIÓN Y EJECUCIÓN PRINCIPAL
 # ==============================================================================
-# (Esta sección no requiere cambios)
+
 def main():
-    """Función principal que controla el flujo de la aplicación."""
-    st.sidebar.image(APP_CONFIG["url_logo"], use_container_width=True)
-    st.sidebar.header("Control de Acceso")
+    """Función principal que controla el flujo de la aplicación."""
+    st.sidebar.image(APP_CONFIG["url_logo"], use_container_width=True)
+    st.sidebar.header("Control de Acceso")
 
-    if 'autenticado' not in st.session_state: st.session_state.autenticado = False
+    if 'autenticado' not in st.session_state: st.session_state.autenticado = False
 
-    if not st.session_state.autenticado:
-        @st.cache_data
-        def obtener_lista_usuarios():
-            df = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["ventas"], APP_CONFIG["column_names"]["ventas"])
-            if not df.empty:
-                vendedores_individuales = sorted(list(df['nomvendedor'].dropna().unique()))
-                vendedores_en_grupos = [v for lista in DATA_CONFIG['grupos_vendedores'].values() for v in lista]
-                vendedores_solos = [v for v in vendedores_individuales if v not in vendedores_en_grupos]
-                return ["GERENTE"] + list(DATA_CONFIG['grupos_vendedores'].keys()) + vendedores_solos
-            return ["GERENTE"] + list(DATA_CONFIG['grupos_vendedores'].keys())
+    if not st.session_state.autenticado:
+        @st.cache_data
+        def obtener_lista_usuarios():
+            df = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["ventas"], APP_CONFIG["column_names"]["ventas"])
+            if not df.empty:
+                vendedores_individuales = sorted(list(df['nomvendedor'].dropna().unique()))
+                vendedores_en_grupos = [v for lista in DATA_CONFIG['grupos_vendedores'].values() for v in lista]
+                vendedores_solos = [v for v in vendedores_individuales if v not in vendedores_en_grupos]
+                return ["GERENTE"] + list(DATA_CONFIG['grupos_vendedores'].keys()) + vendedores_solos
+            return ["GERENTE"] + list(DATA_CONFIG['grupos_vendedores'].keys())
 
-        todos_usuarios = obtener_lista_usuarios()
-        usuarios_fijos = {"GERENTE": "1234", "MOSTRADOR PEREIRA": "2345", "MOSTRADOR ARMENIA": "3456", "MOSTRADOR MANIZALES": "4567", "MOSTRADOR LAURELES": "5678"}
-        usuarios = usuarios_fijos.copy(); codigo = 1001
-        for u in todos_usuarios:
-            if u not in usuarios: usuarios[u] = str(codigo); codigo += 1
-        
-        usuario_seleccionado = st.sidebar.selectbox("Seleccione su usuario", options=todos_usuarios)
-        clave = st.sidebar.text_input("Contraseña", type="password")
+        todos_usuarios = obtener_lista_usuarios()
+        usuarios_fijos = {"GERENTE": "1234", "MOSTRADOR PEREIRA": "2345", "MOSTRADOR ARMENIA": "3456", "MOSTRADOR MANIZALES": "4567", "MOSTRADOR LAURELES": "5678"}
+        usuarios = usuarios_fijos.copy(); codigo = 1001
+        for u in todos_usuarios:
+            if u not in usuarios: usuarios[u] = str(codigo); codigo += 1
+        
+        usuario_seleccionado = st.sidebar.selectbox("Seleccione su usuario", options=todos_usuarios)
+        clave = st.sidebar.text_input("Contraseña", type="password")
 
-        if st.sidebar.button("Ingresar"):
-            if usuario_seleccionado in usuarios and clave == usuarios[usuario_seleccionado]:
-                st.session_state.autenticado = True
-                st.session_state.usuario = usuario_seleccionado
-                with st.spinner('Cargando datos maestros, por favor espere...'):
-                    st.session_state.df_ventas = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["ventas"], APP_CONFIG["column_names"]["ventas"])
-                    st.session_state.df_cobros = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["cobros"], APP_CONFIG["column_names"]["cobros"])
-                    st.session_state.APP_CONFIG = APP_CONFIG
-                    st.session_state.DATA_CONFIG = DATA_CONFIG
-                    st.session_state.calcular_marquilla_optimizado = calcular_marquilla_optimizado
-                st.rerun()
-            else:
-                st.sidebar.error("Usuario o contraseña incorrectos")
-        
-        st.title("Plataforma de Inteligencia de Negocios"); st.image(APP_CONFIG["url_logo"], width=400)
-        st.header("Bienvenido"); st.info("Por favor, utilice el panel de la izquierda para ingresar sus credenciales de acceso.")
-    
-    else:
-        render_dashboard()
-        if st.sidebar.button("Salir"):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.rerun()
+        if st.sidebar.button("Ingresar"):
+            if usuario_seleccionado in usuarios and clave == usuarios[usuario_seleccionado]:
+                st.session_state.autenticado = True
+                st.session_state.usuario = usuario_seleccionado
+                with st.spinner('Cargando datos maestros, por favor espere...'):
+                    st.session_state.df_ventas = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["ventas"], APP_CONFIG["column_names"]["ventas"])
+                    st.session_state.df_cobros = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["cobros"], APP_CONFIG["column_names"]["cobros"])
+                    st.session_state.APP_CONFIG = APP_CONFIG
+                    st.session_state.DATA_CONFIG = DATA_CONFIG
+                    st.session_state.calcular_marquilla_optimizado = calcular_marquilla_optimizado
+                st.rerun()
+            else:
+                st.sidebar.error("Usuario o contraseña incorrectos")
+        
+        st.title("Plataforma de Inteligencia de Negocios"); st.image(APP_CONFIG["url_logo"], width=400)
+        st.header("Bienvenido"); st.info("Por favor, utilice el panel de la izquierda para ingresar sus credenciales de acceso.")
+    
+    else:
+        render_dashboard()
+        if st.sidebar.button("Salir"):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
 
 if __name__ == '__main__':
     main()
