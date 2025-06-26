@@ -3,17 +3,24 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import io
-from dateutil.relativedelta import relativedelta
-from datetime import datetime
+import unicodedata # << AÑADIDO >> Import necesario para la normalización
 
 # ==============================================================================
 # 1. CONFIGURACIÓN Y ESTADO INICIAL
 # ==============================================================================
 st.set_page_config(page_title="Acciones y Recomendaciones", page_icon="🎯", layout="wide")
 
+# << AÑADIDO >> Se incluye la misma función de normalización de la página principal
+def normalizar_texto(texto):
+    if not isinstance(texto, str):
+        return texto
+    texto_sin_tildes = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
+    return texto_sin_tildes.upper().replace('-', ' ').strip().replace('  ', ' ')
+
 def mostrar_acceso_restringido():
     st.header("🔒 Acceso Restringido")
     st.warning("Por favor, inicie sesión desde la página principal `🏠 Resumen Mensual`.")
+    st.image("https://raw.githubusercontent.com/DiegoMao201/Resumen-Ventas-Gerenciales/main/LOGO%20FERREINOX%20SAS%20BIC%202024.png", width=300)
     st.stop()
 
 if not st.session_state.get('autenticado'):
@@ -30,12 +37,13 @@ if df_ventas_historico is None or df_ventas_historico.empty or not APP_CONFIG or
 
 # ==============================================================================
 # 2. LÓGICA DE ANÁLISIS Y RECOMENDACIONES (El "Cerebro")
+# (Sin modificaciones en esta sección)
 # ==============================================================================
 
 @st.cache_data
 def preparar_datos_y_margen(df):
-    filtro_descuento = (df['nombre_articulo'].str.contains('descuento', case=False, na=False)) & \
-                       (df['nombre_articulo'].str.contains('comercial', case=False, na=False))
+    filtro_descuento = (df['nombre_articulo'].str.contains('DESCUENTO', case=False, na=False)) & \
+                       (df['nombre_articulo'].str.contains('COMERCIAL', case=False, na=False))
     df_descuentos = df[filtro_descuento]
     df_productos = df[~filtro_descuento].copy()
     if not df_productos.empty:
@@ -82,7 +90,7 @@ def analizar_segmentacion_rfm(df_productos, fecha_fin_analisis_dt):
         Monetario=('valor_venta', 'sum')
     ).reset_index()
 
-    if df_rfm.empty or len(df_rfm) < 4: return df_rfm # No se puede segmentar con muy pocos clientes
+    if df_rfm.empty or len(df_rfm) < 4: return df_rfm
 
     quintiles = df_rfm[['Recencia', 'Frecuencia', 'Monetario']].quantile([.25, .5, .75]).to_dict()
     def r_score(x, q): return 1 if x <= q['Recencia'][.25] else 2 if x <= q['Recencia'][.5] else 3 if x <= q['Recencia'][.75] else 4
@@ -139,16 +147,22 @@ st.title("🎯 Acciones y Recomendaciones Estratégicas")
 st.markdown("Planes de acción inteligentes basados en tus datos para impulsar los resultados.")
 
 # --- 1. SELECCIÓN DE VENDEDOR ---
-lista_vendedores = sorted(list(df_ventas_historico['nomvendedor'].dropna().unique()))
-vendedores_en_grupos = [v for lista in DATA_CONFIG['grupos_vendedores'].values() for v in lista]
-vendedores_solos = [v for v in lista_vendedores if v not in vendedores_en_grupos]
-opciones_analisis = list(DATA_CONFIG['grupos_vendedores'].keys()) + vendedores_solos
-usuario_actual = st.session_state.usuario
+# << CORREGIDO >> Se normalizan los nombres para hacer comparaciones consistentes.
+lista_vendedores_norm = sorted(list(df_ventas_historico['nomvendedor'].dropna().unique()))
+vendedores_en_grupos_norm = [normalizar_texto(v) for lista in DATA_CONFIG['grupos_vendedores'].values() for v in lista]
+vendedores_solos_norm = [v for v in lista_vendedores_norm if v not in vendedores_en_grupos_norm]
 
-if usuario_actual == "GERENTE":
+# Se muestran los nombres originales en el dropdown para una mejor experiencia de usuario.
+opciones_analisis = sorted(list(DATA_CONFIG['grupos_vendedores'].keys())) + sorted([v for v in df_ventas_historico['nomvendedor'].unique() if normalizar_texto(v) in vendedores_solos_norm])
+
+usuario_actual = st.session_state.usuario
+usuario_actual_norm = normalizar_texto(usuario_actual)
+
+if usuario_actual_norm == "GERENTE":
     opciones_analisis.insert(0, "Seleccione un Vendedor o Grupo")
     default_index = 0
 else:
+    # Encuentra la opción correcta para el usuario actual, manteniendo el nombre original.
     opciones_analisis = [usuario_actual] if usuario_actual in opciones_analisis else []
     default_index = 0
 
@@ -159,11 +173,17 @@ if not opciones_analisis:
 seleccion = st.selectbox("Seleccione el Vendedor o Grupo a analizar:", opciones_analisis, index=default_index, key="seller_selector")
 
 if seleccion == "Seleccione un Vendedor o Grupo":
-    st.info("Por favor, elija un vendedor para comenzar.")
+    st.info("Por favor, elija un vendedor o grupo para comenzar.")
     st.stop()
 
 # --- 2. FILTRADO INICIAL POR VENDEDOR ---
-df_vendedor_base = df_ventas_historico[df_ventas_historico['nomvendedor'].isin(DATA_CONFIG['grupos_vendedores'].get(seleccion, [seleccion]))]
+# << CORREGIDO >> Se normalizan los nombres del grupo/vendedor seleccionado antes de filtrar el DataFrame.
+seleccion_norm = normalizar_texto(seleccion)
+# Se obtiene la lista de vendedores originales del grupo y se normaliza para el filtro.
+lista_vendedores_a_filtrar = DATA_CONFIG['grupos_vendedores'].get(seleccion, [seleccion])
+lista_vendedores_a_filtrar_norm = [normalizar_texto(v) for v in lista_vendedores_a_filtrar]
+df_vendedor_base = df_ventas_historico[df_ventas_historico['nomvendedor'].isin(lista_vendedores_a_filtrar_norm)]
+
 
 if df_vendedor_base.empty:
     st.warning(f"No hay datos históricos para {seleccion}.")
@@ -171,8 +191,10 @@ if df_vendedor_base.empty:
 
 # --- 3. SELECCIÓN DE RANGO DE MESES ---
 st.markdown("---")
-df_vendedor_base.loc[:, 'periodo'] = df_vendedor_base['fecha_venta'].dt.to_period('M')
-meses_disponibles = sorted(df_vendedor_base['periodo'].unique())
+# Usamos .copy() para evitar SettingWithCopyWarning
+df_vendedor_base_copy = df_vendedor_base.copy()
+df_vendedor_base_copy['periodo'] = df_vendedor_base_copy['fecha_venta'].dt.to_period('M')
+meses_disponibles = sorted(df_vendedor_base_copy['periodo'].unique())
 mapa_meses = {f"{DATA_CONFIG['mapeo_meses'][p.month]} {p.year}": p for p in meses_disponibles}
 opciones_slider = list(mapa_meses.keys())
 
@@ -180,7 +202,7 @@ if len(opciones_slider) > 1:
     mes_inicio_str, mes_fin_str = st.select_slider("Seleccione rango de meses para el análisis:", options=opciones_slider, value=(opciones_slider[0], opciones_slider[-1]))
 elif len(opciones_slider) == 1:
     mes_inicio_str = mes_fin_str = opciones_slider[0]
-    st.text(f"Periodo de análisis: {mes_inicio_str}")
+    st.info(f"Periodo de análisis: {mes_inicio_str}") # Usamos st.info para mejor visibilidad
 else:
     st.warning("No hay periodos de venta para analizar para este vendedor.")
     st.stop()
@@ -197,7 +219,7 @@ if df_vendedor_periodo.empty:
 with st.spinner(f"Generando plan de acción para {seleccion}..."):
     df_productos, df_descuentos = preparar_datos_y_margen(df_vendedor_periodo.copy())
     analisis_rentabilidad = analizar_rentabilidad(df_productos, df_descuentos)
-    df_rfm = analizar_segmentacion_rfm(df_productos, fecha_fin)
+    df_rfm = analizar_segmentacion_rfm(df_productos, fecha_fin.to_pydatetime()) # Convertir a datetime de Python
     df_matriz_productos = analizar_matriz_productos(df_productos)
 
 # --- 5. RENDERIZADO DE LA PÁGINA ---
@@ -230,7 +252,7 @@ if not df_evo.empty:
     st.info("La brecha entre las dos líneas representa el total de descuentos comerciales otorgados cada mes.")
 
 st.subheader("Clientes con Mayor Descuento Otorgado")
-st.dataframe(analisis_rentabilidad['top_clientes_descuento'], use_container_width=True, hide_index=True)
+st.dataframe(analisis_rentabilidad['top_clientes_descuento'], use_container_width=True, hide_index=True, column_config={"valor_venta": st.column_config.NumberColumn(format="$ %d")})
 
 # Módulo de Segmentación RFM
 st.header("👥 Segmentación Estratégica de Clientes (RFM)")
@@ -258,13 +280,22 @@ with st.container(border=True):
             color_discrete_map={'⭐ Estrella': 'gold', '🐄 Vaca Lechera': 'dodgerblue', '❓ Interrogante': 'limegreen', '🐕 Perro': 'tomato'},
             title="Matriz de Rendimiento de Productos"
         )
-        # Código de anotaciones omitido por brevedad, ya funciona
         st.plotly_chart(fig_matriz, use_container_width=True)
         
         st.subheader("Explorar Datos de Productos")
-        segmentos_seleccionados = st.multiselect("Filtrar por segmento:", options=df_matriz_productos['Segmento'].unique(), default=df_matriz_productos['Segmento'].unique())
+        segmentos_seleccionados = st.multiselect("Filtrar por segmento:", options=sorted(df_matriz_productos['Segmento'].unique()), default=sorted(df_matriz_productos['Segmento'].unique()))
         df_filtrada = df_matriz_productos[df_matriz_productos['Segmento'].isin(segmentos_seleccionados)]
-        st.dataframe(df_filtrada, use_container_width=True, hide_index=True, height=350,
-                     column_config={"Volumen": st.column_config.NumberColumn(format="$ %d"), "Rentabilidad": st.column_config.ProgressColumn(format="%.1f%%", min_value=df_filtrada['Rentabilidad'].min()-1, max_value=df_filtrada['Rentabilidad'].max()+1)})
+        if not df_filtrada.empty:
+            max_rentabilidad = df_filtrada['Rentabilidad'].max()
+            min_rentabilidad = df_filtrada['Rentabilidad'].min()
+            st.dataframe(df_filtrada, use_container_width=True, hide_index=True, height=350,
+                         column_config={
+                             "Volumen": st.column_config.NumberColumn(format="$ %d"), 
+                             "Rentabilidad": st.column_config.ProgressColumn(
+                                 format="%.1f%%", 
+                                 min_value=float(min_rentabilidad-abs(min_rentabilidad*0.1)), 
+                                 max_value=float(max_rentabilidad+abs(max_rentabilidad*0.1))
+                              )
+                         })
     else:
         st.warning("No hay suficientes datos de productos para generar la matriz en este periodo.")
