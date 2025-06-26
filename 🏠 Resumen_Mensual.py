@@ -17,13 +17,20 @@ APP_CONFIG = {
         "cobros": "/data/cobros_detalle.csv"
     },
     "column_names": {
-        "ventas": ['anio', 'mes', 'fecha_venta', 'codigo_vendedor', 'nomvendedor', 'cliente_id', 'nombre_cliente', 'codigo_articulo', 'nombre_articulo','linea_producto', 'marca_producto', 'valor_venta', 'unidades_vendidas', 'costo_unitario', 'super_categoria'],
+        # << MODIFICADO >> Se añadió 'categoria_producto' según tu nueva consulta SQL
+        "ventas": ['anio', 'mes', 'fecha_venta', 'codigo_vendedor', 'nomvendedor', 'cliente_id', 'nombre_cliente', 'codigo_articulo', 'nombre_articulo', 'categoria_producto', 'linea_producto', 'marca_producto', 'valor_venta', 'unidades_vendidas', 'costo_unitario', 'super_categoria'],
         "cobros": ['anio', 'mes', 'fecha_cobro', 'codigo_vendedor', 'valor_cobro']
     },
     "kpi_goals": {
         "meta_marquilla": 2.4
     },
-    "marquillas_clave": ['VINILTEX', 'KORAZA', 'ESTUCOMASTIC', 'VINILICO']
+    "marquillas_clave": ['VINILTEX', 'KORAZA', 'ESTUCOMASTIC', 'VINILICO'],
+    # << NUEVO >> Configuración para las nuevas funcionalidades
+    "complementarios": {
+        "departamento": "ACC PARA PINTAR", # Departamento que identifica a los complementarios
+        "presupuesto_pct": 0.10 # El presupuesto es el 10% del de ventas
+    },
+    "categorias_clave_venta": ['ABRACOL', 'YALE', 'SAINT GOBAIN', 'GOYA', 'ALLEGION', 'SEGUREX']
 }
 
 DATA_CONFIG = {
@@ -83,29 +90,48 @@ def calcular_marquilla_optimizado(df_periodo):
     return df_final_marquilla.rename(columns={'puntaje_marquilla': 'promedio_marquilla'})
 
 def procesar_datos_periodo(df_ventas, df_cobros):
-    """Centraliza la lógica de negocio para procesar los datos del periodo."""
+    """<< MODIFICADO >> Centraliza la lógica de negocio, ahora incluyendo complementarios."""
     resumen_ventas = df_ventas.groupby(['codigo_vendedor', 'nomvendedor']).agg(
         ventas_totales=('valor_venta', 'sum'), impactos=('cliente_id', 'nunique')).reset_index()
+    
     resumen_cobros = df_cobros.groupby('codigo_vendedor').agg(cobros_totales=('valor_cobro', 'sum')).reset_index()
+    
+    # << NUEVO >> Cálculo de ventas de productos complementarios
+    df_ventas_comp = df_ventas[df_ventas['linea_producto'] == APP_CONFIG['complementarios']['departamento']]
+    resumen_complementarios = df_ventas_comp.groupby('codigo_vendedor').agg(
+        ventas_complementarios=('valor_venta', 'sum')).reset_index()
+    
     resumen_marquilla = calcular_marquilla_optimizado(df_ventas)
+    
     df_resumen = pd.merge(resumen_ventas, resumen_cobros, on='codigo_vendedor', how='left')
     df_resumen = pd.merge(df_resumen, resumen_marquilla, on=['codigo_vendedor', 'nomvendedor'], how='left')
+    # << NUEVO >> Se integra el resumen de complementarios
+    df_resumen = pd.merge(df_resumen, resumen_complementarios, on='codigo_vendedor', how='left')
+
     presupuestos = DATA_CONFIG['presupuestos']
     df_resumen['presupuesto'] = df_resumen['codigo_vendedor'].map(lambda x: presupuestos.get(x, {}).get('presupuesto', 0))
     df_resumen['presupuestocartera'] = df_resumen['codigo_vendedor'].map(lambda x: presupuestos.get(x, {}).get('presupuestocartera', 0))
+    # << NUEVO >> Se calcula el presupuesto de complementarios
+    df_resumen['presupuesto_complementarios'] = df_resumen['presupuesto'] * APP_CONFIG['complementarios']['presupuesto_pct']
+    
     df_resumen.fillna(0, inplace=True)
+    
     registros_agrupados = []
     for grupo, lista_vendedores in DATA_CONFIG['grupos_vendedores'].items():
         df_grupo = df_resumen[df_resumen['nomvendedor'].isin(lista_vendedores)]
         if not df_grupo.empty:
-            suma_grupo = df_grupo[['ventas_totales', 'cobros_totales', 'impactos', 'presupuesto', 'presupuestocartera']].sum().to_dict()
+            # << MODIFICADO >> Se agregan las nuevas columnas a la suma del grupo
+            cols_a_sumar = ['ventas_totales', 'cobros_totales', 'impactos', 'presupuesto', 'presupuestocartera', 'ventas_complementarios', 'presupuesto_complementarios']
+            suma_grupo = df_grupo[cols_a_sumar].sum().to_dict()
             total_impactos = df_grupo['impactos'].sum()
             promedio_marquilla_grupo = np.average(df_grupo['promedio_marquilla'], weights=df_grupo['impactos']) if total_impactos > 0 else 0.0
             registro = {'nomvendedor': grupo, 'codigo_vendedor': grupo, **suma_grupo, 'promedio_marquilla': promedio_marquilla_grupo}
             registros_agrupados.append(registro)
+            
     df_agrupado = pd.DataFrame(registros_agrupados)
     vendedores_en_grupos = [v for lista in DATA_CONFIG['grupos_vendedores'].values() for v in lista]
     df_individuales = df_resumen[~df_resumen['nomvendedor'].isin(vendedores_en_grupos)]
+    
     df_final = pd.concat([df_agrupado, df_individuales], ignore_index=True)
     return df_final
 
@@ -113,21 +139,28 @@ def procesar_datos_periodo(df_ventas, df_cobros):
 # 3. LÓGICA DE LA INTERFAZ DE USUARIO (UI)
 # ==============================================================================
 
-def generar_comentario_asesor(avance_v, avance_c, marquilla_p):
-    """Genera comentarios dinámicos basados en los KPIs."""
+def generar_comentario_asesor(avance_v, avance_c, marquilla_p, avance_comp):
+    """<< MODIFICADO >> Genera comentarios dinámicos, ahora incluyendo complementarios."""
     comentarios = []
     if avance_v >= 100: comentarios.append("📈 **Ventas:** ¡Felicitaciones! Has superado la meta de ventas.")
     elif avance_v >= 80: comentarios.append("📈 **Ventas:** ¡Estás muy cerca de la meta! Un último esfuerzo.")
     else: comentarios.append("📈 **Ventas:** Planifica tus visitas y aprovecha cada oportunidad.")
+    
     if avance_c >= 100: comentarios.append("💰 **Cartera:** Objetivo de recaudo cumplido. ¡Gestión impecable!")
     else: comentarios.append("💰 **Cartera:** Recuerda hacer seguimiento a la cartera pendiente.")
+
+    # << NUEVO >> Comentario para la meta de complementarios
+    if avance_comp >= 100: comentarios.append("⚙️ **Complementarios:** ¡Excelente! Cumpliste la meta de venta de complementarios.")
+    else: comentarios.append(f"⚙️ **Complementarios:** Tu avance es del {avance_comp:.1f}%. ¡Impulsa la venta cruzada!")
+
     if marquilla_p >= APP_CONFIG['kpi_goals']['meta_marquilla']: comentarios.append(f"🎨 **Marquilla:** Tu promedio de {marquilla_p:.2f} es excelente.")
     elif marquilla_p > 0: comentarios.append(f"🎨 **Marquilla:** Tu promedio es {marquilla_p:.2f}. Hay oportunidad de crecimiento.")
     else: comentarios.append("🎨 **Marquilla:** Aún no registras ventas en las marcas clave. ¡Son una gran oportunidad!")
+    
     return comentarios
 
 def render_analisis_detallado(df_vista, df_ventas_periodo):
-    """Renderiza la sección de análisis detallado con pestañas."""
+    """<< MODIFICADO >> Renderiza la sección de análisis detallado con la nueva pestaña."""
     st.markdown("---")
     st.header("🔬 Análisis Detallado del Periodo")
 
@@ -145,7 +178,8 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
         df_ventas_enfocadas = df_ventas_periodo[df_ventas_periodo['nomvendedor'].isin(nombres_a_filtrar)]
         df_ranking = df_vista[df_vista['nomvendedor'] == enfoque_sel]
     
-    tab1, tab2, tab3 = st.tabs(["📊 Análisis de Portafolio", "🏆 Ranking de Rendimiento", "⭐ Clientes Clave"])
+    # << MODIFICADO >> Se añade la nueva pestaña "Ventas por Categoría"
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 Análisis de Portafolio", "🏆 Ranking de Rendimiento", "⭐ Clientes Clave", "⚙️ Ventas por Categoría"])
 
     with tab1:
         st.subheader("Análisis de Marcas y Categorías Estratégicas")
@@ -186,8 +220,43 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
             st.dataframe(top_clientes, column_config={"nombre_cliente": "Cliente", "valor_venta": st.column_config.NumberColumn("Total Compra", format="$ %d")}, use_container_width=True, hide_index=True)
         else: st.info("No hay datos de clientes para este periodo.")
 
+    # << NUEVO >> Contenido de la nueva pestaña de Ventas por Categoría
+    with tab4:
+        st.subheader(f"Desempeño en Categorías Clave para: {enfoque_sel}")
+        
+        categorias_objetivo = APP_CONFIG['categorias_clave_venta']
+        df_ventas_cat = df_ventas_enfocadas[df_ventas_enfocadas['categoria_producto'].isin(categorias_objetivo)]
+        
+        if df_ventas_cat.empty:
+            st.info("No se encontraron ventas en las categorías clave (ABRACOL, YALE, etc.) para la selección actual.")
+        else:
+            col1, col2 = st.columns([0.5, 0.5])
+            
+            with col1:
+                st.markdown("##### Ventas por Categoría")
+                resumen_cat = df_ventas_cat.groupby('categoria_producto').agg(Ventas=('valor_venta', 'sum')).reset_index()
+                total_ventas_enfocadas = df_ventas_enfocadas['valor_venta'].sum()
+                resumen_cat['Participacion (%)'] = (resumen_cat['Ventas'] / total_ventas_enfocadas) * 100
+                resumen_cat = resumen_cat.sort_values('Ventas', ascending=False)
+                
+                st.dataframe(resumen_cat,
+                             column_config={
+                                 "categoria_producto": "Categoría",
+                                 "Ventas": st.column_config.NumberColumn("Total Venta", format="$ %d"),
+                                 "Participacion (%)": st.column_config.ProgressColumn("Part. sobre Venta Total", format="%.2f%%", min_value=0, max_value=resumen_cat['Participacion (%)'].max())
+                             },
+                             use_container_width=True, hide_index=True)
+
+            with col2:
+                st.markdown("##### Distribución de Ventas")
+                fig = px.pie(resumen_cat, names='categoria_producto', values='Ventas', 
+                             title="Distribución entre Categorías Clave", hole=0.4)
+                fig.update_traces(textinfo='percent+label', textposition='inside')
+                st.plotly_chart(fig, use_container_width=True)
+
+
 def render_dashboard():
-    """Función principal que orquesta la renderización del dashboard."""
+    """<< MODIFICADO >> Función principal que orquesta la renderización, ahora con 4 métricas."""
     st.sidebar.markdown("---"); st.sidebar.header("Filtros de Periodo")
     df_ventas = st.session_state.df_ventas; df_cobros = st.session_state.df_cobros
     
@@ -230,86 +299,113 @@ def render_dashboard():
     with st.container(border=True):
         ventas_total = df_vista['ventas_totales'].sum(); meta_ventas = df_vista['presupuesto'].sum()
         cobros_total = df_vista['cobros_totales'].sum(); meta_cobros = df_vista['presupuestocartera'].sum()
+        # << NUEVO >> Cálculo de totales para la nueva métrica
+        comp_total = df_vista['ventas_complementarios'].sum(); meta_comp = df_vista['presupuesto_complementarios'].sum()
+
         avance_ventas = (ventas_total / meta_ventas * 100) if meta_ventas > 0 else 0
         avance_cobros = (cobros_total / meta_cobros * 100) if meta_cobros > 0 else 0
+        # << NUEVO >> Cálculo de avance para la nueva métrica
+        avance_comp = (comp_total / meta_comp * 100) if meta_comp > 0 else 0
+
         total_impactos = df_vista['impactos'].sum()
         marquilla_prom = np.average(df_vista['promedio_marquilla'], weights=df_vista['impactos']) if total_impactos > 0 else 0.0
+        
         st.subheader(f"👨‍💼 Asesor Virtual para: {st.session_state.usuario}")
-        comentarios = generar_comentario_asesor(avance_ventas, avance_cobros, marquilla_prom)
+        # << MODIFICADO >> Se pasa el nuevo avance al generador de comentarios
+        comentarios = generar_comentario_asesor(avance_ventas, avance_cobros, marquilla_prom, avance_comp)
         for comentario in comentarios: st.markdown(f"- {comentario}")
 
     st.subheader("Métricas Clave del Periodo")
-    col1, col2, col3 = st.columns(3); meta_marquilla = APP_CONFIG['kpi_goals']['meta_marquilla']
+    # << MODIFICADO >> Se cambia a 4 columnas para la nueva métrica
+    col1, col2, col3, col4 = st.columns(4)
+    meta_marquilla = APP_CONFIG['kpi_goals']['meta_marquilla']
+    
     col1.metric("Ventas Totales", f"${ventas_total:,.0f}", f"{ventas_total - meta_ventas:,.0f} vs Meta")
     col1.progress(min(avance_ventas / 100, 1.0), text=f"Avance Ventas: {avance_ventas:.1f}%")
+    
     col2.metric("Recaudo de Cartera", f"${cobros_total:,.0f}", f"{cobros_total - meta_cobros:,.0f} vs Meta")
     col2.progress(min(avance_cobros / 100, 1.0), text=f"Avance Cartera: {avance_cobros:.1f}%")
-    col3.metric("Promedio Marquilla", f"{marquilla_prom:.2f}", f"{marquilla_prom - meta_marquilla:.2f} vs Meta")
-    col3.progress(min((marquilla_prom / meta_marquilla), 1.0) if marquilla_prom > 0 else 0, text=f"Meta: {meta_marquilla}")
+
+    # << NUEVO >> Se añade la métrica de Complementarios en la nueva columna
+    col3.metric("Venta Complementarios", f"${comp_total:,.0f}", f"{comp_total - meta_comp:,.0f} vs Meta")
+    col3.progress(min(avance_comp / 100, 1.0), text=f"Avance: {avance_comp:.1f}%")
+    
+    col4.metric("Promedio Marquilla", f"{marquilla_prom:.2f}", f"{marquilla_prom - meta_marquilla:.2f} vs Meta")
+    col4.progress(min((marquilla_prom / meta_marquilla), 1.0) if marquilla_prom > 0 else 0, text=f"Meta: {meta_marquilla}")
 
     st.subheader("Desglose por Vendedor / Grupo")
-    st.dataframe(df_vista[['Estatus', 'nomvendedor', 'ventas_totales', 'presupuesto', 'cobros_totales', 'presupuestocartera', 'impactos', 'promedio_marquilla']],
-        column_config={"Estatus": st.column_config.TextColumn("🚦", width="small"), "nomvendedor": "Vendedor/Grupo", "ventas_totales": st.column_config.NumberColumn("Ventas", format="$ %d"), "presupuesto": st.column_config.NumberColumn("Meta Ventas", format="$ %d"), "cobros_totales": st.column_config.NumberColumn("Recaudo", format="$ %d"), "presupuestocartera": st.column_config.NumberColumn("Meta Recaudo", format="$ %d"), "impactos": st.column_config.NumberColumn("Clientes Únicos", format="%d"), "promedio_marquilla": st.column_config.ProgressColumn("Promedio Marquilla", format="%.2f", min_value=0, max_value=len(APP_CONFIG['marquillas_clave']))},
+    # << MODIFICADO >> Se añaden las nuevas columnas al dataframe de desglose
+    cols_desglose = ['Estatus', 'nomvendedor', 'ventas_totales', 'presupuesto', 'ventas_complementarios', 'presupuesto_complementarios', 'cobros_totales', 'presupuestocartera', 'impactos', 'promedio_marquilla']
+    st.dataframe(df_vista[cols_desglose],
+        column_config={
+            "Estatus": st.column_config.TextColumn("🚦", width="small"), "nomvendedor": "Vendedor/Grupo",
+            "ventas_totales": st.column_config.NumberColumn("Ventas", format="$ %d"), 
+            "presupuesto": st.column_config.NumberColumn("Meta Ventas", format="$ %d"),
+            "ventas_complementarios": st.column_config.NumberColumn("Venta Comp.", format="$ %d"),
+            "presupuesto_complementarios": st.column_config.NumberColumn("Meta Comp.", format="$ %d"),
+            "cobros_totales": st.column_config.NumberColumn("Recaudo", format="$ %d"),
+            "presupuestocartera": st.column_config.NumberColumn("Meta Recaudo", format="$ %d"),
+            "impactos": st.column_config.NumberColumn("Clientes Únicos", format="%d"),
+            "promedio_marquilla": st.column_config.ProgressColumn("Prom. Marquilla", format="%.2f", min_value=0, max_value=len(APP_CONFIG['marquillas_clave']))
+        },
         use_container_width=True, hide_index=True)
 
-    # --- SECCIÓN DE ANÁLISIS DETALLADO RESTAURADA ---
     render_analisis_detallado(df_vista, df_ventas_periodo)
-
 
 # ==============================================================================
 # 4. LÓGICA DE AUTENTICACIÓN Y EJECUCIÓN PRINCIPAL
 # ==============================================================================
-
+# (Esta sección no requiere cambios)
 def main():
-    """Función principal que controla el flujo de la aplicación."""
-    st.sidebar.image(APP_CONFIG["url_logo"], use_container_width=True)
-    st.sidebar.header("Control de Acceso")
+    """Función principal que controla el flujo de la aplicación."""
+    st.sidebar.image(APP_CONFIG["url_logo"], use_container_width=True)
+    st.sidebar.header("Control de Acceso")
 
-    if 'autenticado' not in st.session_state: st.session_state.autenticado = False
+    if 'autenticado' not in st.session_state: st.session_state.autenticado = False
 
-    if not st.session_state.autenticado:
-        @st.cache_data
-        def obtener_lista_usuarios():
-            df = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["ventas"], APP_CONFIG["column_names"]["ventas"])
-            if not df.empty:
-                vendedores_individuales = sorted(list(df['nomvendedor'].dropna().unique()))
-                vendedores_en_grupos = [v for lista in DATA_CONFIG['grupos_vendedores'].values() for v in lista]
-                vendedores_solos = [v for v in vendedores_individuales if v not in vendedores_en_grupos]
-                return ["GERENTE"] + list(DATA_CONFIG['grupos_vendedores'].keys()) + vendedores_solos
-            return ["GERENTE"] + list(DATA_CONFIG['grupos_vendedores'].keys())
+    if not st.session_state.autenticado:
+        @st.cache_data
+        def obtener_lista_usuarios():
+            df = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["ventas"], APP_CONFIG["column_names"]["ventas"])
+            if not df.empty:
+                vendedores_individuales = sorted(list(df['nomvendedor'].dropna().unique()))
+                vendedores_en_grupos = [v for lista in DATA_CONFIG['grupos_vendedores'].values() for v in lista]
+                vendedores_solos = [v for v in vendedores_individuales if v not in vendedores_en_grupos]
+                return ["GERENTE"] + list(DATA_CONFIG['grupos_vendedores'].keys()) + vendedores_solos
+            return ["GERENTE"] + list(DATA_CONFIG['grupos_vendedores'].keys())
 
-        todos_usuarios = obtener_lista_usuarios()
-        usuarios_fijos = {"GERENTE": "1234", "MOSTRADOR PEREIRA": "2345", "MOSTRADOR ARMENIA": "3456", "MOSTRADOR MANIZALES": "4567", "MOSTRADOR LAURELES": "5678"}
-        usuarios = usuarios_fijos.copy(); codigo = 1001
-        for u in todos_usuarios:
-            if u not in usuarios: usuarios[u] = str(codigo); codigo += 1
-        
-        usuario_seleccionado = st.sidebar.selectbox("Seleccione su usuario", options=todos_usuarios)
-        clave = st.sidebar.text_input("Contraseña", type="password")
+        todos_usuarios = obtener_lista_usuarios()
+        usuarios_fijos = {"GERENTE": "1234", "MOSTRADOR PEREIRA": "2345", "MOSTRADOR ARMENIA": "3456", "MOSTRADOR MANIZALES": "4567", "MOSTRADOR LAURELES": "5678"}
+        usuarios = usuarios_fijos.copy(); codigo = 1001
+        for u in todos_usuarios:
+            if u not in usuarios: usuarios[u] = str(codigo); codigo += 1
+        
+        usuario_seleccionado = st.sidebar.selectbox("Seleccione su usuario", options=todos_usuarios)
+        clave = st.sidebar.text_input("Contraseña", type="password")
 
-        if st.sidebar.button("Ingresar"):
-            if usuario_seleccionado in usuarios and clave == usuarios[usuario_seleccionado]:
-                st.session_state.autenticado = True
-                st.session_state.usuario = usuario_seleccionado
-                with st.spinner('Cargando datos maestros, por favor espere...'):
-                    st.session_state.df_ventas = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["ventas"], APP_CONFIG["column_names"]["ventas"])
-                    st.session_state.df_cobros = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["cobros"], APP_CONFIG["column_names"]["cobros"])
-                    st.session_state.APP_CONFIG = APP_CONFIG
-                    st.session_state.DATA_CONFIG = DATA_CONFIG
-                    st.session_state.calcular_marquilla_optimizado = calcular_marquilla_optimizado
-                st.rerun()
-            else:
-                st.sidebar.error("Usuario o contraseña incorrectos")
-        
-        st.title("Plataforma de Inteligencia de Negocios"); st.image(APP_CONFIG["url_logo"], width=400)
-        st.header("Bienvenido"); st.info("Por favor, utilice el panel de la izquierda para ingresar sus credenciales de acceso.")
-    
-    else:
-        render_dashboard()
-        if st.sidebar.button("Salir"):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.rerun()
+        if st.sidebar.button("Ingresar"):
+            if usuario_seleccionado in usuarios and clave == usuarios[usuario_seleccionado]:
+                st.session_state.autenticado = True
+                st.session_state.usuario = usuario_seleccionado
+                with st.spinner('Cargando datos maestros, por favor espere...'):
+                    st.session_state.df_ventas = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["ventas"], APP_CONFIG["column_names"]["ventas"])
+                    st.session_state.df_cobros = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["cobros"], APP_CONFIG["column_names"]["cobros"])
+                    st.session_state.APP_CONFIG = APP_CONFIG
+                    st.session_state.DATA_CONFIG = DATA_CONFIG
+                    st.session_state.calcular_marquilla_optimizado = calcular_marquilla_optimizado
+                st.rerun()
+            else:
+                st.sidebar.error("Usuario o contraseña incorrectos")
+        
+        st.title("Plataforma de Inteligencia de Negocios"); st.image(APP_CONFIG["url_logo"], width=400)
+        st.header("Bienvenido"); st.info("Por favor, utilice el panel de la izquierda para ingresar sus credenciales de acceso.")
+    
+    else:
+        render_dashboard()
+        if st.sidebar.button("Salir"):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
 
 if __name__ == '__main__':
     main()
