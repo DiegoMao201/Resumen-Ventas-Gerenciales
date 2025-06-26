@@ -4,6 +4,7 @@ import numpy as np
 import plotly.express as px
 import dropbox
 import io
+import unicodedata # << NUEVO >> Librería para manejar tildes y caracteres especiales
 
 # ==============================================================================
 # 1. CONFIGURACIÓN CENTRALIZADA
@@ -28,10 +29,9 @@ APP_CONFIG = {
         "exclude_super_categoria": "Pintuco",
         "presupuesto_pct": 0.10
     },
-    # << MODIFICADO >> El porcentaje de la sub-meta ahora es del 10%
     "sub_meta_complementarios": {
         "nombre_marca_objetivo": "non-AN Third Party",
-        "presupuesto_pct": 0.10 # <-- ¡CAMBIO REALIZADO AQUÍ!
+        "presupuesto_pct": 0.10
     },
     "categorias_clave_venta": ['ABRACOL', 'YALE', 'SAINT GOBAIN', 'GOYA', 'ALLEGION', 'SEGUREX']
 }
@@ -54,9 +54,25 @@ st.set_page_config(
 # 2. LÓGICA DE PROCESAMIENTO DE DATOS
 # ==============================================================================
 
+# << NUEVO >> Función robusta para normalizar (limpiar) texto.
+def normalizar_texto(texto):
+    """Convierte texto a un formato estándar: sin tildes, mayúsculas, sin espacios extra ni guiones."""
+    if not isinstance(texto, str):
+        return texto
+    # Quitar tildes (ej: á -> a)
+    texto_sin_tildes = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
+    # Convertir a mayúsculas, reemplazar guiones, y quitar espacios extra
+    return texto_sin_tildes.upper().replace('-', ' ').strip().replace('  ', ' ')
+
+# << MODIFICADO >> Se normalizan los valores de la configuración para que coincidan con los datos limpios.
+APP_CONFIG['complementarios']['exclude_super_categoria'] = normalizar_texto(APP_CONFIG['complementarios']['exclude_super_categoria'])
+APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo'] = normalizar_texto(APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo'])
+APP_CONFIG['categorias_clave_venta'] = [normalizar_texto(cat) for cat in APP_CONFIG['categorias_clave_venta']]
+
+
 @st.cache_data(ttl=1800)
 def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
-    # (Sin cambios en esta función)
+    """<< MODIFICADO >> Descarga, limpia y AHORA NORMALIZA los datos desde Dropbox."""
     try:
         with dropbox.Dropbox(app_key=st.secrets.dropbox.app_key, app_secret=st.secrets.dropbox.app_secret, oauth2_refresh_token=st.secrets.dropbox.refresh_token) as dbx:
             _, res = dbx.files_download(path=ruta_archivo)
@@ -74,6 +90,13 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
             df = df.astype({'anio': int, 'mes': int, 'codigo_vendedor': str})
             if 'fecha_venta' in df.columns: df['fecha_venta'] = pd.to_datetime(df['fecha_venta'], errors='coerce')
             if 'marca_producto' in df.columns: df['nombre_marca'] = df['marca_producto'].map(DATA_CONFIG["mapeo_marcas"]).fillna('No Especificada')
+            
+            # << NUEVO >> Se aplica la normalización a las columnas de texto clave.
+            cols_a_normalizar = ['super_categoria', 'categoria_producto', 'nombre_marca']
+            for col in cols_a_normalizar:
+                if col in df.columns:
+                    df[col] = df[col].apply(normalizar_texto)
+            
             return df
     except Exception as e:
         st.error(f"Error crítico al cargar {ruta_archivo}: {e}")
@@ -93,7 +116,7 @@ def calcular_marquilla_optimizado(df_periodo):
     return df_final_marquilla.rename(columns={'puntaje_marquilla': 'promedio_marquilla'})
 
 def procesar_datos_periodo(df_ventas, df_cobros):
-    # (Sin cambios en esta función)
+    # (Sin cambios en esta función, ya que la limpieza se hace antes, heredará los datos correctos)
     resumen_ventas = df_ventas.groupby(['codigo_vendedor', 'nomvendedor']).agg(
         ventas_totales=('valor_venta', 'sum'), impactos=('cliente_id', 'nunique')).reset_index()
     
@@ -145,9 +168,9 @@ def procesar_datos_periodo(df_ventas, df_cobros):
 # ==============================================================================
 # 3. LÓGICA DE LA INTERFAZ DE USUARIO (UI)
 # ==============================================================================
+# El resto del código no necesita cambios, ya que heredará los datos limpios.
 
 def generar_comentario_asesor(avance_v, avance_c, marquilla_p, avance_comp, avance_sub_meta):
-    # (Sin cambios en esta función)
     comentarios = []
     if avance_v >= 100: comentarios.append("📈 **Ventas:** ¡Felicitaciones! Has superado la meta de ventas.")
     elif avance_v >= 80: comentarios.append("📈 **Ventas:** ¡Estás muy cerca de la meta! Un último esfuerzo.")
@@ -170,7 +193,6 @@ def generar_comentario_asesor(avance_v, avance_c, marquilla_p, avance_comp, avan
     return comentarios
 
 def render_analisis_detallado(df_vista, df_ventas_periodo):
-    # (Sin cambios en esta función)
     st.markdown("---")
     st.header("🔬 Análisis Detallado del Periodo")
 
@@ -263,7 +285,6 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
                 st.plotly_chart(fig, use_container_width=True)
 
 def render_dashboard():
-    # (Sin cambios en esta función)
     st.sidebar.markdown("---"); st.sidebar.header("Filtros de Periodo")
     df_ventas = st.session_state.df_ventas; df_cobros = st.session_state.df_cobros
     
@@ -323,7 +344,6 @@ def render_dashboard():
 
     st.subheader("Métricas Clave del Periodo")
     
-    # Fila 1: Métricas Principales
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric("Ventas Totales", f"${ventas_total:,.0f}", f"{ventas_total - meta_ventas:,.0f} vs Meta")
@@ -337,9 +357,8 @@ def render_dashboard():
         st.metric("Venta Complementarios", f"${comp_total:,.0f}", f"{comp_total - meta_comp:,.0f} vs Meta")
         st.progress(min(avance_comp / 100, 1.0), text=f"Avance: {avance_comp:.1f}%")
 
-    st.markdown("---") # Separador visual
+    st.markdown("---") 
 
-    # Fila 2: Métricas Específicas
     col4, col5 = st.columns(2)
     with col4:
         sub_meta_label = APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo']
@@ -378,7 +397,6 @@ def render_dashboard():
 # ==============================================================================
 # 4. LÓGICA DE AUTENTICACIÓN Y EJECUCIÓN PRINCIPAL
 # ==============================================================================
-# (Esta sección no requiere cambios)
 def main():
     """Función principal que controla el flujo de la aplicación."""
     st.sidebar.image(APP_CONFIG["url_logo"], use_container_width=True)
