@@ -17,20 +17,25 @@ APP_CONFIG = {
         "cobros": "/data/cobros_detalle.csv"
     },
     "column_names": {
-        # << MODIFICADO >> Se añadió 'categoria_producto' según tu nueva consulta SQL
-        "ventas": ['anio', 'mes', 'fecha_venta', 'codigo_vendedor', 'nomvendedor', 'cliente_id', 'nombre_cliente', 'codigo_articulo', 'nombre_articulo', 'categoria_producto', 'linea_producto', 'marca_producto', 'valor_venta', 'unidades_vendidas', 'costo_unitario', 'super_categoria'],
+        "ventas": ['anio', 'mes', 'fecha_venta', 'codigo_vendedor', 'nomvendedor', 'cliente_id', 'nombre_cliente', 'codigo_articulo', 'nombre_articulo', 'categoria_producto', 'linea_producto', 'departamento', 'marca_producto', 'valor_venta', 'unidades_vendidas', 'costo_unitario', 'super_categoria'],
         "cobros": ['anio', 'mes', 'fecha_cobro', 'codigo_vendedor', 'valor_cobro']
     },
     "kpi_goals": {
         "meta_marquilla": 2.4
     },
     "marquillas_clave": ['VINILTEX', 'KORAZA', 'ESTUCOMASTIC', 'VINILICO'],
-    # << NUEVO >> Configuración para las nuevas funcionalidades
+    # << RE-DEFINIDO >> La lógica de complementarios ahora se basa en la super_categoria
     "complementarios": {
-        "departamento": "ACC PARA PINTAR", # Departamento que identifica a los complementarios
-        "presupuesto_pct": 0.10 # El presupuesto es el 10% del de ventas
+        "exclude_super_categoria": "Pintuco", # Se excluye esta super categoría para definir complementarios
+        "presupuesto_pct": 0.10 # El presupuesto sigue siendo el 10% del de ventas
     },
-    "categorias_clave_venta": ['ABRACOL', 'YALE', 'SAINT GOBAIN', 'GOYA', 'ALLEGION', 'SEGUREX']
+    # << NUEVO >> Configuración para la nueva sub-meta específica
+    "sub_meta_complementarios": {
+        "categoria_producto": "non-AN Third Party",
+        "presupuesto_pct": 0.025 # El 2.5% del presupuesto de COMPLEMENTARIOS
+    },
+    # << MODIFICADO >> Se añade 'non-AN Third Party' para asegurar que se analiza en la pestaña
+    "categorias_clave_venta": ['ABRACOL', 'YALE', 'SAINT GOBAIN', 'GOYA', 'ALLEGION', 'SEGUREX', 'non-AN Third Party']
 }
 
 DATA_CONFIG = {
@@ -53,7 +58,7 @@ st.set_page_config(
 
 @st.cache_data(ttl=1800)
 def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
-    """Descarga y limpia datos desde Dropbox."""
+    # (Sin cambios en esta función)
     try:
         with dropbox.Dropbox(app_key=st.secrets.dropbox.app_key, app_secret=st.secrets.dropbox.app_secret, oauth2_refresh_token=st.secrets.dropbox.refresh_token) as dbx:
             _, res = dbx.files_download(path=ruta_archivo)
@@ -77,7 +82,7 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
         return pd.DataFrame(columns=nombres_columnas)
 
 def calcular_marquilla_optimizado(df_periodo):
-    """Calcula el promedio de marquilla de forma eficiente."""
+    # (Sin cambios en esta función)
     if df_periodo.empty or 'nombre_articulo' not in df_periodo.columns:
         return pd.DataFrame(columns=['codigo_vendedor', 'nomvendedor', 'promedio_marquilla'])
     df_temp = df_periodo[['codigo_vendedor', 'nomvendedor', 'cliente_id', 'nombre_articulo']].copy()
@@ -90,29 +95,36 @@ def calcular_marquilla_optimizado(df_periodo):
     return df_final_marquilla.rename(columns={'puntaje_marquilla': 'promedio_marquilla'})
 
 def procesar_datos_periodo(df_ventas, df_cobros):
-    """<< MODIFICADO >> Centraliza la lógica de negocio, ahora incluyendo complementarios."""
+    """<< RE-ESTRUCTURADO >> Lógica de negocio con nueva definición de complementarios y sub-meta."""
     resumen_ventas = df_ventas.groupby(['codigo_vendedor', 'nomvendedor']).agg(
         ventas_totales=('valor_venta', 'sum'), impactos=('cliente_id', 'nunique')).reset_index()
     
     resumen_cobros = df_cobros.groupby('codigo_vendedor').agg(cobros_totales=('valor_cobro', 'sum')).reset_index()
     
-    # << NUEVO >> Cálculo de ventas de productos complementarios
-    df_ventas_comp = df_ventas[df_ventas['linea_producto'] == APP_CONFIG['complementarios']['departamento']]
+    # << RE-DEFINIDO >> Cálculo de ventas de complementarios: todo lo que NO es 'Pintuco'
+    df_ventas_comp = df_ventas[df_ventas['super_categoria'] != APP_CONFIG['complementarios']['exclude_super_categoria']]
     resumen_complementarios = df_ventas_comp.groupby('codigo_vendedor').agg(
         ventas_complementarios=('valor_venta', 'sum')).reset_index()
-    
+
+    # << NUEVO >> Cálculo de ventas para la sub-meta específica ('non-AN Third Party')
+    cat_sub_meta = APP_CONFIG['sub_meta_complementarios']['categoria_producto']
+    df_ventas_sub_meta = df_ventas[df_ventas['categoria_producto'] == cat_sub_meta]
+    resumen_sub_meta = df_ventas_sub_meta.groupby('codigo_vendedor').agg(
+        ventas_sub_meta=('valor_venta', 'sum')).reset_index()
+
     resumen_marquilla = calcular_marquilla_optimizado(df_ventas)
     
     df_resumen = pd.merge(resumen_ventas, resumen_cobros, on='codigo_vendedor', how='left')
     df_resumen = pd.merge(df_resumen, resumen_marquilla, on=['codigo_vendedor', 'nomvendedor'], how='left')
-    # << NUEVO >> Se integra el resumen de complementarios
     df_resumen = pd.merge(df_resumen, resumen_complementarios, on='codigo_vendedor', how='left')
+    df_resumen = pd.merge(df_resumen, resumen_sub_meta, on='codigo_vendedor', how='left') # << NUEVO >> Se integra el resumen de la sub-meta
 
     presupuestos = DATA_CONFIG['presupuestos']
     df_resumen['presupuesto'] = df_resumen['codigo_vendedor'].map(lambda x: presupuestos.get(x, {}).get('presupuesto', 0))
     df_resumen['presupuestocartera'] = df_resumen['codigo_vendedor'].map(lambda x: presupuestos.get(x, {}).get('presupuestocartera', 0))
-    # << NUEVO >> Se calcula el presupuesto de complementarios
     df_resumen['presupuesto_complementarios'] = df_resumen['presupuesto'] * APP_CONFIG['complementarios']['presupuesto_pct']
+    # << NUEVO >> Se calcula el presupuesto de la sub-meta (un % del presupuesto de complementarios)
+    df_resumen['presupuesto_sub_meta'] = df_resumen['presupuesto_complementarios'] * APP_CONFIG['sub_meta_complementarios']['presupuesto_pct']
     
     df_resumen.fillna(0, inplace=True)
     
@@ -120,8 +132,9 @@ def procesar_datos_periodo(df_ventas, df_cobros):
     for grupo, lista_vendedores in DATA_CONFIG['grupos_vendedores'].items():
         df_grupo = df_resumen[df_resumen['nomvendedor'].isin(lista_vendedores)]
         if not df_grupo.empty:
-            # << MODIFICADO >> Se agregan las nuevas columnas a la suma del grupo
-            cols_a_sumar = ['ventas_totales', 'cobros_totales', 'impactos', 'presupuesto', 'presupuestocartera', 'ventas_complementarios', 'presupuesto_complementarios']
+            # << MODIFICADO >> Se agregan las nuevas columnas de la sub-meta a la suma del grupo
+            cols_a_sumar = ['ventas_totales', 'cobros_totales', 'impactos', 'presupuesto', 'presupuestocartera', 
+                            'ventas_complementarios', 'presupuesto_complementarios', 'ventas_sub_meta', 'presupuesto_sub_meta']
             suma_grupo = df_grupo[cols_a_sumar].sum().to_dict()
             total_impactos = df_grupo['impactos'].sum()
             promedio_marquilla_grupo = np.average(df_grupo['promedio_marquilla'], weights=df_grupo['impactos']) if total_impactos > 0 else 0.0
@@ -139,8 +152,8 @@ def procesar_datos_periodo(df_ventas, df_cobros):
 # 3. LÓGICA DE LA INTERFAZ DE USUARIO (UI)
 # ==============================================================================
 
-def generar_comentario_asesor(avance_v, avance_c, marquilla_p, avance_comp):
-    """<< MODIFICADO >> Genera comentarios dinámicos, ahora incluyendo complementarios."""
+def generar_comentario_asesor(avance_v, avance_c, marquilla_p, avance_comp, avance_sub_meta):
+    """<< MODIFICADO >> Asesor virtual ahora incluye la nueva sub-meta."""
     comentarios = []
     if avance_v >= 100: comentarios.append("📈 **Ventas:** ¡Felicitaciones! Has superado la meta de ventas.")
     elif avance_v >= 80: comentarios.append("📈 **Ventas:** ¡Estás muy cerca de la meta! Un último esfuerzo.")
@@ -149,18 +162,21 @@ def generar_comentario_asesor(avance_v, avance_c, marquilla_p, avance_comp):
     if avance_c >= 100: comentarios.append("💰 **Cartera:** Objetivo de recaudo cumplido. ¡Gestión impecable!")
     else: comentarios.append("💰 **Cartera:** Recuerda hacer seguimiento a la cartera pendiente.")
 
-    # << NUEVO >> Comentario para la meta de complementarios
     if avance_comp >= 100: comentarios.append("⚙️ **Complementarios:** ¡Excelente! Cumpliste la meta de venta de complementarios.")
     else: comentarios.append(f"⚙️ **Complementarios:** Tu avance es del {avance_comp:.1f}%. ¡Impulsa la venta cruzada!")
 
+    # << NUEVO >> Comentario para la sub-meta específica
+    if avance_sub_meta >= 100: comentarios.append(f"🎯 **Meta Específica:** ¡Logrado! Superaste la meta de venta de '{APP_CONFIG['sub_meta_complementarios']['categoria_producto']}'.")
+    else: comentarios.append(f"🎯 **Meta Específica:** Tu avance en '{APP_CONFIG['sub_meta_complementarios']['categoria_producto']}' es del {avance_sub_meta:.1f}%. ¡Hay una gran oportunidad ahí!")
+
     if marquilla_p >= APP_CONFIG['kpi_goals']['meta_marquilla']: comentarios.append(f"🎨 **Marquilla:** Tu promedio de {marquilla_p:.2f} es excelente.")
     elif marquilla_p > 0: comentarios.append(f"🎨 **Marquilla:** Tu promedio es {marquilla_p:.2f}. Hay oportunidad de crecimiento.")
-    else: comentarios.append("🎨 **Marquilla:** Aún no registras ventas en las marcas clave. ¡Son una gran oportunidad!")
+    else: comentarios.append("🎨 **Marquilla:** Aún no registras ventas en las marcas clave.")
     
     return comentarios
 
 def render_analisis_detallado(df_vista, df_ventas_periodo):
-    """<< MODIFICADO >> Renderiza la sección de análisis detallado con la nueva pestaña."""
+    # (Sin cambios en esta función)
     st.markdown("---")
     st.header("🔬 Análisis Detallado del Periodo")
 
@@ -178,7 +194,6 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
         df_ventas_enfocadas = df_ventas_periodo[df_ventas_periodo['nomvendedor'].isin(nombres_a_filtrar)]
         df_ranking = df_vista[df_vista['nomvendedor'] == enfoque_sel]
     
-    # << MODIFICADO >> Se añade la nueva pestaña "Ventas por Categoría"
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Análisis de Portafolio", "🏆 Ranking de Rendimiento", "⭐ Clientes Clave", "⚙️ Ventas por Categoría"])
 
     with tab1:
@@ -220,15 +235,14 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
             st.dataframe(top_clientes, column_config={"nombre_cliente": "Cliente", "valor_venta": st.column_config.NumberColumn("Total Compra", format="$ %d")}, use_container_width=True, hide_index=True)
         else: st.info("No hay datos de clientes para este periodo.")
 
-    # << NUEVO >> Contenido de la nueva pestaña de Ventas por Categoría
     with tab4:
         st.subheader(f"Desempeño en Categorías Clave para: {enfoque_sel}")
         
-        categorias_objetivo = APP_CONFIG['categorias_clave_venta']
+        categorias_objetivo = sorted(list(set(APP_CONFIG['categorias_clave_venta'])))
         df_ventas_cat = df_ventas_enfocadas[df_ventas_enfocadas['categoria_producto'].isin(categorias_objetivo)]
         
         if df_ventas_cat.empty:
-            st.info("No se encontraron ventas en las categorías clave (ABRACOL, YALE, etc.) para la selección actual.")
+            st.info("No se encontraron ventas en las categorías clave para la selección actual.")
         else:
             col1, col2 = st.columns([0.5, 0.5])
             
@@ -254,9 +268,8 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
                 fig.update_traces(textinfo='percent+label', textposition='inside')
                 st.plotly_chart(fig, use_container_width=True)
 
-
 def render_dashboard():
-    """<< MODIFICADO >> Función principal que orquesta la renderización, ahora con 4 métricas."""
+    """<< RE-ESTRUCTURADO >> Renderización principal con 5 métricas clave."""
     st.sidebar.markdown("---"); st.sidebar.header("Filtros de Periodo")
     df_ventas = st.session_state.df_ventas; df_cobros = st.session_state.df_cobros
     
@@ -299,25 +312,27 @@ def render_dashboard():
     with st.container(border=True):
         ventas_total = df_vista['ventas_totales'].sum(); meta_ventas = df_vista['presupuesto'].sum()
         cobros_total = df_vista['cobros_totales'].sum(); meta_cobros = df_vista['presupuestocartera'].sum()
-        # << NUEVO >> Cálculo de totales para la nueva métrica
         comp_total = df_vista['ventas_complementarios'].sum(); meta_comp = df_vista['presupuesto_complementarios'].sum()
+        # << NUEVO >> Cálculo de totales para la nueva sub-métrica
+        sub_meta_total = df_vista['ventas_sub_meta'].sum(); meta_sub_meta = df_vista['presupuesto_sub_meta'].sum()
 
         avance_ventas = (ventas_total / meta_ventas * 100) if meta_ventas > 0 else 0
         avance_cobros = (cobros_total / meta_cobros * 100) if meta_cobros > 0 else 0
-        # << NUEVO >> Cálculo de avance para la nueva métrica
         avance_comp = (comp_total / meta_comp * 100) if meta_comp > 0 else 0
+        # << NUEVO >> Cálculo de avance para la nueva sub-métrica
+        avance_sub_meta = (sub_meta_total / meta_sub_meta * 100) if meta_sub_meta > 0 else 0
 
         total_impactos = df_vista['impactos'].sum()
         marquilla_prom = np.average(df_vista['promedio_marquilla'], weights=df_vista['impactos']) if total_impactos > 0 else 0.0
         
         st.subheader(f"👨‍💼 Asesor Virtual para: {st.session_state.usuario}")
         # << MODIFICADO >> Se pasa el nuevo avance al generador de comentarios
-        comentarios = generar_comentario_asesor(avance_ventas, avance_cobros, marquilla_prom, avance_comp)
+        comentarios = generar_comentario_asesor(avance_ventas, avance_cobros, marquilla_prom, avance_comp, avance_sub_meta)
         for comentario in comentarios: st.markdown(f"- {comentario}")
 
     st.subheader("Métricas Clave del Periodo")
-    # << MODIFICADO >> Se cambia a 4 columnas para la nueva métrica
-    col1, col2, col3, col4 = st.columns(4)
+    # << MODIFICADO >> Se cambia a 5 columnas para la nueva métrica
+    col1, col2, col3, col4, col5 = st.columns(5)
     meta_marquilla = APP_CONFIG['kpi_goals']['meta_marquilla']
     
     col1.metric("Ventas Totales", f"${ventas_total:,.0f}", f"{ventas_total - meta_ventas:,.0f} vs Meta")
@@ -326,16 +341,23 @@ def render_dashboard():
     col2.metric("Recaudo de Cartera", f"${cobros_total:,.0f}", f"{cobros_total - meta_cobros:,.0f} vs Meta")
     col2.progress(min(avance_cobros / 100, 1.0), text=f"Avance Cartera: {avance_cobros:.1f}%")
 
-    # << NUEVO >> Se añade la métrica de Complementarios en la nueva columna
     col3.metric("Venta Complementarios", f"${comp_total:,.0f}", f"{comp_total - meta_comp:,.0f} vs Meta")
     col3.progress(min(avance_comp / 100, 1.0), text=f"Avance: {avance_comp:.1f}%")
+
+    # << NUEVO >> Se añade la métrica de la Sub-Meta Específica en la nueva columna
+    sub_meta_label = APP_CONFIG['sub_meta_complementarios']['categoria_producto']
+    col4.metric(f"Meta Específica ({sub_meta_label})", f"${sub_meta_total:,.0f}", f"{sub_meta_total - meta_sub_meta:,.0f} vs Meta")
+    col4.progress(min(avance_sub_meta / 100, 1.0), text=f"Avance: {avance_sub_meta:.1f}%")
     
-    col4.metric("Promedio Marquilla", f"{marquilla_prom:.2f}", f"{marquilla_prom - meta_marquilla:.2f} vs Meta")
-    col4.progress(min((marquilla_prom / meta_marquilla), 1.0) if marquilla_prom > 0 else 0, text=f"Meta: {meta_marquilla}")
+    col5.metric("Promedio Marquilla", f"{marquilla_prom:.2f}", f"{marquilla_prom - meta_marquilla:.2f} vs Meta")
+    col5.progress(min((marquilla_prom / meta_marquilla), 1.0) if marquilla_prom > 0 else 0, text=f"Meta: {meta_marquilla}")
 
     st.subheader("Desglose por Vendedor / Grupo")
     # << MODIFICADO >> Se añaden las nuevas columnas al dataframe de desglose
-    cols_desglose = ['Estatus', 'nomvendedor', 'ventas_totales', 'presupuesto', 'ventas_complementarios', 'presupuesto_complementarios', 'cobros_totales', 'presupuestocartera', 'impactos', 'promedio_marquilla']
+    cols_desglose = ['Estatus', 'nomvendedor', 'ventas_totales', 'presupuesto', 
+                     'ventas_complementarios', 'presupuesto_complementarios', 
+                     'ventas_sub_meta', 'presupuesto_sub_meta',
+                     'cobros_totales', 'presupuestocartera', 'impactos', 'promedio_marquilla']
     st.dataframe(df_vista[cols_desglose],
         column_config={
             "Estatus": st.column_config.TextColumn("🚦", width="small"), "nomvendedor": "Vendedor/Grupo",
@@ -343,6 +365,8 @@ def render_dashboard():
             "presupuesto": st.column_config.NumberColumn("Meta Ventas", format="$ %d"),
             "ventas_complementarios": st.column_config.NumberColumn("Venta Comp.", format="$ %d"),
             "presupuesto_complementarios": st.column_config.NumberColumn("Meta Comp.", format="$ %d"),
+            "ventas_sub_meta": st.column_config.NumberColumn("Venta Espec.", format="$ %d"),
+            "presupuesto_sub_meta": st.column_config.NumberColumn("Meta Espec.", format="$ %d"),
             "cobros_totales": st.column_config.NumberColumn("Recaudo", format="$ %d"),
             "presupuestocartera": st.column_config.NumberColumn("Meta Recaudo", format="$ %d"),
             "impactos": st.column_config.NumberColumn("Clientes Únicos", format="%d"),
@@ -355,7 +379,7 @@ def render_dashboard():
 # ==============================================================================
 # 4. LÓGICA DE AUTENTICACIÓN Y EJECUCIÓN PRINCIPAL
 # ==============================================================================
-
+# (Esta sección no requiere cambios)
 def main():
     """Función principal que controla el flujo de la aplicación."""
     st.sidebar.image(APP_CONFIG["url_logo"], use_container_width=True)
