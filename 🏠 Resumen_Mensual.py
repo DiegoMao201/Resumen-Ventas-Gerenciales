@@ -41,7 +41,7 @@ APP_CONFIG = {
 
 DATA_CONFIG = {
     "presupuestos": {'154033':{'presupuesto':123873239, 'presupuestocartera':105287598}, '154044':{'presupuesto':80000000, 'presupuestocartera':300000000}, '154034':{'presupuesto':82753045, 'presupuestocartera':44854727}, '154014':{'presupuesto':268214737, 'presupuestocartera':307628243}, '154046':{'presupuesto':85469798, 'presupuestocartera':7129065}, '154012':{'presupuesto':246616193, 'presupuestocartera':295198667}, '154043':{'presupuesto':124885413, 'presupuestocartera':99488960}, '154035':{'presupuesto':80000000, 'presupuestocartera':300000000}, '154006':{'presupuesto':81250000, 'presupuestocartera':103945133}, '154049':{'presupuesto':56500000, 'presupuestocartera':70421127}, '154013':{'presupuesto':303422639, 'presupuestocartera':260017920}, '154011':{'presupuesto':447060250, 'presupuestocartera':428815923}, '154029':{'presupuesto':32500000, 'presupuestocartera':40000000}, '154040':{'presupuesto':0, 'presupuestocartera':0},'154053':{'presupuesto':0, 'presupuestocartera':0},'154048':{'presupuesto':0, 'presupuestocartera':0},'154042':{'presupuesto':0, 'presupuestocartera':0},'154031':{'presupuesto':0, 'presupuestocartera':0},'154039':{'presupuesto':0, 'presupuestocartera':0},'154051':{'presupuesto':0, 'presupuestocartera':0},'154008':{'presupuesto':0, 'presupuestocartera':0},'154052':{'presupuesto':0, 'presupuestocartera':0},'154050':{'presupuesto':0, 'presupuestocartera':0}},
-    # << MODIFICADO >> Se añade el nuevo grupo "MOSTRADOR OPALO"
+    # Se incluye a "MOSTRADOR OPALO" con su vendedora correcta.
     "grupos_vendedores": {
         "MOSTRADOR PEREIRA": ["ALEJANDRO CARBALLO MARQUEZ", "GEORGINA A. GALVIS HERRERA"], 
         "MOSTRADOR ARMENIA": ["CRISTIAN CAMILO RENDON MONTES", "FANDRY JOHANA ABRIL PENHA", "JAVIER ORLANDO PATINO HURTADO"], 
@@ -118,6 +118,7 @@ def calcular_marquilla_optimizado(df_periodo):
     return df_final_marquilla.rename(columns={'puntaje_marquilla': 'promedio_marquilla'})
 
 def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel):
+    # Paso 1: Resumir métricas a nivel de vendedor individual
     resumen_ventas = df_ventas_periodo.groupby(['codigo_vendedor', 'nomvendedor']).agg(
         ventas_totales=('valor_venta', 'sum'), impactos=('cliente_id', 'nunique')).reset_index()
     
@@ -132,16 +133,19 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     
     resumen_marquilla = calcular_marquilla_optimizado(df_ventas_periodo)
     
+    # Unir todos los resúmenes individuales
     df_resumen = pd.merge(resumen_ventas, resumen_cobros, on='codigo_vendedor', how='left')
     df_resumen = pd.merge(df_resumen, resumen_marquilla, on=['codigo_vendedor', 'nomvendedor'], how='left')
     df_resumen = pd.merge(df_resumen, resumen_complementarios, on=['codigo_vendedor', 'nomvendedor'], how='left')
     df_resumen = pd.merge(df_resumen, resumen_sub_meta, on=['codigo_vendedor', 'nomvendedor'], how='left')
 
+    # Asignar presupuestos fijos de cartera
     presupuestos_fijos = DATA_CONFIG['presupuestos']
     df_resumen['presupuesto'] = df_resumen['codigo_vendedor'].map(lambda x: presupuestos_fijos.get(x, {}).get('presupuesto', 0))
     df_resumen['presupuestocartera'] = df_resumen['codigo_vendedor'].map(lambda x: presupuestos_fijos.get(x, {}).get('presupuestocartera', 0))
     df_resumen.fillna(0, inplace=True)
 
+    # Paso 2: Procesar y agregar los grupos (mostradores)
     registros_agrupados = []
     incremento_mostradores = 1 + APP_CONFIG['presupuesto_mostradores']['incremento_anual_pct']
     
@@ -150,6 +154,7 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
         df_grupo_actual = df_resumen[df_resumen['nomvendedor'].isin(lista_vendedores_norm)]
         
         if not df_grupo_actual.empty:
+            # Calcular presupuesto dinámico basado en historial
             anio_anterior = anio_sel - 1
             df_grupo_historico = df_ventas_historicas[
                 (df_ventas_historicas['anio'] == anio_anterior) &
@@ -159,27 +164,31 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
             ventas_anio_anterior = df_grupo_historico['valor_venta'].sum()
             presupuesto_dinamico = ventas_anio_anterior * incremento_mostradores
             
-            # << CORREGIDO >> Se añaden 'ventas_complementarios' y 'ventas_sub_meta' a la lista de columnas a sumar.
+            # Sumar TODAS las métricas relevantes para el grupo
             cols_a_sumar = ['ventas_totales', 'cobros_totales', 'impactos', 'presupuestocartera',
                             'ventas_complementarios', 'ventas_sub_meta']
             suma_grupo = df_grupo_actual[cols_a_sumar].sum().to_dict()
             
+            # Calcular promedio ponderado de marquilla
             total_impactos = df_grupo_actual['impactos'].sum()
             promedio_marquilla_grupo = np.average(df_grupo_actual['promedio_marquilla'], weights=df_grupo_actual['impactos']) if total_impactos > 0 else 0.0
-            registro = {'nomvendedor': normalizar_texto(grupo), 'codigo_vendedor': normalizar_texto(grupo), **suma_grupo, 'promedio_marquilla': promedio_marquilla_grupo}
             
+            # Crear el registro final para el grupo
+            registro = {'nomvendedor': normalizar_texto(grupo), 'codigo_vendedor': normalizar_texto(grupo), **suma_grupo, 'promedio_marquilla': promedio_marquilla_grupo}
             registro['presupuesto'] = presupuesto_dinamico
             
             registros_agrupados.append(registro)
             
     df_agrupado = pd.DataFrame(registros_agrupados)
     
+    # Paso 3: Combinar vendedores individuales y grupos
     vendedores_en_grupos = [v for lista in DATA_CONFIG['grupos_vendedores'].values() for v in [normalizar_texto(i) for i in lista]]
     df_individuales = df_resumen[~df_resumen['nomvendedor'].isin(vendedores_en_grupos)]
     df_final = pd.concat([df_agrupado, df_individuales], ignore_index=True)
     
-    df_final.fillna(0, inplace=True) # Rellenar NaNs que puedan surgir de los merges
+    df_final.fillna(0, inplace=True)
     
+    # Paso 4: Calcular presupuestos derivados (complementarios, sub-meta)
     df_final['presupuesto_complementarios'] = df_final['presupuesto'] * APP_CONFIG['complementarios']['presupuesto_pct']
     df_final['presupuesto_sub_meta'] = df_final['presupuesto_complementarios'] * APP_CONFIG['sub_meta_complementarios']['presupuesto_pct']
     
@@ -221,16 +230,14 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
     if enfoque_sel == "Visión General":
         nombres_a_filtrar = []
         for vendedor in df_vista['nomvendedor']:
-            # Se normaliza el nombre del grupo para buscar los vendedores
             vendedor_norm = normalizar_texto(vendedor)
-            lista_vendedores = DATA_CONFIG['grupos_vendedores'].get(vendedor, [vendedor]) if vendedor_norm not in DATA_CONFIG['grupos_vendedores'] else DATA_CONFIG['grupos_vendedores'][vendedor]
+            nombre_grupo_orig = next((k for k in DATA_CONFIG['grupos_vendedores'] if normalizar_texto(k) == vendedor_norm), vendedor_norm)
+            lista_vendedores = DATA_CONFIG['grupos_vendedores'].get(nombre_grupo_orig, [vendedor_norm])
             nombres_a_filtrar.extend([normalizar_texto(v) for v in lista_vendedores])
         df_ventas_enfocadas = df_ventas_periodo[df_ventas_periodo['nomvendedor'].isin(nombres_a_filtrar)]
         df_ranking = df_vista
     else:
-        # Se normaliza el nombre del grupo seleccionado para que coincida
         enfoque_sel_norm = normalizar_texto(enfoque_sel)
-        # Se busca el nombre original del grupo para obtener la lista de vendedores
         nombre_grupo_orig = next((k for k in DATA_CONFIG['grupos_vendedores'] if normalizar_texto(k) == enfoque_sel_norm), enfoque_sel_norm)
         nombres_a_filtrar = [normalizar_texto(n) for n in DATA_CONFIG['grupos_vendedores'].get(nombre_grupo_orig, [enfoque_sel_norm])]
         df_ventas_enfocadas = df_ventas_periodo[df_ventas_periodo['nomvendedor'].isin(nombres_a_filtrar)]
@@ -389,7 +396,6 @@ def render_dashboard():
 # 4. LÓGICA DE AUTENTICACIÓN Y EJECUCIÓN PRINCIPAL
 # ==============================================================================
 def main():
-    """Función principal que controla el flujo de la aplicación."""
     st.sidebar.image(APP_CONFIG["url_logo"], use_container_width=True)
     st.sidebar.header("Control de Acceso")
 
@@ -404,20 +410,19 @@ def main():
                 vendedores_individuales = sorted(list(df['nomvendedor'].dropna().unique()))
                 vendedores_en_grupos = [v for lista in DATA_CONFIG['grupos_vendedores'].values() for v in [normalizar_texto(i) for i in lista]]
                 vendedores_solos = [v for v in vendedores_individuales if v not in vendedores_en_grupos]
-                return ["GERENTE"] + grupos_norm + vendedores_solos
+                # Se devuelven los nombres originales de los grupos para el selectbox
+                return ["GERENTE"] + list(DATA_CONFIG['grupos_vendedores'].keys()) + vendedores_solos
             return ["GERENTE"] + list(DATA_CONFIG['grupos_vendedores'].keys())
 
         todos_usuarios = obtener_lista_usuarios()
         
         usuarios_fijos_orig = {"GERENTE": "1234", "MOSTRADOR PEREIRA": "2345", "MOSTRADOR ARMENIA": "3456", "MOSTRADOR MANIZALES": "4567", "MOSTRADOR LAURELES": "5678"}
-        # << NUEVO >> Se añade contraseña para el nuevo mostrador.
         if "MOSTRADOR OPALO" not in usuarios_fijos_orig:
-            usuarios_fijos_orig["MOSTRADOR OPALO"] = "opalo123" # Puedes cambiar esta contraseña
+            usuarios_fijos_orig["MOSTRADOR OPALO"] = "opalo123"
 
         usuarios_fijos = {normalizar_texto(k): v for k, v in usuarios_fijos_orig.items()}
         usuarios = usuarios_fijos.copy(); codigo = 1001
         for u in todos_usuarios:
-            # Asegurarse de que el usuario normalizado no esté ya en el diccionario
             u_norm = normalizar_texto(u)
             if u_norm not in usuarios: usuarios[u_norm] = str(codigo); codigo += 1
         
@@ -428,6 +433,7 @@ def main():
             usuario_sel_norm = normalizar_texto(usuario_seleccionado)
             if usuario_sel_norm in usuarios and clave == usuarios[usuario_sel_norm]:
                 st.session_state.autenticado = True
+                # Guardamos el nombre original para mostrarlo en el dashboard
                 st.session_state.usuario = usuario_seleccionado
                 with st.spinner('Cargando datos maestros, por favor espere...'):
                     st.session_state.df_ventas = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["ventas"], APP_CONFIG["column_names"]["ventas"])
