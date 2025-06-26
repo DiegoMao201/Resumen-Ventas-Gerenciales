@@ -3,19 +3,23 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import io
-import unicodedata # << AÑADIDO >> Import necesario para la normalización
+import unicodedata
+from datetime import datetime
 
 # ==============================================================================
 # 1. CONFIGURACIÓN Y ESTADO INICIAL
 # ==============================================================================
 st.set_page_config(page_title="Acciones y Recomendaciones", page_icon="🎯", layout="wide")
 
-# << AÑADIDO >> Se incluye la misma función de normalización de la página principal
+# << AÑADIDO >> Se incluye la misma función de normalización de la página principal.
 def normalizar_texto(texto):
     if not isinstance(texto, str):
         return texto
-    texto_sin_tildes = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
-    return texto_sin_tildes.upper().replace('-', ' ').strip().replace('  ', ' ')
+    try:
+        texto_sin_tildes = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
+        return texto_sin_tildes.upper().replace('-', ' ').strip().replace('  ', ' ')
+    except (TypeError, AttributeError):
+        return texto
 
 def mostrar_acceso_restringido():
     st.header("🔒 Acceso Restringido")
@@ -37,15 +41,18 @@ if df_ventas_historico is None or df_ventas_historico.empty or not APP_CONFIG or
 
 # ==============================================================================
 # 2. LÓGICA DE ANÁLISIS Y RECOMENDACIONES (El "Cerebro")
-# (Sin modificaciones en esta sección)
+# (Sin modificaciones en la lógica de estas funciones)
 # ==============================================================================
 
 @st.cache_data
 def preparar_datos_y_margen(df):
-    filtro_descuento = (df['nombre_articulo'].str.contains('DESCUENTO', case=False, na=False)) & \
-                       (df['nombre_articulo'].str.contains('COMERCIAL', case=False, na=False))
-    df_descuentos = df[filtro_descuento]
-    df_productos = df[~filtro_descuento].copy()
+    df_copy = df.copy()
+    # Normalizar nombre de artículo para la búsqueda de descuentos
+    df_copy['nombre_articulo_norm'] = df_copy['nombre_articulo'].str.upper()
+    filtro_descuento = (df_copy['nombre_articulo_norm'].str.contains('DESCUENTO', na=False)) & \
+                       (df_copy['nombre_articulo_norm'].str.contains('COMERCIAL', na=False))
+    df_descuentos = df_copy[filtro_descuento]
+    df_productos = df_copy[~filtro_descuento].copy()
     if not df_productos.empty:
         df_productos['costo_total_linea'] = df_productos['costo_unitario'].fillna(0) * df_productos['unidades_vendidas'].fillna(0)
         df_productos['margen_bruto'] = df_productos['valor_venta'] - df_productos['costo_total_linea']
@@ -62,12 +69,12 @@ def analizar_rentabilidad(df_productos, df_descuentos):
     df_productos_copy = df_productos.copy()
     df_descuentos_copy = df_descuentos.copy()
     if not df_productos_copy.empty:
-        df_productos_copy.loc[:, 'mes_anio'] = df_productos_copy['fecha_venta'].dt.to_period('M')
+        df_productos_copy['mes_anio'] = df_productos_copy['fecha_venta'].dt.to_period('M')
     if not df_descuentos_copy.empty:
-        df_descuentos_copy.loc[:, 'mes_anio'] = df_descuentos_copy['fecha_venta'].dt.to_period('M')
+        df_descuentos_copy['mes_anio'] = df_descuentos_copy['fecha_venta'].dt.to_period('M')
     
-    margen_bruto_mensual = df_productos_copy.groupby('mes_anio')['margen_bruto'].sum() if not df_productos_copy.empty else pd.Series()
-    descuentos_mensual = abs(df_descuentos_copy.groupby('mes_anio')['valor_venta'].sum()) if not df_descuentos_copy.empty else pd.Series()
+    margen_bruto_mensual = df_productos_copy.groupby('mes_anio')['margen_bruto'].sum() if not df_productos_copy.empty else pd.Series(dtype=float)
+    descuentos_mensual = abs(df_descuentos_copy.groupby('mes_anio')['valor_venta'].sum()) if not df_descuentos_copy.empty else pd.Series(dtype=float)
     
     df_evolucion = pd.DataFrame(margen_bruto_mensual).reset_index()
     df_evolucion = pd.merge(df_evolucion, pd.DataFrame(descuentos_mensual).reset_index(), on='mes_anio', how='outer').fillna(0)
@@ -142,160 +149,160 @@ def generar_excel_descargable(datos_para_exportar):
 
 # ==============================================================================
 # 3. LÓGICA DE LA INTERFAZ DE USUARIO (UI) Y EJECUCIÓN
+# << REESTRUCTURADO >> Toda la lógica de la UI se encapsula en una función principal
 # ==============================================================================
-st.title("🎯 Acciones y Recomendaciones Estratégicas")
-st.markdown("Planes de acción inteligentes basados en tus datos para impulsar los resultados.")
+def render_pagina_acciones():
+    st.title("🎯 Acciones y Recomendaciones Estratégicas")
+    st.markdown("Planes de acción inteligentes basados en tus datos para impulsar los resultados.")
 
-# --- 1. SELECCIÓN DE VENDEDOR ---
-# << CORREGIDO >> Se normalizan los nombres para hacer comparaciones consistentes.
-lista_vendedores_norm = sorted(list(df_ventas_historico['nomvendedor'].dropna().unique()))
-vendedores_en_grupos_norm = [normalizar_texto(v) for lista in DATA_CONFIG['grupos_vendedores'].values() for v in lista]
-vendedores_solos_norm = [v for v in lista_vendedores_norm if v not in vendedores_en_grupos_norm]
+    # --- 1. SELECCIÓN DE VENDEDOR (CORREGIDO)---
+    # Se usan los nombres normalizados para la lógica interna
+    vendedores_unicos_norm = sorted(list(df_ventas_historico['nomvendedor'].dropna().unique()))
+    grupos = DATA_CONFIG.get('grupos_vendedores', {})
+    vendedores_en_grupos_norm = [normalizar_texto(v) for lista in grupos.values() for v in lista]
+    vendedores_solos_norm = [v for v in vendedores_unicos_norm if v not in vendedores_en_grupos_norm]
+    
+    # Se usan los nombres originales para mostrar en el dropdown
+    nombres_grupos = sorted(grupos.keys())
+    # Se busca el nombre original correspondiente a los vendedores normalizados que están solos
+    mapa_norm_a_orig = {normalizar_texto(v): v for v in df_ventas_historico['nomvendedor'].unique()}
+    vendedores_solos_orig = sorted([mapa_norm_a_orig.get(v_norm) for v_norm in vendedores_solos_norm if mapa_norm_a_orig.get(v_norm)])
 
-# Se muestran los nombres originales en el dropdown para una mejor experiencia de usuario.
-opciones_analisis = sorted(list(DATA_CONFIG['grupos_vendedores'].keys())) + sorted([v for v in df_ventas_historico['nomvendedor'].unique() if normalizar_texto(v) in vendedores_solos_norm])
-
-usuario_actual = st.session_state.usuario
-usuario_actual_norm = normalizar_texto(usuario_actual)
-
-if usuario_actual_norm == "GERENTE":
-    opciones_analisis.insert(0, "Seleccione un Vendedor o Grupo")
-    default_index = 0
-else:
-    # Encuentra la opción correcta para el usuario actual, manteniendo el nombre original.
-    opciones_analisis = [usuario_actual] if usuario_actual in opciones_analisis else []
-    default_index = 0
-
-if not opciones_analisis:
-    st.warning(f"No se encontraron datos asociados al usuario '{usuario_actual}'.")
-    st.stop()
-
-seleccion = st.selectbox("Seleccione el Vendedor o Grupo a analizar:", opciones_analisis, index=default_index, key="seller_selector")
-
-if seleccion == "Seleccione un Vendedor o Grupo":
-    st.info("Por favor, elija un vendedor o grupo para comenzar.")
-    st.stop()
-
-# --- 2. FILTRADO INICIAL POR VENDEDOR ---
-# << CORREGIDO >> Se normalizan los nombres del grupo/vendedor seleccionado antes de filtrar el DataFrame.
-seleccion_norm = normalizar_texto(seleccion)
-# Se obtiene la lista de vendedores originales del grupo y se normaliza para el filtro.
-lista_vendedores_a_filtrar = DATA_CONFIG['grupos_vendedores'].get(seleccion, [seleccion])
-lista_vendedores_a_filtrar_norm = [normalizar_texto(v) for v in lista_vendedores_a_filtrar]
-df_vendedor_base = df_ventas_historico[df_ventas_historico['nomvendedor'].isin(lista_vendedores_a_filtrar_norm)]
-
-
-if df_vendedor_base.empty:
-    st.warning(f"No hay datos históricos para {seleccion}.")
-    st.stop()
-
-# --- 3. SELECCIÓN DE RANGO DE MESES ---
-st.markdown("---")
-# Usamos .copy() para evitar SettingWithCopyWarning
-df_vendedor_base_copy = df_vendedor_base.copy()
-df_vendedor_base_copy['periodo'] = df_vendedor_base_copy['fecha_venta'].dt.to_period('M')
-meses_disponibles = sorted(df_vendedor_base_copy['periodo'].unique())
-mapa_meses = {f"{DATA_CONFIG['mapeo_meses'][p.month]} {p.year}": p for p in meses_disponibles}
-opciones_slider = list(mapa_meses.keys())
-
-if len(opciones_slider) > 1:
-    mes_inicio_str, mes_fin_str = st.select_slider("Seleccione rango de meses para el análisis:", options=opciones_slider, value=(opciones_slider[0], opciones_slider[-1]))
-elif len(opciones_slider) == 1:
-    mes_inicio_str = mes_fin_str = opciones_slider[0]
-    st.info(f"Periodo de análisis: {mes_inicio_str}") # Usamos st.info para mejor visibilidad
-else:
-    st.warning("No hay periodos de venta para analizar para este vendedor.")
-    st.stop()
-
-# --- 4. FILTRADO FINAL Y EJECUCIÓN DE ANÁLISIS ---
-periodo_inicio, periodo_fin = mapa_meses[mes_inicio_str], mapa_meses[mes_fin_str]
-fecha_inicio, fecha_fin = periodo_inicio.start_time, periodo_fin.end_time
-df_vendedor_periodo = df_vendedor_base[(df_vendedor_base['fecha_venta'] >= fecha_inicio) & (df_vendedor_base['fecha_venta'] <= fecha_fin)]
-
-if df_vendedor_periodo.empty:
-    st.warning(f"No se encontraron datos para '{seleccion}' en el rango de meses seleccionado.")
-    st.stop()
-
-with st.spinner(f"Generando plan de acción para {seleccion}..."):
-    df_productos, df_descuentos = preparar_datos_y_margen(df_vendedor_periodo.copy())
-    analisis_rentabilidad = analizar_rentabilidad(df_productos, df_descuentos)
-    df_rfm = analizar_segmentacion_rfm(df_productos, fecha_fin.to_pydatetime()) # Convertir a datetime de Python
-    df_matriz_productos = analizar_matriz_productos(df_productos)
-
-# --- 5. RENDERIZADO DE LA PÁGINA ---
-st.download_button(
-    label="📥 Descargar Análisis en Excel",
-    data=generar_excel_descargable({
-        "Segmentacion_RFM": df_rfm,
-        "Matriz_de_Productos": df_matriz_productos,
-        "Rentabilidad_y_Dcto": analisis_rentabilidad['df_evolucion'],
-        "Top_Clientes_con_Dcto": analisis_rentabilidad['top_clientes_descuento']
-    }),
-    file_name=f"Plan_Accion_{seleccion.replace(' ', '_')}.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-)
-st.markdown("---")
-
-# Módulo de Rentabilidad
-st.header("💰 Optimización de Rentabilidad y Descuentos")
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Margen Bruto de Productos", f"${analisis_rentabilidad['margen_bruto_productos']:,.0f}")
-col2.metric("Total Descuentos Otorgados", f"-${analisis_rentabilidad['total_descuentos']:,.0f}", help="Suma de todos los artículos 'Descuento Comercial'")
-col3.metric("Margen Operativo Real", f"${analisis_rentabilidad['margen_operativo']:,.0f}", delta_color="off")
-col4.metric("% Descuento sobre Venta", f"{analisis_rentabilidad['porcentaje_descuento']:.1f}%", help="(Total Descuentos / Venta Bruta de Productos) * 100")
-
-df_evo = analisis_rentabilidad['df_evolucion']
-if not df_evo.empty:
-    fig_evo = px.line(df_evo, x='mes_anio', y=['margen_bruto', 'margen_operativo'], title="Evolución de Margen Bruto vs. Margen Operativo", labels={"value": "Monto ($)", "mes_anio": "Mes"}, markers=True)
-    fig_evo.update_layout(legend_title_text='Leyenda')
-    st.plotly_chart(fig_evo, use_container_width=True)
-    st.info("La brecha entre las dos líneas representa el total de descuentos comerciales otorgados cada mes.")
-
-st.subheader("Clientes con Mayor Descuento Otorgado")
-st.dataframe(analisis_rentabilidad['top_clientes_descuento'], use_container_width=True, hide_index=True, column_config={"valor_venta": st.column_config.NumberColumn(format="$ %d")})
-
-# Módulo de Segmentación RFM
-st.header("👥 Segmentación Estratégica de Clientes (RFM)")
-with st.container(border=True):
-    st.info("Clasifica a tus clientes para enfocar tus esfuerzos: **Campeones** (tus mejores clientes), **Leales** (compran consistentemente), **En Riesgo** (necesitan atención para no perderlos) e **Hibernando** (necesitan reactivación).")
-    if not df_rfm.empty:
-        st.dataframe(df_rfm, use_container_width=True, hide_index=True, height=350)
+    opciones_analisis = nombres_grupos + vendedores_solos_orig
+    usuario_actual = st.session_state.usuario
+    
+    if normalizar_texto(usuario_actual) == "GERENTE":
+        opciones_analisis.insert(0, "Seleccione un Vendedor o Grupo")
+        default_index = 0
     else:
-        st.warning("No hay suficientes datos de clientes para realizar la segmentación RFM en este periodo.")
+        opciones_analisis = [usuario_actual] if usuario_actual in opciones_analisis else []
+        default_index = 0
 
-# Módulo Matriz de Productos
-st.header("📦 Estrategia de Portafolio de Productos")
-with st.container(border=True):
-    st.info("""
-    Clasifica tus productos para saber dónde invertir tu tiempo. **Pasa el mouse sobre las burbujas para ver el detalle de cada producto.**
-    - **⭐ Estrellas:** Alta Venta y Alta Rentabilidad. ¡Tus productos clave!
-    - **❓ Interrogantes:** Baja Venta, Alta Rentabilidad. ¡Tus mayores oportunidades de crecimiento! Impúlsalos.
-    - **🐄 Vacas Lecheras:** Alta Venta, Baja Rentabilidad. Generan flujo de caja, gestiona su eficiencia.
-    - **🐕 Perros:** Baja Venta, Baja Rentabilidad. Considera reducir su foco.
-    """)
-    if not df_matriz_productos.empty:
-        fig_matriz = px.scatter(
-            df_matriz_productos, x="Volumen", y="Rentabilidad", color="Segmento",
-            size='Volumen', hover_name="nombre_articulo", log_x=True,
-            color_discrete_map={'⭐ Estrella': 'gold', '🐄 Vaca Lechera': 'dodgerblue', '❓ Interrogante': 'limegreen', '🐕 Perro': 'tomato'},
-            title="Matriz de Rendimiento de Productos"
-        )
-        st.plotly_chart(fig_matriz, use_container_width=True)
-        
-        st.subheader("Explorar Datos de Productos")
-        segmentos_seleccionados = st.multiselect("Filtrar por segmento:", options=sorted(df_matriz_productos['Segmento'].unique()), default=sorted(df_matriz_productos['Segmento'].unique()))
-        df_filtrada = df_matriz_productos[df_matriz_productos['Segmento'].isin(segmentos_seleccionados)]
-        if not df_filtrada.empty:
-            max_rentabilidad = df_filtrada['Rentabilidad'].max()
-            min_rentabilidad = df_filtrada['Rentabilidad'].min()
-            st.dataframe(df_filtrada, use_container_width=True, hide_index=True, height=350,
-                         column_config={
-                             "Volumen": st.column_config.NumberColumn(format="$ %d"), 
-                             "Rentabilidad": st.column_config.ProgressColumn(
-                                 format="%.1f%%", 
-                                 min_value=float(min_rentabilidad-abs(min_rentabilidad*0.1)), 
-                                 max_value=float(max_rentabilidad+abs(max_rentabilidad*0.1))
-                              )
-                         })
+    if not opciones_analisis:
+        st.warning(f"No se encontraron datos asociados al usuario '{usuario_actual}'.")
+        st.stop()
+
+    seleccion = st.selectbox("Seleccione el Vendedor o Grupo a analizar:", opciones_analisis, index=default_index, key="seller_selector")
+
+    if seleccion == "Seleccione un Vendedor o Grupo":
+        st.info("Por favor, elija un vendedor o grupo para comenzar.")
+        st.stop()
+
+    # --- 2. FILTRADO INICIAL POR VENDEDOR ---
+    lista_vendedores_a_filtrar = grupos.get(seleccion, [seleccion])
+    lista_vendedores_a_filtrar_norm = [normalizar_texto(v) for v in lista_vendedores_a_filtrar]
+    df_vendedor_base = df_ventas_historico[df_ventas_historico['nomvendedor'].isin(lista_vendedores_a_filtrar_norm)]
+
+    if df_vendedor_base.empty:
+        st.warning(f"No hay datos históricos para {seleccion}.")
+        st.stop()
+
+    # --- 3. SELECCIÓN DE RANGO DE MESES ---
+    st.markdown("---")
+    df_vendedor_base_copy = df_vendedor_base.copy()
+    df_vendedor_base_copy['periodo'] = df_vendedor_base_copy['fecha_venta'].dt.to_period('M')
+    meses_disponibles = sorted(df_vendedor_base_copy['periodo'].unique())
+    mapa_meses = {f"{DATA_CONFIG['mapeo_meses'].get(p.month, p.month)} {p.year}": p for p in meses_disponibles}
+    opciones_slider = list(mapa_meses.keys())
+
+    if len(opciones_slider) > 1:
+        mes_inicio_str, mes_fin_str = st.select_slider("Seleccione rango de meses para el análisis:", options=opciones_slider, value=(opciones_slider[0], opciones_slider[-1]))
+    elif len(opciones_slider) == 1:
+        mes_inicio_str = mes_fin_str = opciones_slider[0]
+        st.info(f"Periodo de análisis: {mes_inicio_str}")
     else:
-        st.warning("No hay suficientes datos de productos para generar la matriz en este periodo.")
+        st.warning("No hay periodos de venta para analizar para este vendedor.")
+        st.stop()
+
+    # --- 4. FILTRADO FINAL Y EJECUCIÓN DE ANÁLISIS ---
+    periodo_inicio, periodo_fin = mapa_meses[mes_inicio_str], mapa_meses[mes_fin_str]
+    fecha_inicio, fecha_fin = periodo_inicio.start_time, periodo_fin.end_time
+    df_vendedor_periodo = df_vendedor_base[(df_vendedor_base['fecha_venta'] >= fecha_inicio) & (df_vendedor_base['fecha_venta'] <= fecha_fin)]
+
+    if df_vendedor_periodo.empty:
+        st.warning(f"No se encontraron datos para '{seleccion}' en el rango de meses seleccionado.")
+        st.stop()
+
+    with st.spinner(f"Generando plan de acción para {seleccion}..."):
+        df_productos, df_descuentos = preparar_datos_y_margen(df_vendedor_periodo.copy())
+        analisis_rentabilidad = analizar_rentabilidad(df_productos, df_descuentos)
+        df_rfm = analizar_segmentacion_rfm(df_productos, fecha_fin.to_pydatetime())
+        df_matriz_productos = analizar_matriz_productos(df_productos)
+
+    # --- 5. RENDERIZADO DE LA PÁGINA ---
+    st.download_button(
+        label="📥 Descargar Análisis en Excel",
+        data=generar_excel_descargable({
+            "Segmentacion_RFM": df_rfm,
+            "Matriz_de_Productos": df_matriz_productos,
+            "Rentabilidad_y_Dcto": analisis_rentabilidad['df_evolucion'],
+            "Top_Clientes_con_Dcto": analisis_rentabilidad['top_clientes_descuento']
+        }),
+        file_name=f"Plan_Accion_{seleccion.replace(' ', '_')}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    st.markdown("---")
+
+    st.header("💰 Optimización de Rentabilidad y Descuentos")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Margen Bruto de Productos", f"${analisis_rentabilidad['margen_bruto_productos']:,.0f}")
+    col2.metric("Total Descuentos Otorgados", f"-${analisis_rentabilidad['total_descuentos']:,.0f}", help="Suma de todos los artículos 'Descuento Comercial'")
+    col3.metric("Margen Operativo Real", f"${analisis_rentabilidad['margen_operativo']:,.0f}", delta_color="off")
+    col4.metric("% Descuento sobre Venta", f"{analisis_rentabilidad['porcentaje_descuento']:.1f}%", help="(Total Descuentos / Venta Bruta de Productos) * 100")
+
+    df_evo = analisis_rentabilidad['df_evolucion']
+    if not df_evo.empty:
+        fig_evo = px.line(df_evo, x='mes_anio', y=['margen_bruto', 'margen_operativo'], title="Evolución de Margen Bruto vs. Margen Operativo", labels={"value": "Monto ($)", "mes_anio": "Mes"}, markers=True)
+        fig_evo.update_layout(legend_title_text='Leyenda')
+        st.plotly_chart(fig_evo, use_container_width=True)
+        st.info("La brecha entre las dos líneas representa el total de descuentos comerciales otorgados cada mes.")
+
+    st.subheader("Clientes con Mayor Descuento Otorgado")
+    st.dataframe(analisis_rentabilidad['top_clientes_descuento'], use_container_width=True, hide_index=True, column_config={"valor_venta": st.column_config.NumberColumn(format="$ %d")})
+
+    st.header("👥 Segmentación Estratégica de Clientes (RFM)")
+    with st.container(border=True):
+        st.info("Clasifica a tus clientes para enfocar tus esfuerzos: **Campeones** (tus mejores clientes), **Leales** (compran consistentemente), **En Riesgo** (necesitan atención para no perderlos) e **Hibernando** (necesitan reactivación).")
+        if not df_rfm.empty:
+            st.dataframe(df_rfm, use_container_width=True, hide_index=True, height=350)
+        else:
+            st.warning("No hay suficientes datos de clientes para realizar la segmentación RFM en este periodo.")
+
+    st.header("📦 Estrategia de Portafolio de Productos")
+    with st.container(border=True):
+        st.info("""
+        Clasifica tus productos para saber dónde invertir tu tiempo. **Pasa el mouse sobre las burbujas para ver el detalle de cada producto.**
+        - **⭐ Estrellas:** Alta Venta y Alta Rentabilidad. ¡Tus productos clave!
+        - **❓ Interrogantes:** Baja Venta, Alta Rentabilidad. ¡Tus mayores oportunidades de crecimiento! Impúlsalos.
+        - **🐄 Vacas Lecheras:** Alta Venta, Baja Rentabilidad. Generan flujo de caja, gestiona su eficiencia.
+        - **🐕 Perros:** Baja Venta, Baja Rentabilidad. Considera reducir su foco.
+        """)
+        if not df_matriz_productos.empty:
+            fig_matriz = px.scatter(
+                df_matriz_productos, x="Volumen", y="Rentabilidad", color="Segmento",
+                size='Volumen', hover_name="nombre_articulo", log_x=True,
+                color_discrete_map={'⭐ Estrella': 'gold', '🐄 Vaca Lechera': 'dodgerblue', '❓ Interrogante': 'limegreen', '🐕 Perro': 'tomato'},
+                title="Matriz de Rendimiento de Productos"
+            )
+            st.plotly_chart(fig_matriz, use_container_width=True)
+            
+            st.subheader("Explorar Datos de Productos")
+            segmentos_seleccionados = st.multiselect("Filtrar por segmento:", options=sorted(df_matriz_productos['Segmento'].unique()), default=sorted(df_matriz_productos['Segmento'].unique()))
+            df_filtrada = df_matriz_productos[df_matriz_productos['Segmento'].isin(segmentos_seleccionados)]
+            if not df_filtrada.empty:
+                max_rentabilidad = df_filtrada['Rentabilidad'].max()
+                min_rentabilidad = df_filtrada['Rentabilidad'].min()
+                st.dataframe(df_filtrada, use_container_width=True, hide_index=True, height=350,
+                             column_config={
+                                 "Volumen": st.column_config.NumberColumn(format="$ %d"), 
+                                 "Rentabilidad": st.column_config.ProgressColumn(
+                                     format="%.1f%%", 
+                                     min_value=float(min_rentabilidad-abs(min_rentabilidad*0.1) if min_rentabilidad != 0 else -10), 
+                                     max_value=float(max_rentabilidad+abs(max_rentabilidad*0.1) if max_rentabilidad != 0 else 10)
+                                  )
+                             })
+        else:
+            st.warning("No hay suficientes datos de productos para generar la matriz en este periodo.")
+
+# Ejecución principal de la página
+render_pagina_acciones()
