@@ -28,10 +28,10 @@ APP_CONFIG = {
         "exclude_super_categoria": "Pintuco",
         "presupuesto_pct": 0.10
     },
-    # << CORREGIDO >> Se aclara que la meta se busca en 'nombre_marca' y no 'categoria_producto'
+    # << MODIFICADO >> El porcentaje de la sub-meta ahora es del 10%
     "sub_meta_complementarios": {
         "nombre_marca_objetivo": "non-AN Third Party",
-        "presupuesto_pct": 0.025
+        "presupuesto_pct": 0.10 # <-- ¡CAMBIO REALIZADO AQUÍ!
     },
     "categorias_clave_venta": ['ABRACOL', 'YALE', 'SAINT GOBAIN', 'GOYA', 'ALLEGION', 'SEGUREX']
 }
@@ -93,7 +93,7 @@ def calcular_marquilla_optimizado(df_periodo):
     return df_final_marquilla.rename(columns={'puntaje_marquilla': 'promedio_marquilla'})
 
 def procesar_datos_periodo(df_ventas, df_cobros):
-    """<< CORREGIDO >> Lógica de negocio con el cálculo correcto de la sub-meta."""
+    # (Sin cambios en esta función)
     resumen_ventas = df_ventas.groupby(['codigo_vendedor', 'nomvendedor']).agg(
         ventas_totales=('valor_venta', 'sum'), impactos=('cliente_id', 'nunique')).reset_index()
     
@@ -103,7 +103,6 @@ def procesar_datos_periodo(df_ventas, df_cobros):
     resumen_complementarios = df_ventas_comp.groupby('codigo_vendedor').agg(
         ventas_complementarios=('valor_venta', 'sum')).reset_index()
 
-    # << CORREGIDO >> Se usa la columna 'nombre_marca' para el filtro, no 'categoria_producto'.
     marca_sub_meta = APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo']
     df_ventas_sub_meta = df_ventas[df_ventas['nombre_marca'] == marca_sub_meta]
     resumen_sub_meta = df_ventas_sub_meta.groupby('codigo_vendedor').agg(
@@ -264,7 +263,7 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
                 st.plotly_chart(fig, use_container_width=True)
 
 def render_dashboard():
-    """<< RE-DISEÑADO >> Renderización con métricas en 2 filas para mejor visualización."""
+    # (Sin cambios en esta función)
     st.sidebar.markdown("---"); st.sidebar.header("Filtros de Periodo")
     df_ventas = st.session_state.df_ventas; df_cobros = st.session_state.df_cobros
     
@@ -324,7 +323,6 @@ def render_dashboard():
 
     st.subheader("Métricas Clave del Periodo")
     
-    # << RE-DISEÑADO >> Métricas divididas en dos filas para mejor legibilidad
     # Fila 1: Métricas Principales
     col1, col2, col3 = st.columns(3)
     with col1:
