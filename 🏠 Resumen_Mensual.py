@@ -4,7 +4,7 @@ import numpy as np
 import plotly.express as px
 import dropbox
 import io
-import unicodedata # << NUEVO >> Librería para manejar tildes y caracteres especiales
+import unicodedata
 
 # ==============================================================================
 # 1. CONFIGURACIÓN CENTRALIZADA
@@ -18,7 +18,8 @@ APP_CONFIG = {
         "cobros": "/data/cobros_detalle.csv"
     },
     "column_names": {
-        "ventas": ['anio', 'mes', 'fecha_venta', 'codigo_vendedor', 'nomvendedor', 'cliente_id', 'nombre_cliente', 'codigo_articulo', 'nombre_articulo', 'categoria_producto', 'linea_producto', 'departamento', 'marca_producto', 'valor_venta', 'unidades_vendidas', 'costo_unitario', 'super_categoria'],
+        # << CORREGIDO >> Se eliminó la columna 'departamento' para que coincida con las 16 columnas del CSV.
+        "ventas": ['anio', 'mes', 'fecha_venta', 'codigo_vendedor', 'nomvendedor', 'cliente_id', 'nombre_cliente', 'codigo_articulo', 'nombre_articulo', 'categoria_producto', 'linea_producto', 'marca_producto', 'valor_venta', 'unidades_vendidas', 'costo_unitario', 'super_categoria'],
         "cobros": ['anio', 'mes', 'fecha_cobro', 'codigo_vendedor', 'valor_cobro']
     },
     "kpi_goals": {
@@ -54,17 +55,12 @@ st.set_page_config(
 # 2. LÓGICA DE PROCESAMIENTO DE DATOS
 # ==============================================================================
 
-# << NUEVO >> Función robusta para normalizar (limpiar) texto.
 def normalizar_texto(texto):
-    """Convierte texto a un formato estándar: sin tildes, mayúsculas, sin espacios extra ni guiones."""
     if not isinstance(texto, str):
         return texto
-    # Quitar tildes (ej: á -> a)
     texto_sin_tildes = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
-    # Convertir a mayúsculas, reemplazar guiones, y quitar espacios extra
     return texto_sin_tildes.upper().replace('-', ' ').strip().replace('  ', ' ')
 
-# << MODIFICADO >> Se normalizan los valores de la configuración para que coincidan con los datos limpios.
 APP_CONFIG['complementarios']['exclude_super_categoria'] = normalizar_texto(APP_CONFIG['complementarios']['exclude_super_categoria'])
 APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo'] = normalizar_texto(APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo'])
 APP_CONFIG['categorias_clave_venta'] = [normalizar_texto(cat) for cat in APP_CONFIG['categorias_clave_venta']]
@@ -72,7 +68,6 @@ APP_CONFIG['categorias_clave_venta'] = [normalizar_texto(cat) for cat in APP_CON
 
 @st.cache_data(ttl=1800)
 def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
-    """<< MODIFICADO >> Descarga, limpia y AHORA NORMALIZA los datos desde Dropbox."""
     try:
         with dropbox.Dropbox(app_key=st.secrets.dropbox.app_key, app_secret=st.secrets.dropbox.app_secret, oauth2_refresh_token=st.secrets.dropbox.refresh_token) as dbx:
             _, res = dbx.files_download(path=ruta_archivo)
@@ -91,7 +86,6 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
             if 'fecha_venta' in df.columns: df['fecha_venta'] = pd.to_datetime(df['fecha_venta'], errors='coerce')
             if 'marca_producto' in df.columns: df['nombre_marca'] = df['marca_producto'].map(DATA_CONFIG["mapeo_marcas"]).fillna('No Especificada')
             
-            # << NUEVO >> Se aplica la normalización a las columnas de texto clave.
             cols_a_normalizar = ['super_categoria', 'categoria_producto', 'nombre_marca']
             for col in cols_a_normalizar:
                 if col in df.columns:
@@ -103,7 +97,6 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
         return pd.DataFrame(columns=nombres_columnas)
 
 def calcular_marquilla_optimizado(df_periodo):
-    # (Sin cambios en esta función)
     if df_periodo.empty or 'nombre_articulo' not in df_periodo.columns:
         return pd.DataFrame(columns=['codigo_vendedor', 'nomvendedor', 'promedio_marquilla'])
     df_temp = df_periodo[['codigo_vendedor', 'nomvendedor', 'cliente_id', 'nombre_articulo']].copy()
@@ -116,7 +109,6 @@ def calcular_marquilla_optimizado(df_periodo):
     return df_final_marquilla.rename(columns={'puntaje_marquilla': 'promedio_marquilla'})
 
 def procesar_datos_periodo(df_ventas, df_cobros):
-    # (Sin cambios en esta función, ya que la limpieza se hace antes, heredará los datos correctos)
     resumen_ventas = df_ventas.groupby(['codigo_vendedor', 'nomvendedor']).agg(
         ventas_totales=('valor_venta', 'sum'), impactos=('cliente_id', 'nunique')).reset_index()
     
@@ -168,8 +160,6 @@ def procesar_datos_periodo(df_ventas, df_cobros):
 # ==============================================================================
 # 3. LÓGICA DE LA INTERFAZ DE USUARIO (UI)
 # ==============================================================================
-# El resto del código no necesita cambios, ya que heredará los datos limpios.
-
 def generar_comentario_asesor(avance_v, avance_c, marquilla_p, avance_comp, avance_sub_meta):
     comentarios = []
     if avance_v >= 100: comentarios.append("📈 **Ventas:** ¡Felicitaciones! Has superado la meta de ventas.")
