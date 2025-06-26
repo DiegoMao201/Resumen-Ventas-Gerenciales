@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 from datetime import datetime
-from dateutil.relativedelta import relativedelta
+import unicodedata
 
 # ==============================================================================
 # 1. CONFIGURACIÓN Y ESTADO INICIAL
@@ -14,16 +14,23 @@ st.set_page_config(
     layout="wide"
 )
 
-# Verifica la autenticación del usuario
+# << AÑADIDO >> Función de normalización para consistencia con la app principal.
+def normalizar_texto(texto):
+    if not isinstance(texto, str):
+        return texto
+    try:
+        texto_sin_tildes = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
+        return texto_sin_tildes.upper().replace('-', ' ').strip().replace('  ', ' ')
+    except (TypeError, AttributeError):
+        return texto
+
+# Bloque de seguridad para verificar autenticación y carga de datos.
 if not st.session_state.get('autenticado'):
-    logo_url = st.session_state.get('APP_CONFIG', {}).get('url_logo', '')
-    if logo_url:
-        st.image(logo_url, width=300)
     st.header("🔒 Acceso Restringido")
     st.warning("Por favor, inicie sesión desde la página principal `🏠 Resumen Mensual` para acceder a esta sección.")
+    st.image("https://raw.githubusercontent.com/DiegoMao201/Resumen-Ventas-Gerenciales/main/LOGO%20FERREINOX%20SAS%20BIC%202024.png", width=300)
     st.stop()
 
-# Carga de datos desde el estado de la sesión
 df_ventas_historico = st.session_state.get('df_ventas')
 APP_CONFIG = st.session_state.get('APP_CONFIG')
 DATA_CONFIG = st.session_state.get('DATA_CONFIG')
@@ -34,19 +41,21 @@ if df_ventas_historico is None or df_ventas_historico.empty or not APP_CONFIG or
 
 # ==============================================================================
 # 2. LÓGICA DE ANÁLISIS DEL PERFIL (El "Cerebro" de la Página)
+# (Sin modificaciones en la lógica de estas funciones)
 # ==============================================================================
 
 def calcular_margen(df):
-    """Calcula el margen bruto y el porcentaje de margen para cada venta."""
-    df['costo_total_linea'] = df['costo_unitario'].fillna(0) * df['unidades_vendidas'].fillna(0)
-    df['margen_bruto'] = df['valor_venta'] - df['costo_total_linea']
-    df['porcentaje_margen'] = np.where(df['valor_venta'] > 0, (df['margen_bruto'] / df['valor_venta']) * 100, 0)
-    return df
+    df_copy = df.copy()
+    df_copy['costo_total_linea'] = df_copy['costo_unitario'].fillna(0) * df_copy['unidades_vendidas'].fillna(0)
+    df_copy['margen_bruto'] = df_copy['valor_venta'] - df_copy['costo_total_linea']
+    df_copy['porcentaje_margen'] = np.where(df_copy['valor_venta'] > 0, (df_copy['margen_bruto'] / df_copy['valor_venta']) * 100, 0)
+    return df_copy
 
+@st.cache_data
 def analizar_tendencias(df_vendedor):
-    """Analiza la evolución mensual de ventas, margen y marquilla."""
-    df_vendedor['mes_anio'] = df_vendedor['fecha_venta'].dt.to_period('M')
-    df_evolucion = df_vendedor.groupby('mes_anio').agg(
+    df_vendedor_copy = df_vendedor.copy()
+    df_vendedor_copy['mes_anio'] = df_vendedor_copy['fecha_venta'].dt.to_period('M')
+    df_evolucion = df_vendedor_copy.groupby('mes_anio').agg(
         valor_venta=('valor_venta', 'sum'),
         margen_bruto=('margen_bruto', 'sum')
     ).reset_index()
@@ -64,7 +73,7 @@ def analizar_tendencias(df_vendedor):
         return pd.DataFrame([{'promedio_marquilla': df_cliente_marcas['puntaje_marquilla'].mean()}])
 
     marquilla_mensual = []
-    for periodo, df_mes in df_vendedor.groupby('mes_anio'):
+    for periodo, df_mes in df_vendedor_copy.groupby('mes_anio'):
         resumen_marquilla_mes = calcular_marquilla_local(df_mes)
         if not resumen_marquilla_mes.empty:
             marquilla_mensual.append({
@@ -77,8 +86,8 @@ def analizar_tendencias(df_vendedor):
 
     return df_evolucion.fillna(0)
 
+@st.cache_data
 def analizar_clientes(df_vendedor):
-    """Realiza un análisis completo de la cartera de clientes."""
     if df_vendedor.empty: return {}
     fecha_max = df_vendedor['fecha_venta'].max()
     mes_actual_inicio = fecha_max.replace(day=1)
@@ -102,8 +111,8 @@ def analizar_clientes(df_vendedor):
         "top_clientes_volumen": ventas_por_cliente.head(10).reset_index()
     }
 
+@st.cache_data
 def analizar_rentabilidad_y_productos(df_vendedor):
-    """Analiza la rentabilidad por producto y cliente."""
     top_productos_margen = df_vendedor.groupby('nombre_articulo')['margen_bruto'].sum().nlargest(5).reset_index()
     bottom_productos_margen = df_vendedor.groupby('nombre_articulo')['margen_bruto'].sum().nsmallest(5).reset_index()
     top_clientes_margen = df_vendedor.groupby(['cliente_id', 'nombre_cliente'])['margen_bruto'].sum().nlargest(10).reset_index()
@@ -117,7 +126,6 @@ def analizar_rentabilidad_y_productos(df_vendedor):
     }
 
 def generar_resumen_ejecutivo(vendedor, analisis):
-    """Crea un resumen en lenguaje natural con los hallazgos clave."""
     st.subheader("📝 Resumen Ejecutivo")
     resumen_kpis = analisis['resumen_kpis']
     analisis_clientes = analisis['analisis_clientes']
@@ -135,7 +143,6 @@ def generar_resumen_ejecutivo(vendedor, analisis):
 # ==============================================================================
 
 def render_pestañas_analisis(analisis, vendedor):
-    """Renderiza las pestañas con todos los gráficos y tablas de análisis."""
     tab1, tab2, tab3, tab4 = st.tabs(["📈 **Tendencias**", "👥 **Análisis de Clientes**", "💰 **Análisis de Rentabilidad**", "📦 **Mix de Productos**"])
     with tab1:
         st.subheader(f"Evolución Mensual de {vendedor}")
@@ -187,9 +194,6 @@ def render_pestañas_analisis(analisis, vendedor):
             with col1:
                 st.markdown("##### Ventas por Super Categoría")
                 if not analisis_mix['mix_super_categoria'].empty:
-                    # =============================================================
-                    # INICIO DEL CAMBIO: Gráfico de Pastel a Gráfico Treemap
-                    # =============================================================
                     fig = px.treemap(
                         analisis_mix['mix_super_categoria'],
                         path=[px.Constant("Todas las Categorías"), 'super_categoria'],
@@ -197,9 +201,6 @@ def render_pestañas_analisis(analisis, vendedor):
                         title='Composición de Ventas por Super Categoría'
                     )
                     fig.update_layout(margin=dict(t=50, l=25, r=25, b=25))
-                    # =============================================================
-                    # FIN DEL CAMBIO
-                    # =============================================================
                     st.plotly_chart(fig, use_container_width=True)
                 else: 
                     st.info("No hay datos de 'Super Categoría' para mostrar.")
@@ -221,32 +222,53 @@ def render_pagina_perfil():
     st.markdown("Una vista profunda del rendimiento histórico, rentabilidad y cartera de clientes.")
     st.markdown("---")
 
-    # --- Selector de Vendedor/Grupo ---
-    lista_vendedores = sorted(list(df_ventas_historico['nomvendedor'].dropna().unique()))
-    vendedores_en_grupos = [v for lista in DATA_CONFIG['grupos_vendedores'].values() for v in lista]
-    vendedores_solos = [v for v in lista_vendedores if v not in vendedores_en_grupos]
-    opciones_analisis = list(DATA_CONFIG['grupos_vendedores'].keys()) + vendedores_solos
+    # --- Selector de Vendedor/Grupo (CORREGIDO)---
+    vendedores_unicos_norm = sorted(list(df_ventas_historico['nomvendedor'].dropna().unique()))
+    grupos = DATA_CONFIG.get('grupos_vendedores', {})
+    vendedores_en_grupos_norm = [normalizar_texto(v) for lista in grupos.values() for v in lista]
+    
+    # Se muestran los nombres originales para una mejor UX
+    nombres_grupos = sorted(grupos.keys())
+    vendedores_solos = sorted([v_orig for v_orig in df_ventas_historico['nomvendedor'].unique() if normalizar_texto(v_orig) not in vendedores_en_grupos_norm])
+
+    opciones_analisis = nombres_grupos + vendedores_solos
     usuario_actual = st.session_state.usuario
-    if usuario_actual == "GERENTE":
+    
+    if normalizar_texto(usuario_actual) == "GERENTE":
         opciones_analisis.insert(0, "Seleccione un Vendedor o Grupo")
-        default_index = 0
+        # Intenta encontrar al usuario actual en la lista para el default, si no, usa el primero.
+        try:
+            default_index = opciones_analisis.index(st.session_state.get('last_selection', opciones_analisis[0]))
+        except ValueError:
+            default_index = 0
     else:
-        opciones_analisis = [usuario_actual] if usuario_actual in opciones_analisis else []
+        opciones_analisis = [usuario_actual]
         default_index = 0
-    if not opciones_analisis: st.warning(f"No se encontraron datos asociados al usuario '{usuario_actual}'."); st.stop()
-    seleccion = st.selectbox("Seleccione el Vendedor o Grupo a analizar:", opciones_analisis, index=default_index)
-    if seleccion == "Seleccione un Vendedor o Grupo": st.info("Por favor, elija un vendedor o grupo para comenzar el análisis."); st.stop()
+
+    if not opciones_analisis:
+        st.warning(f"No se encontraron datos asociados al usuario '{usuario_actual}'.")
+        st.stop()
+        
+    seleccion = st.selectbox("Seleccione el Vendedor o Grupo a analizar:", opciones_analisis, index=default_index, key="perfil_vendedor_selector")
+    st.session_state['last_selection'] = seleccion
+    
+    if seleccion == "Seleccione un Vendedor o Grupo":
+        st.info("Por favor, elija un vendedor o grupo para comenzar el análisis.")
+        st.stop()
 
     # --- Filtro de Meses ---
     st.markdown("##### Seleccione el rango de meses para el análisis:")
-    df_ventas_historico['periodo'] = df_ventas_historico['fecha_venta'].dt.to_period('M')
-    meses_disponibles = sorted(df_ventas_historico['periodo'].unique())
-    mapa_meses = {f"{DATA_CONFIG['mapeo_meses'][p.month]} {p.year}": p for p in meses_disponibles}
+    df_ventas_historico_copy = df_ventas_historico.copy()
+    df_ventas_historico_copy['periodo'] = df_ventas_historico_copy['fecha_venta'].dt.to_period('M')
+    meses_disponibles = sorted(df_ventas_historico_copy['periodo'].unique())
+    mapa_meses = {f"{DATA_CONFIG['mapeo_meses'].get(p.month, p.month)} {p.year}": p for p in meses_disponibles}
     opciones_slider = list(mapa_meses.keys())
+    
+    # Define el rango por defecto (últimos 12 meses o todos si son menos)
     start_index = max(0, len(opciones_slider) - 12)
     end_index = len(opciones_slider) - 1
     
-    if start_index > end_index: # Evita error si hay menos de 1 mes de datos
+    if start_index > end_index:
         start_index = end_index
 
     mes_inicio_str, mes_fin_str = st.select_slider(
@@ -256,21 +278,26 @@ def render_pagina_perfil():
     )
     periodo_inicio = mapa_meses[mes_inicio_str]
     periodo_fin = mapa_meses[mes_fin_str]
-    fecha_inicio = periodo_inicio.start_time.date()
-    fecha_fin = periodo_fin.end_time.date()
+    fecha_inicio = periodo_inicio.start_time
+    fecha_fin = periodo_fin.end_time
 
-    # --- Filtrado de Datos ---
-    if seleccion in DATA_CONFIG['grupos_vendedores']:
-        df_base = df_ventas_historico[df_ventas_historico['nomvendedor'].isin(DATA_CONFIG['grupos_vendedores'][seleccion])]
-    else:
-        df_base = df_ventas_historico[df_ventas_historico['nomvendedor'] == seleccion]
-    df_vendedor = df_base[(df_base['fecha_venta'].dt.date >= fecha_inicio) & (df_base['fecha_venta'].dt.date <= fecha_fin)]
-    if df_vendedor.empty: st.warning(f"No se encontraron datos para '{seleccion}' en el rango de meses seleccionado."); st.stop()
+    # --- Filtrado de Datos (CORREGIDO) ---
+    lista_vendedores_a_filtrar = grupos.get(seleccion, [seleccion])
+    lista_vendedores_a_filtrar_norm = [normalizar_texto(v) for v in lista_vendedores_a_filtrar]
+    
+    df_base = df_ventas_historico[df_ventas_historico['nomvendedor'].isin(lista_vendedores_a_filtrar_norm)]
+    df_vendedor = df_base[(df_base['fecha_venta'] >= fecha_inicio) & (df_base['fecha_venta'] <= fecha_fin)]
+    
+    if df_vendedor.empty:
+        st.warning(f"No se encontraron datos para '{seleccion}' en el rango de meses seleccionado.")
+        st.stop()
     
     # --- Ejecutar Análisis ---
     with st.spinner(f"Analizando perfil de {seleccion} de {mes_inicio_str} a {mes_fin_str}..."):
-        df_vendedor_con_margen = calcular_margen(df_vendedor.copy())
-        venta_total, margen_total = df_vendedor_con_margen['valor_venta'].sum(), df_vendedor_con_margen['margen_bruto'].sum()
+        df_vendedor_con_margen = calcular_margen(df_vendedor)
+        venta_total = df_vendedor_con_margen['valor_venta'].sum()
+        margen_total = df_vendedor_con_margen['margen_bruto'].sum()
+        
         analisis_completo = {
             "resumen_kpis": {
                 "venta_total": venta_total, "margen_total": margen_total,
