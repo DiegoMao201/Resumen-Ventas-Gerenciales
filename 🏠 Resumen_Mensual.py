@@ -1,7 +1,7 @@
 # ==============================================================================
 # SCRIPT COMPLETO Y DEFINITIVO PARA: 🏠 Resumen Mensual.py
 # VERSIÓN FINAL: 28 de Junio, 2025
-# INCLUYE VISTA ANUAL ACUMULADA (YTD), NETEO GLOBAL Y TODOS LOS KPIs
+# Lógica de Venta Neta y Albaranes correcta. Vista Anual Acumulada (YTD) eliminada por solicitud.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -90,7 +90,7 @@ def calcular_marquilla_optimizado(df_periodo):
     df_final_marquilla = df_cliente_marcas.groupby(['codigo_vendedor', 'nomvendedor'])['puntaje_marquilla'].mean().reset_index()
     return df_final_marquilla.rename(columns={'puntaje_marquilla': 'promedio_marquilla'})
 
-def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel, vista):
+def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel):
     ### PASO 1: SEPARACIÓN Y CÁLCULOS BÁSICOS ###
     df_ventas_reales = df_ventas_periodo[df_ventas_periodo['TipoDocumento'] == 'FACTURA'].copy()
     resumen_ventas = df_ventas_reales.groupby(['codigo_vendedor', 'nomvendedor']).agg(ventas_totales=('valor_venta', 'sum'), impactos=('cliente_id', 'nunique')).reset_index()
@@ -123,7 +123,7 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     else:
         df_albaranes_reales_pendientes = df_albaranes_bruto_periodo.copy()
 
-    ### PASO 4: CÁLCULOS FINALES Y AJUSTE DE PRESUPUESTOS ###
+    ### PASO 4: CÁLCULOS FINALES Y ENSAMBLAJE ###
     if not df_albaranes_reales_pendientes.empty:
         resumen_albaranes = df_albaranes_reales_pendientes[df_albaranes_reales_pendientes['valor_venta'] > 0].groupby(['codigo_vendedor', 'nomvendedor']).agg(albaranes_pendientes=('valor_venta', 'sum')).reset_index()
     else:
@@ -135,10 +135,9 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     df_resumen = pd.merge(df_resumen, resumen_sub_meta, on=['codigo_vendedor', 'nomvendedor'], how='left')
     df_resumen = pd.merge(df_resumen, resumen_albaranes, on=['codigo_vendedor', 'nomvendedor'], how='left')
 
-    multiplicador = mes_sel if vista == "Acumulado Anual (YTD)" else 1
     presupuestos_fijos = DATA_CONFIG['presupuestos']
-    df_resumen['presupuesto'] = df_resumen['codigo_vendedor'].map(lambda x: presupuestos_fijos.get(x, {}).get('presupuesto', 0) * multiplicador)
-    df_resumen['presupuestocartera'] = df_resumen['codigo_vendedor'].map(lambda x: presupuestos_fijos.get(x, {}).get('presupuestocartera', 0) * multiplicador)
+    df_resumen['presupuesto'] = df_resumen['codigo_vendedor'].map(lambda x: presupuestos_fijos.get(x, {}).get('presupuesto', 0))
+    df_resumen['presupuestocartera'] = df_resumen['codigo_vendedor'].map(lambda x: presupuestos_fijos.get(x, {}).get('presupuestocartera', 0))
     df_resumen.fillna(0, inplace=True)
     
     registros_agrupados = []
@@ -148,11 +147,10 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
         df_grupo_actual = df_resumen[df_resumen['nomvendedor'].isin(lista_vendedores_norm)]
         if not df_grupo_actual.empty:
             anio_anterior = anio_sel - 1
-            filtro_mes_historico = (df_ventas_historicas['mes'] <= mes_sel) if vista == "Acumulado Anual (YTD)" else (df_ventas_historicas['mes'] == mes_sel)
             df_grupo_historico_facturas = df_ventas_historicas[
                 (df_ventas_historicas['TipoDocumento'] == 'FACTURA') &
                 (df_ventas_historicas['anio'] == anio_anterior) & 
-                filtro_mes_historico & 
+                (df_ventas_historicas['mes'] == mes_sel) & 
                 (df_ventas_historicas['nomvendedor'].isin(lista_vendedores_norm))
             ]
             ventas_anio_anterior = df_grupo_historico_facturas['valor_venta'].sum() if not df_grupo_historico_facturas.empty else 0
@@ -283,8 +281,6 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
 
 def render_dashboard():
     st.sidebar.markdown("---"); st.sidebar.header("Filtros de Periodo")
-    
-    vista = st.sidebar.radio("Seleccionar Vista", ["Mensual", "Acumulado Anual (YTD)"], horizontal=True)
 
     df_ventas_historicas = st.session_state.df_ventas
     df_cobros_historicos = st.session_state.df_cobros
@@ -296,25 +292,14 @@ def render_dashboard():
     lista_meses_num = sorted(df_ventas_historicas[df_ventas_historicas['anio'] == anio_sel]['mes'].unique())
     index_mes_defecto = lista_meses_num.index(mes_reciente) if anio_sel == anio_reciente and mes_reciente in lista_meses_num else 0
     
-    mes_sel_num = st.sidebar.selectbox(
-        "Elija el Mes" if vista == "Mensual" else "Acumulado hasta el Mes", 
-        options=lista_meses_num, 
-        format_func=lambda x: DATA_CONFIG['mapeo_meses'].get(x, 'N/A'), 
-        index=index_mes_defecto
-    )
+    mes_sel_num = st.sidebar.selectbox("Elija el Mes", options=lista_meses_num, format_func=lambda x: DATA_CONFIG['mapeo_meses'].get(x, 'N/A'), index=index_mes_defecto)
 
-    if vista == "Mensual":
-        df_ventas_periodo = df_ventas_historicas[(df_ventas_historicas['anio'] == anio_sel) & (df_ventas_historicas['mes'] == mes_sel_num)]
-        df_cobros_periodo = df_cobros_historicos[(df_cobros_historicos['anio'] == anio_sel) & (df_cobros_historicos['mes'] == mes_sel_num)]
-        titulo_header = f"{DATA_CONFIG['mapeo_meses'].get(mes_sel_num, '')} {anio_sel}"
-    else: # Vista Acumulado Anual (YTD)
-        df_ventas_periodo = df_ventas_historicas[(df_ventas_historicas['anio'] == anio_sel) & (df_ventas_historicas['mes'] <= mes_sel_num)]
-        df_cobros_periodo = df_cobros_historicos[(df_cobros_historicos['anio'] == anio_sel) & (df_cobros_historicos['mes'] <= mes_sel_num)]
-        titulo_header = f"Acumulado {anio_sel} (Hasta {DATA_CONFIG['mapeo_meses'].get(mes_sel_num, '')})"
+    df_ventas_periodo = df_ventas_historicas[(df_ventas_historicas['anio'] == anio_sel) & (df_ventas_historicas['mes'] == mes_sel_num)]
+    df_cobros_periodo = df_cobros_historicos[(df_cobros_historicos['anio'] == anio_sel) & (df_cobros_historicos['mes'] == mes_sel_num)]
 
     if df_ventas_periodo.empty: st.warning("No hay datos para el periodo seleccionado."); st.stop()
 
-    df_resumen_final, df_albaranes_pendientes = procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel_num, vista)
+    df_resumen_final, df_albaranes_pendientes = procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel_num)
     
     usuario_actual_norm = normalizar_texto(st.session_state.usuario)
     if usuario_actual_norm == "GERENTE":
@@ -333,7 +318,7 @@ def render_dashboard():
         return "🔴 Necesita Atención"
     df_vista['Estatus'] = df_vista.apply(asignar_estatus, axis=1)
 
-    st.title("🏠 Resumen de Rendimiento"); st.header(titulo_header)
+    st.title("🏠 Resumen de Rendimiento"); st.header(f"{DATA_CONFIG['mapeo_meses'].get(mes_sel_num, '')} {anio_sel}")
     vista_para = st.session_state.usuario if len(df_vista['nomvendedor'].unique()) == 1 else 'Múltiples Seleccionados'
     st.markdown(f"**Vista para:** `{vista_para}`")
     
