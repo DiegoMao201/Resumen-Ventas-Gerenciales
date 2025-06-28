@@ -1,6 +1,7 @@
 # ==============================================================================
 # SCRIPT COMPLETO Y DEFINITIVO PARA: 🏠 Resumen Mensual.py
-# VERSIÓN FINAL CON LÓGICA DE ALBARANES PENDIENTES Y NETEO DE ANULACIONES
+# VERSIÓN FINAL: 28 de Junio, 2025
+# INCLUYE LÓGICA DE ALBARANES PENDIENTES Y NETEO GLOBAL INTER-MES
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -18,7 +19,6 @@ APP_CONFIG = {
     "url_logo": "https://raw.githubusercontent.com/DiegoMao201/Resumen-Ventas-Gerenciales/main/LOGO%20FERREINOX%20SAS%20BIC%202024.png",
     "dropbox_paths": {"ventas": "/data/ventas_detalle.csv", "cobros": "/data/cobros_detalle.csv"},
     "column_names": {
-        # >> MODIFICADO <<: Se añaden las columnas de la nueva consulta SQL
         "ventas": ['anio', 'mes', 'fecha_venta', 'Serie', 'TipoDocumento', 'codigo_vendedor', 'nomvendedor', 'cliente_id', 'nombre_cliente', 'codigo_articulo', 'nombre_articulo', 'categoria_producto', 'linea_producto', 'marca_producto', 'valor_venta', 'unidades_vendidas', 'costo_unitario', 'super_categoria'],
         "cobros": ['anio', 'mes', 'fecha_cobro', 'codigo_vendedor', 'valor_cobro']
     },
@@ -90,13 +90,11 @@ def calcular_marquilla_optimizado(df_periodo):
     df_final_marquilla = df_cliente_marcas.groupby(['codigo_vendedor', 'nomvendedor'])['puntaje_marquilla'].mean().reset_index()
     return df_final_marquilla.rename(columns={'puntaje_marquilla': 'promedio_marquilla'})
 
-# >> FUNCIÓN CLAVE MODIFICADA <<
 def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel):
-    ### PASO 1: SEPARACIÓN DE DATOS (AISLAMIENTO DE CÁLCULOS) ###
+    ### PASO 1: SEPARACIÓN DE DATOS DEL PERIODO ACTUAL ###
     df_ventas_reales = df_ventas_periodo[df_ventas_periodo['TipoDocumento'] == 'FACTURA'].copy()
-    df_albaranes_bruto = df_ventas_periodo[df_ventas_periodo['TipoDocumento'].str.contains('ALBARAN', na=False)].copy()
-
-    ### PASO 2: CÁLCULOS SOBRE VENTAS REALES (TUS INDICADORES ORIGINALES NO SE AFECTAN) ###
+    
+    # Cálculos sobre las ventas reales del periodo (TUS INDICADORES SIGUEN INTACTOS)
     resumen_ventas = df_ventas_reales.groupby(['codigo_vendedor', 'nomvendedor']).agg(ventas_totales=('valor_venta', 'sum'), impactos=('cliente_id', 'nunique')).reset_index()
     resumen_cobros = df_cobros_periodo.groupby('codigo_vendedor').agg(cobros_totales=('valor_cobro', 'sum')).reset_index()
     df_ventas_comp = df_ventas_reales[df_ventas_reales['super_categoria'] != APP_CONFIG['complementarios']['exclude_super_categoria']]
@@ -106,20 +104,24 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     resumen_sub_meta = df_ventas_sub_meta.groupby(['codigo_vendedor','nomvendedor']).agg(ventas_sub_meta=('valor_venta', 'sum')).reset_index()
     resumen_marquilla = calcular_marquilla_optimizado(df_ventas_periodo)
 
-    ### PASO 3: CÁLCULOS SOBRE ALBARANES (NUEVO INDICADOR AISLADO CON LÓGICA DE NETEO) ###
-    df_albaranes_reales_pendientes = pd.DataFrame()
-    if not df_albaranes_bruto.empty:
-        grouping_keys = ['Serie', 'cliente_id', 'codigo_articulo', 'codigo_vendedor']
-        df_neto = df_albaranes_bruto.groupby(grouping_keys).agg(valor_neto=('valor_venta', 'sum')).reset_index()
-        df_grupos_pendientes = df_neto[df_neto['valor_neto'] != 0]
-        df_albaranes_reales_pendientes = df_albaranes_bruto.merge(
-            df_grupos_pendientes[grouping_keys],
-            on=grouping_keys,
-            how='inner'
-        )
+    ### PASO 2: LÓGICA DE NETEO GLOBAL (LA SOLUCIÓN AL PROBLEMA INTER-MES) ###
+    df_albaranes_historicos_bruto = df_ventas_historicas[df_ventas_historicas['TipoDocumento'].str.contains('ALBARAN', na=False)].copy()
+    grouping_keys = ['Serie', 'cliente_id', 'codigo_articulo', 'codigo_vendedor']
+    df_neto_historico = df_albaranes_historicos_bruto.groupby(grouping_keys).agg(valor_neto=('valor_venta', 'sum')).reset_index()
+    df_grupos_cancelados_global = df_neto_historico[df_neto_historico['valor_neto'] == 0]
+
+    ### PASO 3: LIMPIEZA DE ALBARANES DEL PERIODO ACTUAL ###
+    df_albaranes_bruto_periodo = df_ventas_periodo[df_ventas_periodo['TipoDocumento'].str.contains('ALBARAN', na=False)].copy()
+    df_albaranes_reales_pendientes = df_albaranes_bruto_periodo.merge(
+        df_grupos_cancelados_global[grouping_keys],
+        on=grouping_keys,
+        how='left',
+        indicator=True
+    ).query('_merge == "left_only"').drop(columns=['_merge'])
+
+    ### PASO 4: CÁLCULOS FINALES SOBRE DATOS LIMPIOS Y ENSAMBLAJE ###
     resumen_albaranes = df_albaranes_reales_pendientes[df_albaranes_reales_pendientes['valor_venta'] > 0].groupby(['codigo_vendedor', 'nomvendedor']).agg(albaranes_pendientes=('valor_venta', 'sum')).reset_index()
 
-    ### PASO 4: UNIR TODO PARA LA VISTA FINAL ###
     df_resumen = pd.merge(resumen_ventas, resumen_cobros, on='codigo_vendedor', how='left')
     df_resumen = pd.merge(df_resumen, resumen_marquilla, on=['codigo_vendedor', 'nomvendedor'], how='left')
     df_resumen = pd.merge(df_resumen, resumen_complementarios, on=['codigo_vendedor', 'nomvendedor'], how='left')
@@ -137,8 +139,13 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
         df_grupo_actual = df_resumen[df_resumen['nomvendedor'].isin(lista_vendedores_norm)]
         if not df_grupo_actual.empty:
             anio_anterior = anio_sel - 1
-            df_grupo_historico = df_ventas_historicas[(df_ventas_historicas['anio'] == anio_anterior) & (df_ventas_historicas['mes'] == mes_sel) & (df_ventas_historicas['nomvendedor'].isin(lista_vendedores_norm))]
-            ventas_anio_anterior = df_grupo_historico['valor_venta'].sum()
+            df_grupo_historico_facturas = df_ventas_historicas[
+                (df_ventas_historicas['TipoDocumento'] == 'FACTURA') &
+                (df_ventas_historicas['anio'] == anio_anterior) & 
+                (df_ventas_historicas['mes'] == mes_sel) & 
+                (df_ventas_historicas['nomvendedor'].isin(lista_vendedores_norm))
+            ]
+            ventas_anio_anterior = df_grupo_historico_facturas['valor_venta'].sum()
             presupuesto_dinamico = ventas_anio_anterior * incremento_mostradores
             cols_a_sumar = ['ventas_totales', 'cobros_totales', 'impactos', 'presupuestocartera', 'ventas_complementarios', 'ventas_sub_meta', 'albaranes_pendientes']
             suma_grupo = df_grupo_actual[cols_a_sumar].sum().to_dict()
@@ -256,7 +263,6 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
                 fig.update_traces(textinfo='percent+label', textposition='inside')
                 st.plotly_chart(fig, use_container_width=True)
 
-# >> FUNCIÓN CLAVE MODIFICADA <<
 def render_dashboard():
     st.sidebar.markdown("---"); st.sidebar.header("Filtros de Periodo")
     df_ventas_historicas = st.session_state.df_ventas
@@ -273,7 +279,7 @@ def render_dashboard():
     df_ventas_periodo = df_ventas_historicas[(df_ventas_historicas['anio'] == anio_sel) & (df_ventas_historicas['mes'] == mes_sel_num)]
     df_cobros_periodo = df_cobros_historicos[(df_cobros_historicos['anio'] == anio_sel) & (df_cobros_historicos['mes'] == mes_sel_num)]
     
-    if df_ventas_periodo.empty: st.warning("No hay datos de ventas para el periodo seleccionado."); st.stop()
+    if df_ventas_periodo.empty: st.warning("No hay datos para el periodo seleccionado."); st.stop()
     
     df_resumen_final, df_albaranes_pendientes = procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel_num)
     
