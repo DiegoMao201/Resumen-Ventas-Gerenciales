@@ -434,26 +434,45 @@ def render_dashboard():
 
 
 # ==============================================================================
-# 4. LÓGICA DE AUTENTICACIÓN Y EJECUCIÓN PRINCIPAL (Sin cambios)
+# 4. LÓGICA DE AUTENTICACIÓN Y EJECUCIÓN PRINCIPAL (VERSIÓN CORREGIDA Y ROBUSTA)
 # ==============================================================================
 def main():
+    # --- PASO 1: Cargar los datos una sola vez por sesión ---
+    # Se asegura de que los datos maestros existan en el estado de la sesión.
+    # Si no existen, los carga. Esto evita recargar en cada acción.
+    if 'df_ventas' not in st.session_state:
+        with st.spinner('Cargando datos maestros, por favor espere...'):
+            st.session_state.df_ventas = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["ventas"], APP_CONFIG["column_names"]["ventas"])
+            st.session_state.df_cobros = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["cobros"], APP_CONFIG["column_names"]["cobros"])
+            st.session_state['APP_CONFIG'] = APP_CONFIG
+            st.session_state['DATA_CONFIG'] = DATA_CONFIG
+    
     st.sidebar.image(APP_CONFIG["url_logo"], use_container_width=True)
     st.sidebar.header("Control de Acceso")
-    if 'autenticado' not in st.session_state: st.session_state.autenticado = False
+    
+    if 'autenticado' not in st.session_state:
+        st.session_state.autenticado = False
+
+    # --- PASO 2: Lógica de autenticación ---
     if not st.session_state.autenticado:
+        # Usa los datos ya cargados en st.session_state para mayor seguridad y consistencia
+        df_para_usuarios = st.session_state.get('df_ventas', pd.DataFrame())
+        
+        # Esta función anidada ahora es segura porque no depende de una carga de datos externa.
         @st.cache_data
-        def obtener_lista_usuarios():
-            df = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["ventas"], APP_CONFIG["column_names"]["ventas"])
-            if not df.empty:
+        def obtener_lista_usuarios(df_ventas_cache):
+            if not df_ventas_cache.empty:
                 grupos_orig = list(DATA_CONFIG['grupos_vendedores'].keys())
                 vendedores_en_grupos_norm = [normalizar_texto(v) for lista in DATA_CONFIG['grupos_vendedores'].values() for v in lista]
-                vendedores_unicos_df = df['nomvendedor'].dropna().unique()
+                vendedores_unicos_df = df_ventas_cache['nomvendedor'].dropna().unique()
                 mapa_norm_a_orig = {normalizar_texto(v): v for v in vendedores_unicos_df}
                 vendedores_solos_norm = [v_norm for v_norm in [normalizar_texto(v) for v in vendedores_unicos_df] if v_norm not in vendedores_en_grupos_norm]
                 vendedores_solos_orig = sorted([mapa_norm_a_orig.get(v_norm) for v_norm in vendedores_solos_norm if mapa_norm_a_orig.get(v_norm)])
                 return ["GERENTE"] + sorted(grupos_orig) + vendedores_solos_orig
             return ["GERENTE"] + list(DATA_CONFIG['grupos_vendedores'].keys())
-        todos_usuarios = obtener_lista_usuarios()
+
+        todos_usuarios = obtener_lista_usuarios(df_para_usuarios)
+        
         usuarios_fijos_orig = {"GERENTE": "1234", "MOSTRADOR PEREIRA": "2345", "MOSTRADOR ARMENIA": "3456", "MOSTRADOR MANIZALES": "4567", "MOSTRADOR LAURELES": "5678"}
         if "MOSTRADOR OPALO" not in usuarios_fijos_orig: usuarios_fijos_orig["MOSTRADOR OPALO"] = "opalo123"
         usuarios = {normalizar_texto(k): v for k, v in usuarios_fijos_orig.items()}
@@ -461,29 +480,32 @@ def main():
         for u in todos_usuarios:
             u_norm = normalizar_texto(u)
             if u_norm not in usuarios: usuarios[u_norm] = str(codigo); codigo += 1
+            
         usuario_seleccionado = st.sidebar.selectbox("Seleccione su usuario", options=todos_usuarios)
         clave = st.sidebar.text_input("Contraseña", type="password")
+
         if st.sidebar.button("Ingresar"):
             usuario_sel_norm = normalizar_texto(usuario_seleccionado)
             if usuario_sel_norm in usuarios and clave == usuarios[usuario_sel_norm]:
+                # El botón ahora SOLO se encarga de autenticar y disparar el rerun.
+                # Ya no carga datos, lo que hace la transición más limpia.
                 st.session_state.autenticado = True
                 st.session_state.usuario = usuario_seleccionado
-                with st.spinner('Cargando datos maestros, por favor espere...'):
-                    st.session_state.df_ventas = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["ventas"], APP_CONFIG["column_names"]["ventas"])
-                    st.session_state.df_cobros = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["cobros"], APP_CONFIG["column_names"]["cobros"])
-                    st.session_state['APP_CONFIG'] = APP_CONFIG
-                    st.session_state['DATA_CONFIG'] = DATA_CONFIG
-                st.rerun()
+                st.rerun() 
             else:
                 st.sidebar.error("Usuario o contraseña incorrectos")
-        st.title("Plataforma de Inteligencia de Negocios"); st.image(APP_CONFIG["url_logo"], width=400)
-        st.header("Bienvenido"); st.info("Por favor, utilice el panel de la izquierda para ingresar sus credenciales de acceso.")
+        
+        st.title("Plataforma de Inteligencia de Negocios")
+        st.image(APP_CONFIG["url_logo"], width=400)
+        st.header("Bienvenido")
+        st.info("Por favor, utilice el panel de la izquierda para ingresar sus credenciales de acceso.")
+
+    # --- PASO 3: Si ya está autenticado, renderiza el dashboard ---
     else:
         render_dashboard()
         if st.sidebar.button("Salir"):
-            for key in list(st.session_state.keys()):
+            # Limpia TODAS las claves de la sesión para un logout completo
+            keys_to_clear = list(st.session_state.keys())
+            for key in keys_to_clear:
                 del st.session_state[key]
             st.rerun()
-
-if __name__ == '__main__':
-    main()
