@@ -1,9 +1,8 @@
 # ==============================================================================
 # SCRIPT COMPLETO Y DEFINITIVO PARA: 🏠 Resumen Mensual.py
 # VERSIÓN FINAL: 29 de Junio, 2025
-# CORRECCIONES:
-# 1. Lógica de datos ajustada para procesar 'FACTURA_ALBARAN' y 'FACTURA_DIRECTA'.
-# 2. Eliminado st.stop() y refactorizado render_dashboard para prevenir errores de frontend.
+# DESCRIPCIÓN: Versión final con todas las correcciones de lógica de datos y 
+#              errores de frontend aplicadas.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -50,6 +49,7 @@ def normalizar_texto(texto):
         return texto_sin_tildes.upper().replace('-', ' ').strip().replace('  ', ' ')
     except (TypeError, AttributeError): return texto
 
+# Normaliza textos de la configuración una sola vez al inicio
 APP_CONFIG['complementarios']['exclude_super_categoria'] = normalizar_texto(APP_CONFIG['complementarios']['exclude_super_categoria'])
 APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo'] = normalizar_texto(APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo'])
 APP_CONFIG['categorias_clave_venta'] = [normalizar_texto(cat) for cat in APP_CONFIG['categorias_clave_venta']]
@@ -62,14 +62,16 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
             contenido_csv = res.content.decode('latin-1')
             df = pd.read_csv(io.StringIO(contenido_csv), header=None, sep=',', on_bad_lines='skip', dtype=str)
             if df.shape[1] != len(nombres_columnas):
-                st.warning(f"Formato en {ruta_archivo}: Se esperaban {len(nombres_columnas)} cols pero hay {df.shape[1]}.")
-                return pd.DataFrame(columns=nombres_columnas)
+                st.warning(f"Formato en {ruta_archivo}: Se esperaban {len(nombres_columnas)} columnas pero se encontraron {df.shape[1]}. Algunas columnas podrían faltar.")
+                # Se ajusta para rellenar columnas faltantes con None para evitar errores posteriores
+                df = df.reindex(columns=range(len(nombres_columnas)))
             df.columns = nombres_columnas
             numeric_cols = ['anio', 'mes', 'valor_venta', 'valor_cobro', 'unidades_vendidas', 'costo_unitario', 'marca_producto']
             for col in numeric_cols:
                 if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce')
-            df.dropna(subset=['anio', 'mes', 'codigo_vendedor'], inplace=True)
-            df = df.astype({'anio': int, 'mes': int, 'codigo_vendedor': str})
+            df.dropna(subset=['anio', 'mes'], inplace=True) # Se quita 'codigo_vendedor' de aquí para no eliminar filas si es nulo
+            df = df.astype({'anio': int, 'mes': int})
+            if 'codigo_vendedor' in df.columns: df['codigo_vendedor'] = df['codigo_vendedor'].astype(str)
             if 'fecha_venta' in df.columns: df['fecha_venta'] = pd.to_datetime(df['fecha_venta'], errors='coerce')
             if 'marca_producto' in df.columns: df['nombre_marca'] = df['marca_producto'].map(DATA_CONFIG["mapeo_marcas"]).fillna('No Especificada')
             cols_a_normalizar = ['super_categoria', 'categoria_producto', 'nombre_marca', 'nomvendedor', 'TipoDocumento']
@@ -94,8 +96,8 @@ def calcular_marquilla_optimizado(df_periodo):
 
 def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel):
     ### PASO 1: SEPARACIÓN Y CÁLCULOS BÁSICOS ###
-    # --- CORRECCIÓN CLAVE: Ahora se consideran todos los tipos de factura ('FACTURA_ALBARAN', 'FACTURA_DIRECTA').
-    df_ventas_reales = df_ventas_periodo[df_ventas_periodo['TipoDocumento'].str.contains('FACTURA', na=False)].copy()
+    # --- CORRECCIÓN DE LÓGICA: Ahora se consideran todos los tipos de factura ('FACTURA_ALBARAN', 'FACTURA_DIRECTA').
+    df_ventas_reales = df_ventas_periodo[df_ventas_periodo['TipoDocumento'].str.contains('FACTURA', na=False, case=False)].copy()
     
     resumen_ventas = df_ventas_reales.groupby(['codigo_vendedor', 'nomvendedor']).agg(ventas_totales=('valor_venta', 'sum'), impactos=('cliente_id', 'nunique')).reset_index()
     resumen_cobros = df_cobros_periodo.groupby('codigo_vendedor').agg(cobros_totales=('valor_cobro', 'sum')).reset_index()
@@ -107,7 +109,7 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     resumen_marquilla = calcular_marquilla_optimizado(df_ventas_periodo)
 
     ### PASO 2: LÓGICA DE NETEO GLOBAL ###
-    df_albaranes_historicos_bruto = df_ventas_historicas[df_ventas_historicas['TipoDocumento'].str.contains('ALBARAN', na=False)].copy()
+    df_albaranes_historicos_bruto = df_ventas_historicas[df_ventas_historicas['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
     grouping_keys = ['Serie', 'cliente_id', 'codigo_articulo', 'codigo_vendedor']
     if not df_albaranes_historicos_bruto.empty:
         df_neto_historico = df_albaranes_historicos_bruto.groupby(grouping_keys).agg(valor_neto=('valor_venta', 'sum')).reset_index()
@@ -116,13 +118,10 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
         df_grupos_cancelados_global = pd.DataFrame(columns=grouping_keys)
 
     ### PASO 3: LIMPIEZA DE ALBARANES DEL PERIODO ACTUAL ###
-    df_albaranes_bruto_periodo = df_ventas_periodo[df_ventas_periodo['TipoDocumento'].str.contains('ALBARAN', na=False)].copy()
+    df_albaranes_bruto_periodo = df_ventas_periodo[df_ventas_periodo['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
     if not df_albaranes_bruto_periodo.empty and not df_grupos_cancelados_global.empty:
         df_albaranes_reales_pendientes = df_albaranes_bruto_periodo.merge(
-            df_grupos_cancelados_global[grouping_keys],
-            on=grouping_keys,
-            how='left',
-            indicator=True
+            df_grupos_cancelados_global[grouping_keys], on=grouping_keys, how='left', indicator=True
         ).query('_merge == "left_only"').drop(columns=['_merge'])
     else:
         df_albaranes_reales_pendientes = df_albaranes_bruto_periodo.copy()
@@ -140,8 +139,8 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     df_resumen = pd.merge(df_resumen, resumen_albaranes, on=['codigo_vendedor', 'nomvendedor'], how='left')
 
     presupuestos_fijos = DATA_CONFIG['presupuestos']
-    df_resumen['presupuesto'] = df_resumen['codigo_vendedor'].map(lambda x: presupuestos_fijos.get(x, {}).get('presupuesto', 0))
-    df_resumen['presupuestocartera'] = df_resumen['codigo_vendedor'].map(lambda x: presupuestos_fijos.get(x, {}).get('presupuestocartera', 0))
+    df_resumen['presupuesto'] = df_resumen['codigo_vendedor'].map(lambda x: presupuestos_fijos.get(str(x), {}).get('presupuesto', 0))
+    df_resumen['presupuestocartera'] = df_resumen['codigo_vendedor'].map(lambda x: presupuestos_fijos.get(str(x), {}).get('presupuestocartera', 0))
     df_resumen.fillna(0, inplace=True)
     
     registros_agrupados = []
@@ -151,9 +150,9 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
         df_grupo_actual = df_resumen[df_resumen['nomvendedor'].isin(lista_vendedores_norm)]
         if not df_grupo_actual.empty:
             anio_anterior = anio_sel - 1
-            # --- CORRECCIÓN CLAVE: El presupuesto histórico ahora también busca todos los tipos de factura.
+            # --- CORRECCIÓN DE LÓGICA: El presupuesto histórico ahora también busca todos los tipos de factura.
             df_grupo_historico_facturas = df_ventas_historicas[
-                (df_ventas_historicas['TipoDocumento'].str.contains('FACTURA', na=False)) &
+                (df_ventas_historicas['TipoDocumento'].str.contains('FACTURA', na=False, case=False)) &
                 (df_ventas_historicas['anio'] == anio_anterior) & 
                 (df_ventas_historicas['mes'] == mes_sel) & 
                 (df_ventas_historicas['nomvendedor'].isin(lista_vendedores_norm))
@@ -208,7 +207,7 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
     st.markdown("---")
     st.header("🔬 Análisis Detallado del Periodo")
     opciones_enfoque = ["Visión General"] + sorted(df_vista['nomvendedor'].unique())
-    enfoque_sel = st.selectbox("Enfocar análisis en:", opciones_enfoque, index=0)
+    enfoque_sel = st.selectbox("Enfocar análisis en:", opciones_enfoque, index=0, key="sb_enfoque_analisis")
     if enfoque_sel == "Visión General":
         nombres_a_filtrar = []
         for vendedor in df_vista['nomvendedor']:
@@ -258,8 +257,8 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
     with tab3:
         st.subheader("Top 10 Clientes del Periodo")
         if not df_ventas_enfocadas.empty:
-            # --- CORRECCIÓN CLAVE: El filtro de Top Clientes ahora considera todos los tipos de factura.
-            df_facturas_enfocadas = df_ventas_enfocadas[df_ventas_enfocadas['TipoDocumento'].str.contains('FACTURA', na=False)]
+            # --- CORRECCIÓN DE LÓGICA: El filtro de Top Clientes ahora considera todos los tipos de factura.
+            df_facturas_enfocadas = df_ventas_enfocadas[df_ventas_enfocadas['TipoDocumento'].str.contains('FACTURA', na=False, case=False)]
             top_clientes = df_facturas_enfocadas.groupby('nombre_cliente')['valor_venta'].sum().nlargest(10).reset_index()
             st.dataframe(top_clientes, column_config={"nombre_cliente": "Cliente", "valor_venta": st.column_config.NumberColumn("Total Compra", format="$ %d")}, use_container_width=True, hide_index=True)
         else: st.info("No hay datos de clientes para este periodo.")
@@ -285,7 +284,6 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
                 fig.update_traces(textinfo='percent+label', textposition='inside')
                 st.plotly_chart(fig, use_container_width=True)
 
-# --- FUNCIÓN COMPLETAMENTE REFACTORIZADA PARA EVITAR EL ERROR 'removeChild' ---
 def render_dashboard():
     st.sidebar.markdown("---")
     st.sidebar.header("Filtros de Periodo")
@@ -293,27 +291,25 @@ def render_dashboard():
     df_ventas_historicas = st.session_state.df_ventas
     df_cobros_historicos = st.session_state.df_cobros
     
-    # Manejo seguro en caso de que no haya datos en absoluto
     if 'anio' not in df_ventas_historicas.columns or df_ventas_historicas.empty:
         st.error("No hay datos históricos de ventas para analizar.")
-        return # Salida segura de la función
+        return
 
     lista_anios = sorted(df_ventas_historicas['anio'].unique(), reverse=True)
     anio_reciente = int(df_ventas_historicas['anio'].max())
     mes_reciente = int(df_ventas_historicas[df_ventas_historicas['anio'] == anio_reciente]['mes'].max())
-    anio_sel = st.sidebar.selectbox("Elija el Año", lista_anios, index=0)
+    anio_sel = st.sidebar.selectbox("Elija el Año", lista_anios, index=0, key="sb_anio")
     lista_meses_num = sorted(df_ventas_historicas[df_ventas_historicas['anio'] == anio_sel]['mes'].unique())
     
     if not lista_meses_num:
         st.warning(f"No hay datos de ventas para el año {anio_sel}.")
-        return # Salida segura
+        return
         
     index_mes_defecto = lista_meses_num.index(mes_reciente) if anio_sel == anio_reciente and mes_reciente in lista_meses_num else 0
-    mes_sel_num = st.sidebar.selectbox("Elija el Mes", options=lista_meses_num, format_func=lambda x: DATA_CONFIG['mapeo_meses'].get(x, 'N/A'), index=index_mes_defecto)
+    mes_sel_num = st.sidebar.selectbox("Elija el Mes", options=lista_meses_num, format_func=lambda x: DATA_CONFIG['mapeo_meses'].get(x, 'N/A'), index=index_mes_defecto, key="sb_mes")
 
     df_ventas_periodo = df_ventas_historicas[(df_ventas_historicas['anio'] == anio_sel) & (df_ventas_historicas['mes'] == mes_sel_num)]
     
-    # --- ESTRUCTURA DE CONTROL IF/ELSE PARA EVITAR st.stop() ---
     if df_ventas_periodo.empty:
         st.warning("No se encontraron datos de ventas para el periodo seleccionado.")
     else:
@@ -323,7 +319,7 @@ def render_dashboard():
         usuario_actual_norm = normalizar_texto(st.session_state.usuario)
         if usuario_actual_norm == "GERENTE":
             lista_filtro = sorted(df_resumen_final['nomvendedor'].unique())
-            vendedores_sel = st.sidebar.multiselect("Filtrar Vendedores/Grupos", options=lista_filtro, default=lista_filtro)
+            vendedores_sel = st.sidebar.multiselect("Filtrar Vendedores/Grupos", options=lista_filtro, default=lista_filtro, key="ms_vendedores")
             df_vista = df_resumen_final[df_resumen_final['nomvendedor'].isin(vendedores_sel)]
         else:
             df_vista = df_resumen_final[df_resumen_final['nomvendedor'] == usuario_actual_norm]
@@ -331,7 +327,6 @@ def render_dashboard():
         if df_vista.empty:
             st.warning("No hay datos disponibles para la selección de usuario/grupo actual.")
         else:
-            # --- Si todo es correcto, se dibuja el resto del dashboard ---
             def asignar_estatus(row):
                 if row['presupuesto'] > 0:
                     avance = (row['ventas_totales'] / row['presupuesto']) * 100
@@ -432,14 +427,12 @@ def render_dashboard():
                     }, use_container_width=True, hide_index=True
                 )
 
-
 # ==============================================================================
-# 4. LÓGICA DE AUTENTICACIÓN Y EJECUCIÓN PRINCIPAL (VERSIÓN CORREGIDA Y ROBUSTA)
+# 4. LÓGICA DE AUTENTICACIÓN Y EJECUCIÓN PRINCIPAL (VERSIÓN FINAL Y ROBUSTA)
 # ==============================================================================
 def main():
     # --- PASO 1: Cargar los datos una sola vez por sesión ---
     # Se asegura de que los datos maestros existan en el estado de la sesión.
-    # Si no existen, los carga. Esto evita recargar en cada acción.
     if 'df_ventas' not in st.session_state:
         with st.spinner('Cargando datos maestros, por favor espere...'):
             st.session_state.df_ventas = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["ventas"], APP_CONFIG["column_names"]["ventas"])
@@ -455,13 +448,11 @@ def main():
 
     # --- PASO 2: Lógica de autenticación ---
     if not st.session_state.autenticado:
-        # Usa los datos ya cargados en st.session_state para mayor seguridad y consistencia
         df_para_usuarios = st.session_state.get('df_ventas', pd.DataFrame())
         
-        # Esta función anidada ahora es segura porque no depende de una carga de datos externa.
         @st.cache_data
         def obtener_lista_usuarios(df_ventas_cache):
-            if not df_ventas_cache.empty:
+            if not df_ventas_cache.empty and 'nomvendedor' in df_ventas_cache.columns:
                 grupos_orig = list(DATA_CONFIG['grupos_vendedores'].keys())
                 vendedores_en_grupos_norm = [normalizar_texto(v) for lista in DATA_CONFIG['grupos_vendedores'].values() for v in lista]
                 vendedores_unicos_df = df_ventas_cache['nomvendedor'].dropna().unique()
@@ -481,14 +472,12 @@ def main():
             u_norm = normalizar_texto(u)
             if u_norm not in usuarios: usuarios[u_norm] = str(codigo); codigo += 1
             
-        usuario_seleccionado = st.sidebar.selectbox("Seleccione su usuario", options=todos_usuarios)
-        clave = st.sidebar.text_input("Contraseña", type="password")
+        usuario_seleccionado = st.sidebar.selectbox("Seleccione su usuario", options=todos_usuarios, key="sb_login_user")
+        clave = st.sidebar.text_input("Contraseña", type="password", key="txt_login_pass")
 
-        if st.sidebar.button("Ingresar"):
+        if st.sidebar.button("Ingresar", key="btn_login"):
             usuario_sel_norm = normalizar_texto(usuario_seleccionado)
             if usuario_sel_norm in usuarios and clave == usuarios[usuario_sel_norm]:
-                # El botón ahora SOLO se encarga de autenticar y disparar el rerun.
-                # Ya no carga datos, lo que hace la transición más limpia.
                 st.session_state.autenticado = True
                 st.session_state.usuario = usuario_seleccionado
                 st.rerun() 
@@ -503,9 +492,11 @@ def main():
     # --- PASO 3: Si ya está autenticado, renderiza el dashboard ---
     else:
         render_dashboard()
-        if st.sidebar.button("Salir"):
-            # Limpia TODAS las claves de la sesión para un logout completo
+        if st.sidebar.button("Salir", key="btn_logout"):
             keys_to_clear = list(st.session_state.keys())
             for key in keys_to_clear:
                 del st.session_state[key]
             st.rerun()
+
+if __name__ == '__main__':
+    main()
