@@ -1,3 +1,10 @@
+# ==============================================================================
+# SCRIPT PARA: 📊 Comparativa de Rendimiento.py
+# VERSIÓN MEJORADA: 07 de Julio, 2025
+# DESCRIPCIÓN: Se añade una nueva sección para analizar en detalle los
+#              descuentos comerciales por pronto pago otorgados por cada
+#              vendedor, mostrando cliente, valor y porcentaje del descuento.
+# ==============================================================================
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -73,6 +80,58 @@ def calcular_kpis_globales(df_ventas):
     df_kpis = pd.DataFrame(kpis_list)
     promedios = df_kpis.select_dtypes(include=np.number).mean()
     return df_kpis, promedios
+
+# ==============================================================================
+# ✨ NUEVA FUNCIÓN PARA ANÁLISIS DE DESCUENTOS ✨
+# ==============================================================================
+@st.cache_data
+def analizar_descuentos_otorgados(_df_ventas, vendedor):
+    """
+    Analiza las facturas de un vendedor que contienen descuentos comerciales.
+
+    Retorna un DataFrame con:
+    - Fecha de Venta
+    - Cliente
+    - Valor de la Compra (sin descuento)
+    - Valor del Descuento
+    - Porcentaje del Descuento
+    """
+    # Filtrar datos para el vendedor seleccionado y solo documentos tipo factura
+    df_vendedor = _df_ventas[
+        (_df_ventas['nomvendedor'] == vendedor) &
+        (_df_ventas['TipoDocumento'].str.contains('FACTURA', na=False, case=False))
+    ].copy()
+
+    # Identificar las líneas de descuento y las de venta de productos
+    filtro_descuento = df_vendedor['nombre_articulo'].str.contains('descuento comercial', case=False, na=False)
+    
+    # Obtener los números de serie (facturas) que tienen un descuento
+    series_con_descuento = df_vendedor[filtro_descuento]['Serie'].unique()
+
+    if len(series_con_descuento) == 0:
+        return pd.DataFrame() # Retornar un DF vacío si no hay descuentos
+
+    # Filtrar el dataframe para incluir solo las facturas relevantes
+    df_facturas_con_descuento = df_vendedor[df_vendedor['Serie'].isin(series_con_descuento)].copy()
+
+    # Calcular valor de compra y de descuento por factura
+    resumen_facturas = df_facturas_con_descuento.groupby('Serie').apply(lambda x: pd.Series({
+        'fecha_venta': x['fecha_venta'].iloc[0],
+        'nombre_cliente': x['nombre_cliente'].iloc[0],
+        'valor_compra': x[x['valor_venta'] > 0]['valor_venta'].sum(),
+        'valor_descuento': abs(x[x['valor_venta'] < 0]['valor_venta'].sum())
+    })).reset_index()
+
+    # Calcular el porcentaje del descuento
+    resumen_facturas['porcentaje_descuento'] = (resumen_facturas['valor_descuento'] / resumen_facturas['valor_compra']) * 100
+    
+    # Preparar el dataframe final
+    df_final = resumen_facturas[[
+        'fecha_venta', 'nombre_cliente', 'valor_compra', 'valor_descuento', 'porcentaje_descuento'
+    ]].sort_values(by='fecha_venta', ascending=False)
+    
+    return df_final
+
 
 # ==============================================================================
 # 3. LÓGICA DE LA INTERFAZ DE USUARIO (UI)
@@ -163,6 +222,43 @@ def render_matriz_equipo(df_kpis, promedios, vendedor_seleccionado):
     # --- FIN DE LA EXPLICACIÓN DINÁMICA ---
 
 # ==============================================================================
+# ✨ NUEVA SECCIÓN UI PARA LA TABLA DE DESCUENTOS ✨
+# ==============================================================================
+def render_tabla_descuentos(df_ventas, vendedor):
+    st.subheader(f"🔍 Análisis de Descuentos Comerciales Otorgados por: {vendedor}")
+
+    df_descuentos = analizar_descuentos_otorgados(df_ventas, vendedor)
+
+    if df_descuentos.empty:
+        st.info(f"No se encontraron facturas con 'descuento comercial' para {vendedor} en el histórico de datos.")
+        return
+    
+    st.warning("""
+    **Nota Importante sobre los Días de Pago:** El cálculo de los **días promedio de pago** para cada factura específica no es posible con la estructura de datos actual. 
+    El archivo de cobros no contiene un identificador de factura (`Serie`) para vincular un pago a una venta concreta. 
+    La tabla a continuación muestra los descuentos que se aplicaron en el momento de la venta, bajo la política de pago anticipado a 15 días.
+    """)
+
+    st.dataframe(
+        df_descuentos,
+        column_config={
+            "fecha_venta": st.column_config.DateColumn("Fecha Venta", format="YYYY-MM-DD"),
+            "nombre_cliente": st.column_config.TextColumn("Cliente"),
+            "valor_compra": st.column_config.NumberColumn("Valor Compra", format="$ {:,.0f}"),
+            "valor_descuento": st.column_config.NumberColumn("Valor Descuento", format="$ {:,.0f}"),
+            "porcentaje_descuento": st.column_config.ProgressColumn(
+                "Descuento (%)",
+                format="%.2f%%",
+                min_value=0,
+                max_value=float(df_descuentos['porcentaje_descuento'].max()) if not df_descuentos.empty else 1
+            )
+        },
+        use_container_width=True,
+        hide_index=True
+    )
+
+
+# ==============================================================================
 # 4. EJECUCIÓN PRINCIPAL
 # ==============================================================================
 st.title("📊 Comparativa de Rendimiento de Vendedores")
@@ -183,5 +279,10 @@ if vendedor_seleccionado:
     render_radar_chart(df_kpis, promedios, vendedor_seleccionado)
     st.markdown("---")
     render_matriz_equipo(df_kpis, promedios, vendedor_seleccionado)
+    
+    # --- LLAMADA A LA NUEVA TABLA DE DESCUENTOS ---
+    st.markdown("---")
+    render_tabla_descuentos(df_ventas_historico, vendedor_seleccionado)
+    
     st.markdown("---")
     render_ranking_chart(df_kpis, kpi_ranking)
