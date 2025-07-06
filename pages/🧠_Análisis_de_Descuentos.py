@@ -1,9 +1,9 @@
 # ==============================================================================
 # SCRIPT PARA: 🧠 Análisis de Descuentos
-# VERSIÓN: 3.0 DEFINITIVA - 07 de Julio, 2025
-# DESCRIPCIÓN: Versión final con lógica FIFO correcta y motor de cálculo de alto
-#              rendimiento. Se elimina el filtro de fecha de inicio para garantizar
-#              la integridad del análisis y se añade manejo de errores de datos.
+# VERSIÓN: 3.1 CORREGIDA - 07 de Julio, 2025
+# DESCRIPCIÓN: Se corrige el error de recarga de la página al seleccionar un
+#              vendedor mediante el uso de st.session_state para persistir
+#              el resultado del análisis.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -40,12 +40,9 @@ def calcular_vinculos_fifo_optimizado(_df_ventas, nombre_exacto_descuento, fecha
     fecha_politica = pd.to_datetime(fecha_inicio_politica)
     fecha_fin = pd.to_datetime(fecha_fin_rango)
 
-    # 1. PREPARAR EL UNIVERSO COMPLETO DE TRANSACCIONES VÁLIDAS
-    # El análisis corre desde el inicio de la política hasta la fecha fin seleccionada.
     mask_periodo_completo = (df_ventas['fecha_venta'] >= fecha_politica) & (df_ventas['fecha_venta'] <= fecha_fin)
     df_analisis = df_ventas[mask_periodo_completo]
 
-    # 2. SEPARAR FACTURAS Y DESCUENTOS DENTRO DE ESE PERIODO COMPLETO
     filtro_facturas = (df_analisis['valor_venta'] > 0) & (df_analisis['TipoDocumento'].str.contains('FACTURA', na=False, case=False))
     filtro_descuentos = (df_analisis['valor_venta'] < 0) & (df_analisis['nombre_articulo'] == nombre_exacto_descuento)
 
@@ -55,22 +52,14 @@ def calcular_vinculos_fifo_optimizado(_df_ventas, nombre_exacto_descuento, fecha
     if descuentos.empty or facturas.empty:
         return pd.DataFrame()
 
-    # 3. CREAR RANKING POR CLIENTE (La optimización de velocidad)
     facturas['rank'] = facturas.groupby('cliente_id').cumcount()
     descuentos['rank'] = descuentos.groupby('cliente_id').cumcount()
 
-    # 4. UNIR (MERGE) POR CLIENTE Y RANK
-    df_vinculado = pd.merge(
-        descuentos,
-        facturas,
-        on=['cliente_id', 'rank'],
-        suffixes=('_dcto', '_factura')
-    )
+    df_vinculado = pd.merge(descuentos, facturas, on=['cliente_id', 'rank'], suffixes=('_dcto', '_factura'))
 
     if df_vinculado.empty:
         return pd.DataFrame()
 
-    # 5. CÁLCULOS FINALES
     df_vinculado['dias_pago'] = (df_vinculado['fecha_venta_dcto'] - df_vinculado['fecha_venta_factura']).dt.days
     df_vinculado = df_vinculado[df_vinculado['dias_pago'] >= 0] 
 
@@ -86,7 +75,6 @@ def calcular_vinculos_fifo_optimizado(_df_ventas, nombre_exacto_descuento, fecha
     return df_resultado[columnas_finales]
 
 def generar_consejos_vendedor(kpis):
-    # (Esta función no cambia)
     consejos = []
     if kpis['tasa_cumplimiento'] < 0.8:
         consejos.append(f"**Punto de Atención:** Tu tasa de cumplimiento de la política es del {kpis['tasa_cumplimiento']:.1%}. Un número importante de descuentos se otorga a pagos fuera de plazo. **Sugerencia:** Refuerza los términos de pago con los clientes antes de ofrecer el descuento.")
@@ -106,28 +94,36 @@ def generar_consejos_vendedor(kpis):
 NOMBRE_ARTICULO_DESCUENTO = "DESCUENTOS COMERCIALES"
 FECHA_INICIO_POLITICA = "2024-06-01"
 
-# --- FILTROS INTERACTIVOS EN LA BARRA LATERAL (UI CORREGIDA) ---
+# --- Inicialización del estado de la sesión ---
+if 'df_analisis' not in st.session_state:
+    st.session_state.df_analisis = None
+if 'periodo_analisis' not in st.session_state:
+    st.session_state.periodo_analisis = ""
+
+# --- FILTROS INTERACTIVOS EN LA BARRA LATERAL ---
 st.sidebar.header("Filtros del Análisis")
 st.sidebar.info("El análisis siempre empieza el 1 de Junio de 2024. Seleccione solo hasta qué fecha desea analizar.")
 fecha_max_datos = df_ventas_historico['fecha_venta'].max()
 fecha_min_seleccion = pd.to_datetime(FECHA_INICIO_POLITICA).date()
 
-# El usuario solo elige la fecha de fin
 fecha_fin = st.sidebar.date_input("Analizar hasta la fecha:", value=fecha_max_datos.date(), min_value=fecha_min_seleccion, max_value=fecha_max_datos.date())
 
 if st.sidebar.button("🚀 Generar Análisis", type="primary", use_container_width=True):
-    
     with st.spinner('Realizando cálculo FIFO optimizado... ¡El nuevo motor es muy rápido!'):
-        df_vinculado = calcular_vinculos_fifo_optimizado(df_ventas_historico, NOMBRE_ARTICULO_DESCUENTO, FECHA_INICIO_POLITICA, fecha_fin)
+        # Guardamos el resultado en el estado de la sesión
+        st.session_state.df_analisis = calcular_vinculos_fifo_optimizado(df_ventas_historico, NOMBRE_ARTICULO_DESCUENTO, FECHA_INICIO_POLITICA, fecha_fin)
+        st.session_state.periodo_analisis = f"Análisis generado desde el **{FECHA_INICIO_POLITICA}** hasta el **{fecha_fin.strftime('%d-%b-%Y')}**."
 
-    st.success(f"Análisis generado desde el **{FECHA_INICIO_POLITICA}** hasta el **{fecha_fin.strftime('%d-%b-%Y')}**.")
+# --- SECCIÓN DE VISUALIZACIÓN PRINCIPAL ---
+# Ahora la visualización depende de si hay datos en el estado de la sesión, no del botón.
+if st.session_state.df_analisis is not None:
+    df_vinculado = st.session_state.df_analisis
+    st.success(st.session_state.periodo_analisis)
 
     if df_vinculado.empty:
         st.warning(f"No se encontraron '{NOMBRE_ARTICULO_DESCUENTO}' para el periodo seleccionado.")
         st.stop()
     
-    # --- CORRECCIÓN DEL TypeError ---
-    # Se eliminan filas donde 'nomvendedor' pueda ser nulo antes de usarlo en el selectbox
     df_vinculado.dropna(subset=['nomvendedor'], inplace=True)
     if df_vinculado.empty:
         st.warning("Se encontraron descuentos, pero no tienen un vendedor asociado.")
@@ -137,7 +133,6 @@ if st.sidebar.button("🚀 Generar Análisis", type="primary", use_container_wid
     tab1, tab2, tab3 = st.tabs(["📊 Visión General", "👨‍💼 Análisis por Vendedor", "👥 Análisis por Cliente"])
 
     with tab1:
-        # (El código de esta pestaña no cambia)
         st.header("Indicadores Globales de la Política de Descuentos")
         total_descuentos = df_vinculado['valor_descuento'].sum()
         dias_pago_promedio_global = df_vinculado['dias_pago'].mean()
@@ -153,7 +148,6 @@ if st.sidebar.button("🚀 Generar Análisis", type="primary", use_container_wid
         st.plotly_chart(fig_hist, use_container_width=True)
 
     with tab2:
-        # (El código de esta pestaña no cambia)
         st.header("Rendimiento Individual por Vendedor")
         vendedores = sorted(df_vinculado['nomvendedor'].unique())
         vendedor_sel = st.selectbox("Seleccione un Vendedor", options=vendedores, key="sb_vendedor_dcto")
@@ -173,7 +167,6 @@ if st.sidebar.button("🚀 Generar Análisis", type="primary", use_container_wid
             st.dataframe(df_vendedor[['nombre_cliente', 'valor_compra', 'valor_descuento', 'dias_pago', 'cumple_politica']], use_container_width=True, hide_index=True)
 
     with tab3:
-        # (El código de esta pestaña no cambia)
         st.header("Comportamiento de Clientes Frente al Descuento")
         kpis_cliente = df_vinculado.groupby('nombre_cliente').agg(total_descontado=('valor_descuento', 'sum'), frecuencia=('cliente_id', 'count'), dias_pago_promedio=('dias_pago', 'mean'), tasa_cumplimiento=('cumple_politica', 'mean')).reset_index()
         clientes_estrella = kpis_cliente[(kpis_cliente['tasa_cumplimiento'] >= 0.9) & (kpis_cliente['dias_pago_promedio'] <= 15)].sort_values('total_descontado', ascending=False)
