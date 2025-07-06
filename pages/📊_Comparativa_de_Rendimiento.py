@@ -1,7 +1,9 @@
 # ==============================================================================
-# SCRIPT PARA: 📊 Comparativa de Rendimiento.py
-# VERSIÓN: FINAL v2 - 07 de Julio, 2025
-# DESCRIPCIÓN: Se añade fecha de corte (01-Jun-2024) para la política de descuentos.
+# SCRIPT PARA: 📊 Comparativa de Rendimiento
+# VERSIÓN: 2.0 RESTAURADA - 07 de Julio, 2025
+# DESCRIPCIÓN: Versión final y completa que restaura toda la funcionalidad
+#              original de KPIs y gráficos, e integra correctamente el análisis
+#              de descuentos FIFO bajo un único selector de vendedor.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -11,6 +13,9 @@ import plotly.graph_objects as go
 
 # --- CONFIGURACIÓN DE PÁGINA Y VALIDACIÓN DE DATOS ---
 st.set_page_config(page_title="Comparativa de Rendimiento", page_icon="📊", layout="wide")
+
+st.title("📊 Comparativa de Rendimiento de Vendedores")
+st.markdown("Análisis comparativo del equipo de ventas, KPIs de rendimiento y gestión de descuentos.")
 
 if st.session_state.get('usuario') != "GERENTE":
     st.error("🔒 Acceso Exclusivo para Gerencia.")
@@ -26,162 +31,167 @@ if df_ventas_historico is None or df_ventas_historico.empty:
 # ==============================================================================
 
 @st.cache_data
-def calcular_vinculos_fifo(_df_ventas, nombre_exacto_descuento, fecha_inicio_politica):
+def calcular_kpis_globales(_df_ventas):
     """
-    Aplica el modelo FIFO con una fecha de corte para la política.
+    Calcula KPIs de rendimiento general (Ventas, Ticket, etc.) para cada vendedor.
     """
-    df_ventas = _df_ventas.copy()
-    fecha_inicio = pd.to_datetime(fecha_inicio_politica)
-    df_ventas['fecha_venta'] = pd.to_datetime(df_ventas['fecha_venta'])
-
-    filtro_facturas = (df_ventas['valor_venta'] > 0) & (df_ventas['TipoDocumento'].str.contains('FACTURA', na=False, case=False))
-    filtro_descuentos = (df_ventas['valor_venta'] < 0) & (df_ventas['nombre_articulo'] == nombre_exacto_descuento)
-
-    # Solo consideramos facturas y descuentos a partir del inicio de la política
-    facturas = df_ventas[filtro_facturas & (df_ventas['fecha_venta'] >= fecha_inicio)].sort_values(by=['cliente_id', 'fecha_venta']).reset_index()
-    descuentos = df_ventas[filtro_descuentos & (df_ventas['fecha_venta'] >= fecha_inicio)].sort_values(by=['cliente_id', 'fecha_venta'])
-
-    if descuentos.empty or facturas.empty:
-        return pd.DataFrame()
-        
-    facturas['atendida'] = False
-    vinculos = []
-
-    for _, descuento in descuentos.iterrows():
-        facturas_candidatas = facturas[
-            (facturas['cliente_id'] == descuento['cliente_id']) &
-            (facturas['fecha_venta'] <= descuento['fecha_venta']) &
-            # (facturas['fecha_venta'] >= fecha_inicio) & # <-- Ya se pre-filtró arriba
-            (facturas['atendida'] == False)
-        ]
-
-        if not facturas_candidatas.empty:
-            factura_a_vincular = facturas_candidatas.iloc[0]
-            indice_factura = factura_a_vincular['index']
-            dias_pago = (descuento['fecha_venta'] - factura_a_vincular['fecha_venta']).days
-            
-            vinculos.append({
-                'nomvendedor': factura_a_vincular['nomvendedor'],
-                'nombre_cliente': factura_a_vincular['nombre_cliente'],
-                'valor_compra': factura_a_vincular['valor_venta'],
-                'valor_descuento': abs(descuento['valor_venta']),
-                'dias_pago': dias_pago,
-            })
-            
-            facturas.loc[facturas['index'] == indice_factura, 'atendida'] = True
-            
-    if not vinculos:
-        return pd.DataFrame()
-
-    df_resultado = pd.DataFrame(vinculos)
-    df_resultado['cumple_politica'] = df_resultado['dias_pago'] <= 15
-    df_resultado['porcentaje_descuento'] = (df_resultado['valor_descuento'] / df_resultado['valor_compra']) * 100
-    return df_resultado
-
-@st.cache_data
-def calcular_kpis_globales(df_ventas):
+    # Se eliminan filas con nomvendedor nulo para evitar errores
+    df_ventas = _df_ventas.dropna(subset=['nomvendedor'])
     kpis_list = []
     vendedores = df_ventas['nomvendedor'].unique()
+
     for vendedor in vendedores:
         df_vendedor = df_ventas[df_ventas['nomvendedor'] == vendedor]
         df_productos = df_vendedor[df_vendedor['valor_venta'] > 0]
-        df_descuentos = df_vendedor[df_vendedor['valor_venta'] < 0]
+        
         if df_productos.empty: continue
+
         venta_bruta = df_productos['valor_venta'].sum()
-        total_descuentos = abs(df_descuentos['valor_venta'].sum())
         clientes_unicos = df_vendedor['cliente_id'].nunique()
-        kpis_list.append({'Vendedor': vendedor, 'Ventas Brutas': venta_bruta, 'Descuento Concedido (%)': (total_descuentos / venta_bruta * 100) if venta_bruta > 0 else 0, 'Clientes Únicos': clientes_unicos, 'Ticket Promedio': venta_bruta / clientes_unicos if clientes_unicos > 0 else 0})
-    if not kpis_list: return pd.DataFrame(), pd.Series()
+        
+        kpis_list.append({
+            'Vendedor': vendedor,
+            'Ventas Brutas': venta_bruta,
+            'Clientes Únicos': clientes_unicos,
+            'Ticket Promedio': venta_bruta / clientes_unicos if clientes_unicos > 0 else 0
+        })
+
+    if not kpis_list: return pd.DataFrame(), pd.Series(dtype='float64')
+    
     df_kpis = pd.DataFrame(kpis_list)
     promedios = df_kpis.select_dtypes(include=np.number).mean()
     return df_kpis, promedios
+
+@st.cache_data
+def calcular_vinculos_fifo_optimizado(_df_ventas, nombre_exacto_descuento, fecha_inicio_politica):
+    """
+    Versión optimizada que calcula los vínculos de descuento.
+    """
+    df_ventas = _df_ventas.copy()
+    df_ventas['fecha_venta'] = pd.to_datetime(df_ventas['fecha_venta'])
+    fecha_politica = pd.to_datetime(fecha_inicio_politica)
+
+    df_analisis = df_ventas[df_ventas['fecha_venta'] >= fecha_politica]
+
+    filtro_facturas = (df_analisis['valor_venta'] > 0) & (df_analisis['TipoDocumento'].str.contains('FACTURA', na=False, case=False))
+    filtro_descuentos = (df_analisis['valor_venta'] < 0) & (df_analisis['nombre_articulo'] == nombre_exacto_descuento)
+
+    facturas = df_analisis[filtro_facturas].sort_values(by=['cliente_id', 'fecha_venta'])
+    descuentos = df_analisis[filtro_descuentos].sort_values(by=['cliente_id', 'fecha_venta'])
+
+    if descuentos.empty or facturas.empty: return pd.DataFrame()
+
+    facturas['rank'] = facturas.groupby('cliente_id').cumcount()
+    descuentos['rank'] = descuentos.groupby('cliente_id').cumcount()
+
+    df_vinculado = pd.merge(descuentos, facturas, on=['cliente_id', 'rank'], suffixes=('_dcto', '_factura'))
+
+    if df_vinculado.empty: return pd.DataFrame()
+
+    df_vinculado['dias_pago'] = (df_vinculado['fecha_venta_dcto'] - df_vinculado['fecha_venta_factura']).dt.days
+    df_vinculado = df_vinculado[df_vinculado['dias_pago'] >= 0] 
+
+    df_resultado = df_vinculado.rename(columns={'nomvendedor_factura': 'nomvendedor', 'nombre_cliente_factura': 'nombre_cliente', 'valor_venta_factura': 'valor_compra'})
+    df_resultado['valor_descuento'] = abs(df_resultado['valor_venta_dcto'])
+    
+    return df_resultado[['nomvendedor', 'nombre_cliente', 'valor_compra', 'valor_descuento', 'dias_pago']]
 
 # ==============================================================================
 # COMPONENTES DE LA INTERFAZ DE USUARIO (UI)
 # ==============================================================================
 
 def render_radar_chart(df_kpis, promedios, vendedor_seleccionado):
-    st.subheader(f"Radar de Competencias: {vendedor_seleccionado} vs. Promedio")
-    kpis_radar = {'Ventas Brutas': True, 'Clientes Únicos': True, 'Ticket Promedio': True, 'Descuento Concedido (%)': False}
+    st.header(f"Radar de Competencias: {vendedor_seleccionado}")
+    kpis_radar = {'Ventas Brutas': True, 'Clientes Únicos': True, 'Ticket Promedio': True}
     df_percentiles = df_kpis.copy()
+    
     for kpi, higher_is_better in kpis_radar.items():
         if kpi not in df_percentiles.columns: continue
         rank_series = df_percentiles[kpi].rank(pct=True)
         df_percentiles[kpi] = rank_series if higher_is_better else 1 - rank_series
+    
     datos_vendedor = df_percentiles[df_percentiles['Vendedor'] == vendedor_seleccionado]
     if datos_vendedor.empty: return
+
     datos_vendedor = datos_vendedor.iloc[0]
     fig = go.Figure()
-    fig.add_trace(go.Scatterpolar(r=[0.5] * len(kpis_radar), theta=list(kpis_radar.keys()), fill='toself', name='Promedio Equipo'))
+    fig.add_trace(go.Scatterpolar(r=[0.5] * len(kpis_radar), theta=list(kpis_radar.keys()), fill='toself', name='Promedio Equipo', line_color='lightgrey'))
     fig.add_trace(go.Scatterpolar(r=datos_vendedor[list(kpis_radar.keys())].values, theta=list(kpis_radar.keys()), fill='toself', name=vendedor_seleccionado))
     st.plotly_chart(fig, use_container_width=True)
 
 def render_ranking_chart(df_kpis, kpi_seleccionado):
-    st.subheader(f"Ranking de Vendedores por: {kpi_seleccionado}")
+    st.header(f"Ranking General por: {kpi_seleccionado}")
     if kpi_seleccionado not in df_kpis.columns: 
         st.warning(f"No se pudo generar el ranking para la métrica '{kpi_seleccionado}'.")
         return
-    ascending_order = True if kpi_seleccionado == 'Descuento Concedido (%)' else False
-    df_sorted = df_kpis.sort_values(by=kpi_seleccionado, ascending=ascending_order)
-    fig = px.bar(df_sorted, x=kpi_seleccionado, y='Vendedor', orientation='h', text_auto=True)
+    df_sorted = df_kpis.sort_values(by=kpi_seleccionado, ascending=False)
+    fig = px.bar(df_sorted, x=kpi_seleccionado, y='Vendedor', orientation='h', text_auto=True, title=f"Top Vendedores por {kpi_seleccionado}")
     st.plotly_chart(fig, use_container_width=True)
 
 def render_tabla_descuentos(df_vinculado, vendedor):
-    st.subheader(f"🔍 Análisis de Descuentos Otorgados por: {vendedor}")
+    st.header(f"🔍 Detalle de Descuentos Otorgados por {vendedor}")
     df_vista = df_vinculado[df_vinculado['nomvendedor'] == vendedor]
 
     if df_vista.empty:
-        st.info(f"No se encontraron descuentos comerciales otorgados por {vendedor} desde el inicio de la política.")
+        st.info(f"Este vendedor no ha otorgado descuentos comerciales desde el inicio de la política.")
         return
     
     st.dataframe(
-        df_vista[['nombre_cliente', 'valor_compra', 'valor_descuento', 'dias_pago', 'cumple_politica', 'porcentaje_descuento']],
+        df_vista[['nombre_cliente', 'valor_compra', 'valor_descuento', 'dias_pago']],
         column_config={
             "nombre_cliente": "Cliente",
-            "valor_compra": st.column_config.NumberColumn("Valor Compra", format="$ {:,.0f}"),
+            "valor_compra": st.column_config.NumberColumn("Valor Compra Original", format="$ {:,.0f}"),
             "valor_descuento": st.column_config.NumberColumn("Valor Descuento", format="$ {:,.0f}"),
             "dias_pago": st.column_config.NumberColumn("Días de Pago"),
-            "cumple_politica": "Cumple (≤15d)",
-            "porcentaje_descuento": st.column_config.ProgressColumn("% Descuento", format="%.2f%%", min_value=0, max_value=max(5, df_vista['porcentaje_descuento'].max() if not df_vista.empty else 5))
         },
         use_container_width=True, hide_index=True
     )
 
 # ==============================================================================
-# EJECUCIÓN PRINCIPAL DE LA PÁGINA
+# ORQUESTACIÓN Y EJECUCIÓN DE LA PÁGINA
 # ==============================================================================
 
-st.title("📊 Comparativa de Rendimiento de Vendedores")
-st.markdown("Análisis comparativo del equipo de ventas y su gestión de descuentos.")
-st.markdown("---")
-
-# --- Constantes de la lógica de negocio ---
-NOMBRE_ARTICULO_DESCUENTO = "DESCUENTOS COMERCIALES"
-FECHA_INICIO_POLITICA = "2024-06-01"
-
-# --- Cálculos Principales ---
-df_vinculado_fifo = calcular_vinculos_fifo(df_ventas_historico, NOMBRE_ARTICULO_DESCUENTO, FECHA_INICIO_POLITICA)
+# --- CÁLCULOS PRINCIPALES ---
 df_kpis, promedios = calcular_kpis_globales(df_ventas_historico)
 
-# --- Contenido Principal ---
+# Constantes de la lógica de negocio
+NOMBRE_ARTICULO_DESCUENTO = "DESCUENTOS COMERCIALES"
+FECHA_INICIO_POLITICA = "2024-06-01"
+df_vinculado_fifo = calcular_vinculos_fifo_optimizado(df_ventas_historico, NOMBRE_ARTICULO_DESCUENTO, FECHA_INICIO_POLITICA)
+
+
+# --- RENDERIZADO PRINCIPAL ---
 if df_kpis.empty:
     st.warning("No hay suficientes datos de ventas para generar una comparativa de KPIs.")
-else:
-    col1, col2 = st.columns(2)
-    vendedor_sel_kpi = col1.selectbox("Seleccione un Vendedor para analizar sus KPIs:", options=sorted(df_kpis['Vendedor'].unique()))
-    kpi_ranking = col2.selectbox("Seleccione una Métrica para el Ranking:", options=sorted(promedios.index))
+    st.stop()
 
-    if vendedor_sel_kpi:
-        render_radar_chart(df_kpis, promedios, vendedor_sel_kpi)
-        st.markdown("---")
-        render_ranking_chart(df_kpis, kpi_ranking)
-
-# --- Sección de Descuentos ---
 st.markdown("---")
-if df_vinculado_fifo.empty:
-    st.info("No se encontraron datos de descuentos para analizar desde el inicio de la política (Junio 2024).")
-else:
-    vendedores_con_descuento = sorted(df_vinculado_fifo['nomvendedor'].unique())
-    vendedor_sel_dcto = st.selectbox("Seleccione un Vendedor para analizar sus descuentos:", options=vendedores_con_descuento)
-    if vendedor_sel_dcto:
-        render_tabla_descuentos(df_vinculado_fifo, vendedor_sel_dcto)
+st.header("Análisis de Vendedor Individual")
+col1, col2 = st.columns([1, 2])
+
+with col1:
+    # Selector único y principal para toda la página
+    vendedores_lista = sorted(df_kpis['Vendedor'].unique())
+    vendedor_seleccionado = st.selectbox(
+        "**Seleccione un Vendedor:**", 
+        options=vendedores_lista,
+        help="La selección de este vendedor actualizará todos los módulos de esta página."
+    )
+    
+    # Selector para el gráfico de ranking
+    kpi_para_ranking = st.selectbox(
+        "**Seleccione Métrica para el Ranking:**",
+        options=sorted(promedios.index)
+    )
+
+with col2:
+    if vendedor_seleccionado:
+        render_radar_chart(df_kpis, promedios, vendedor_seleccionado)
+
+st.markdown("---")
+
+# Renderizar el ranking y la tabla de descuentos
+if vendedor_seleccionado:
+    render_ranking_chart(df_kpis, kpi_para_ranking)
+    st.markdown("---")
+    render_tabla_descuentos(df_vinculado_fifo, vendedor_seleccionado)
