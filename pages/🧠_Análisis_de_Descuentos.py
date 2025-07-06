@@ -1,8 +1,7 @@
 # ==============================================================================
 # SCRIPT PARA: 🧠 Análisis de Descuentos
-# VERSIÓN: FINAL - 07 de Julio, 2025
-# DESCRIPCIÓN: Dashboard avanzado para el análisis estratégico de la política
-#              de descuentos comerciales por pronto pago.
+# VERSIÓN: FINAL v2 - 07 de Julio, 2025
+# DESCRIPCIÓN: Se añade fecha de corte (01-Jun-2024) para la política de descuentos.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -28,21 +27,22 @@ if df_ventas_historico is None or df_ventas_historico.empty:
 # ==============================================================================
 
 @st.cache_data
-def calcular_vinculos_fifo(_df_ventas, nombre_exacto_descuento):
+def calcular_vinculos_fifo(_df_ventas, nombre_exacto_descuento, fecha_inicio_politica):
     """
-    Aplica el modelo FIFO para vincular notas de descuento con la factura
-    original más antigua y pendiente de cada cliente.
+    Aplica el modelo FIFO con una fecha de corte para la política.
     """
     df_ventas = _df_ventas.copy()
+    fecha_inicio = pd.to_datetime(fecha_inicio_politica)
     df_ventas['fecha_venta'] = pd.to_datetime(df_ventas['fecha_venta'])
 
     filtro_facturas = (df_ventas['valor_venta'] > 0) & (df_ventas['TipoDocumento'].str.contains('FACTURA', na=False, case=False))
     filtro_descuentos = (df_ventas['valor_venta'] < 0) & (df_ventas['nombre_articulo'] == nombre_exacto_descuento)
 
-    facturas = df_ventas[filtro_facturas].sort_values(by=['cliente_id', 'fecha_venta']).reset_index()
-    descuentos = df_ventas[filtro_descuentos].sort_values(by=['cliente_id', 'fecha_venta'])
+    # Solo consideramos facturas y descuentos a partir del inicio de la política
+    facturas = df_ventas[filtro_facturas & (df_ventas['fecha_venta'] >= fecha_inicio)].sort_values(by=['cliente_id', 'fecha_venta']).reset_index()
+    descuentos = df_ventas[filtro_descuentos & (df_ventas['fecha_venta'] >= fecha_inicio)].sort_values(by=['cliente_id', 'fecha_venta'])
 
-    if descuentos.empty:
+    if descuentos.empty or facturas.empty:
         return pd.DataFrame()
         
     facturas['atendida'] = False
@@ -52,6 +52,7 @@ def calcular_vinculos_fifo(_df_ventas, nombre_exacto_descuento):
         facturas_candidatas = facturas[
             (facturas['cliente_id'] == descuento['cliente_id']) &
             (facturas['fecha_venta'] <= descuento['fecha_venta']) &
+            # (facturas['fecha_venta'] >= fecha_inicio) & # <-- Ya se pre-filtró arriba
             (facturas['atendida'] == False)
         ]
 
@@ -80,9 +81,6 @@ def calcular_vinculos_fifo(_df_ventas, nombre_exacto_descuento):
     return df_resultado
 
 def generar_consejos_vendedor(kpis):
-    """
-    Crea una lista de consejos automáticos basados en los KPIs de un vendedor.
-    """
     consejos = []
     if kpis['tasa_cumplimiento'] < 0.8:
         consejos.append(f"**Punto de Atención:** Tu tasa de cumplimiento de la política es del {kpis['tasa_cumplimiento']:.1%}. Esto indica que una porción significativa de los descuentos se otorga a pagos fuera de los 15 días. **Sugerencia:** Refuerza los términos de pago con los clientes antes de ofrecer el descuento.")
@@ -93,21 +91,21 @@ def generar_consejos_vendedor(kpis):
         consejos.append(f"**Oportunidad de Mejora:** El promedio de pago de tus clientes con descuento es de **{kpis['dias_pago_promedio']:.1f} días**. **Sugerencia:** Inicia el recordatorio de pago unos días antes del vencimiento del plazo de 15 días para asegurar el cumplimiento.")
     else:
         consejos.append(f"**Fortaleza:** Logras que tus clientes paguen en un promedio de **{kpis['dias_pago_promedio']:.1f} días** para acceder al descuento, ¡manteniendo la cartera sana!")
-        
     return consejos
 
 # ==============================================================================
 # EJECUCIÓN PRINCIPAL Y RENDERIZADO DE UI
 # ==============================================================================
 
-# --- Nombre del artículo de descuento ---
+# --- Constantes de la lógica de negocio ---
 NOMBRE_ARTICULO_DESCUENTO = "DESCUENTOS COMERCIALES"
+FECHA_INICIO_POLITICA = "2024-06-01"
 
 # --- Cálculo Principal ---
-df_vinculado = calcular_vinculos_fifo(df_ventas_historico, NOMBRE_ARTICULO_DESCUENTO)
+df_vinculado = calcular_vinculos_fifo(df_ventas_historico, NOMBRE_ARTICULO_DESCUENTO, FECHA_INICIO_POLITICA)
 
 if df_vinculado.empty:
-    st.warning("No se encontraron datos de 'DESCUENTOS COMERCIALES' para realizar el análisis.")
+    st.warning("No se encontraron datos de 'DESCUENTOS COMERCIALES' para analizar desde el inicio de la política (Junio 2024).")
     st.stop()
 
 # --- Pestañas de Análisis ---
@@ -121,7 +119,7 @@ with tab1:
     tasa_cumplimiento_global = df_vinculado['cumple_politica'].mean()
 
     col1, col2, col3 = st.columns(3)
-    col1.metric("Monto Total en Descuentos", f"${total_descuentos:,.0f}", help="Suma de todos los descuentos comerciales otorgados.")
+    col1.metric("Monto Total en Descuentos", f"${total_descuentos:,.0f}", help="Suma de todos los descuentos comerciales otorgados desde Junio 2024.")
     col2.metric("Días Promedio de Pago", f"{dias_pago_promedio_global:.1f} días", help="Promedio de días que tardan los clientes en pagar para recibir el descuento.")
     col3.metric("Tasa de Cumplimiento (≤15d)", f"{tasa_cumplimiento_global:.1%}", help="Porcentaje de descuentos que se otorgaron cumpliendo la política.")
 
@@ -135,19 +133,12 @@ with tab1:
 
 with tab2:
     st.header("Rendimiento Individual por Vendedor")
-    
     vendedores = sorted(df_vinculado['nomvendedor'].unique())
     vendedor_sel = st.selectbox("Seleccione un Vendedor", options=vendedores, key="sb_vendedor_dcto")
-    
     df_vendedor = df_vinculado[df_vinculado['nomvendedor'] == vendedor_sel]
     
     if not df_vendedor.empty:
-        kpis_vendedor = {
-            'total_descuento': df_vendedor['valor_descuento'].sum(),
-            'dias_pago_promedio': df_vendedor['dias_pago'].mean(),
-            'tasa_cumplimiento': df_vendedor['cumple_politica'].mean()
-        }
-
+        kpis_vendedor = {'total_descuento': df_vendedor['valor_descuento'].sum(), 'dias_pago_promedio': df_vendedor['dias_pago'].mean(), 'tasa_cumplimiento': df_vendedor['cumple_politica'].mean()}
         col1, col2, col3 = st.columns(3)
         col1.metric(f"Monto Descuentos ({vendedor_sel})", f"${kpis_vendedor['total_descuento']:,.0f}")
         col2.metric(f"Días Promedio Pago ({vendedor_sel})", f"{kpis_vendedor['dias_pago_promedio']:.1f} días")
@@ -157,8 +148,7 @@ with tab2:
         st.subheader("🤖 Coach Virtual: Consejos para " + vendedor_sel)
         with st.container(border=True):
             consejos = generar_consejos_vendedor(kpis_vendedor)
-            for consejo in consejos:
-                st.markdown(f"- {consejo}")
+            for consejo in consejos: st.markdown(f"- {consejo}")
 
         st.subheader("Detalle de Descuentos Otorgados")
         st.dataframe(df_vendedor[['nombre_cliente', 'valor_compra', 'valor_descuento', 'dias_pago', 'cumple_politica']], use_container_width=True, hide_index=True)
@@ -166,25 +156,15 @@ with tab2:
 with tab3:
     st.header("Comportamiento de Clientes Frente al Descuento")
     st.info("Identifica a tus mejores clientes y aquellos cuya gestión de pagos podría mejorar.")
-
-    kpis_cliente = df_vinculado.groupby('nombre_cliente').agg(
-        total_descontado=('valor_descuento', 'sum'),
-        frecuencia=('cliente_id', 'count'),
-        dias_pago_promedio=('dias_pago', 'mean'),
-        tasa_cumplimiento=('cumple_politica', 'mean')
-    ).reset_index()
-    
-    # Segmentación de clientes
+    kpis_cliente = df_vinculado.groupby('nombre_cliente').agg(total_descontado=('valor_descuento', 'sum'), frecuencia=('cliente_id', 'count'), dias_pago_promedio=('dias_pago', 'mean'), tasa_cumplimiento=('cumple_politica', 'mean')).reset_index()
     clientes_estrella = kpis_cliente[(kpis_cliente['tasa_cumplimiento'] >= 0.9) & (kpis_cliente['dias_pago_promedio'] <= 15)].sort_values('total_descontado', ascending=False)
     clientes_a_revisar = kpis_cliente[(kpis_cliente['tasa_cumplimiento'] < 0.5) | (kpis_cliente['dias_pago_promedio'] > 20)].sort_values('dias_pago_promedio', ascending=False)
 
     col1, col2 = st.columns(2)
-
     with col1:
         st.subheader("⭐ Clientes Estrella")
         st.caption("Pagan a tiempo consistentemente y aprovechan la política correctamente.")
         st.dataframe(clientes_estrella.head(10), use_container_width=True, hide_index=True)
-
     with col2:
         st.subheader("⚠️ Clientes a Revisar (Oportunistas)")
         st.caption("Reciben descuentos pero tienden a pagar fuera de plazo.")
