@@ -1,6 +1,6 @@
 # ==============================================================================
 # SCRIPT PARA: 🧠 Análisis de Descuentos
-# VERSIÓN: 1.0 - 07 de Julio, 2025
+# VERSIÓN: FINAL - 07 de Julio, 2025
 # DESCRIPCIÓN: Dashboard avanzado para el análisis estratégico de la política
 #              de descuentos comerciales por pronto pago.
 # ==============================================================================
@@ -23,25 +23,26 @@ if df_ventas_historico is None or df_ventas_historico.empty:
     st.error("No se pudieron cargar los datos maestros. Vuelva a la página principal y recargue.")
     st.stop()
 
-# --- LÓGICA DE ANÁLISIS (CEREBRO) ---
+# ==============================================================================
+# LÓGICA DE ANÁLISIS (EL CEREBRO DE LA PÁGINA)
+# ==============================================================================
 
 @st.cache_data
-def calcular_vinculos_fifo(_df_ventas):
+def calcular_vinculos_fifo(_df_ventas, nombre_exacto_descuento):
     """
     Aplica el modelo FIFO para vincular notas de descuento con la factura
     original más antigua y pendiente de cada cliente.
-    Esta función es el corazón del análisis.
     """
     df_ventas = _df_ventas.copy()
     df_ventas['fecha_venta'] = pd.to_datetime(df_ventas['fecha_venta'])
 
     filtro_facturas = (df_ventas['valor_venta'] > 0) & (df_ventas['TipoDocumento'].str.contains('FACTURA', na=False, case=False))
-    filtro_descuentos = (df_ventas['valor_venta'] < 0) & (df_ventas['nombre_articulo'].str.contains('DESCUENTO COMERCIAL', na=False, case=False))
+    filtro_descuentos = (df_ventas['valor_venta'] < 0) & (df_ventas['nombre_articulo'] == nombre_exacto_descuento)
 
     facturas = df_ventas[filtro_facturas].sort_values(by=['cliente_id', 'fecha_venta']).reset_index()
     descuentos = df_ventas[filtro_descuentos].sort_values(by=['cliente_id', 'fecha_venta'])
 
-    if descuentos.empty or facturas.empty:
+    if descuentos.empty:
         return pd.DataFrame()
         
     facturas['atendida'] = False
@@ -57,7 +58,6 @@ def calcular_vinculos_fifo(_df_ventas):
         if not facturas_candidatas.empty:
             factura_a_vincular = facturas_candidatas.iloc[0]
             indice_factura = factura_a_vincular['index']
-            
             dias_pago = (descuento['fecha_venta'] - factura_a_vincular['fecha_venta']).days
             
             vinculos.append({
@@ -66,7 +66,7 @@ def calcular_vinculos_fifo(_df_ventas):
                 'cliente_id': factura_a_vincular['cliente_id'],
                 'valor_compra': factura_a_vincular['valor_venta'],
                 'valor_descuento': abs(descuento['valor_venta']),
-                'dias_pago': dias_pago
+                'dias_pago': dias_pago,
             })
             
             facturas.loc[facturas['index'] == indice_factura, 'atendida'] = True
@@ -76,9 +76,13 @@ def calcular_vinculos_fifo(_df_ventas):
 
     df_resultado = pd.DataFrame(vinculos)
     df_resultado['cumple_politica'] = df_resultado['dias_pago'] <= 15
+    df_resultado['porcentaje_descuento'] = (df_resultado['valor_descuento'] / df_resultado['valor_compra']) * 100
     return df_resultado
 
 def generar_consejos_vendedor(kpis):
+    """
+    Crea una lista de consejos automáticos basados en los KPIs de un vendedor.
+    """
     consejos = []
     if kpis['tasa_cumplimiento'] < 0.8:
         consejos.append(f"**Punto de Atención:** Tu tasa de cumplimiento de la política es del {kpis['tasa_cumplimiento']:.1%}. Esto indica que una porción significativa de los descuentos se otorga a pagos fuera de los 15 días. **Sugerencia:** Refuerza los términos de pago con los clientes antes de ofrecer el descuento.")
@@ -92,12 +96,18 @@ def generar_consejos_vendedor(kpis):
         
     return consejos
 
-# --- EJECUCIÓN PRINCIPAL Y RENDERIZADO DE UI ---
+# ==============================================================================
+# EJECUCIÓN PRINCIPAL Y RENDERIZADO DE UI
+# ==============================================================================
 
-df_vinculado = calcular_vinculos_fifo(df_ventas_historico)
+# --- Nombre del artículo de descuento ---
+NOMBRE_ARTICULO_DESCUENTO = "DESCUENTOS COMERCIALES"
+
+# --- Cálculo Principal ---
+df_vinculado = calcular_vinculos_fifo(df_ventas_historico, NOMBRE_ARTICULO_DESCUENTO)
 
 if df_vinculado.empty:
-    st.warning("No se encontraron datos suficientes para realizar el análisis de descuentos.")
+    st.warning("No se encontraron datos de 'DESCUENTOS COMERCIALES' para realizar el análisis.")
     st.stop()
 
 # --- Pestañas de Análisis ---
@@ -119,15 +129,15 @@ with tab1:
     st.subheader("Distribución de los Días de Pago")
     st.info("Este gráfico muestra cuántos descuentos se dan en cada rango de días. Idealmente, la mayoría de las barras deberían estar a la izquierda de la línea roja (15 días).")
     
-    fig = px.histogram(df_vinculado, x='dias_pago', nbins=30, title="Frecuencia de Pagos por Días Transcurridos")
-    fig.add_vline(x=15, line_width=3, line_dash="dash", line_color="red", annotation_text="Límite 15 Días")
-    st.plotly_chart(fig, use_container_width=True)
+    fig_hist = px.histogram(df_vinculado, x='dias_pago', nbins=30, title="Frecuencia de Pagos por Días Transcurridos")
+    fig_hist.add_vline(x=15, line_width=3, line_dash="dash", line_color="red", annotation_text="Límite 15 Días")
+    st.plotly_chart(fig_hist, use_container_width=True)
 
 with tab2:
     st.header("Rendimiento Individual por Vendedor")
     
     vendedores = sorted(df_vinculado['nomvendedor'].unique())
-    vendedor_sel = st.selectbox("Seleccione un Vendedor", options=vendedores)
+    vendedor_sel = st.selectbox("Seleccione un Vendedor", options=vendedores, key="sb_vendedor_dcto")
     
     df_vendedor = df_vinculado[df_vinculado['nomvendedor'] == vendedor_sel]
     
@@ -151,7 +161,7 @@ with tab2:
                 st.markdown(f"- {consejo}")
 
         st.subheader("Detalle de Descuentos Otorgados")
-        st.dataframe(df_vendedor[['nombre_cliente', 'valor_compra', 'valor_descuento', 'dias_pago']], use_container_width=True, hide_index=True)
+        st.dataframe(df_vendedor[['nombre_cliente', 'valor_compra', 'valor_descuento', 'dias_pago', 'cumple_politica']], use_container_width=True, hide_index=True)
 
 with tab3:
     st.header("Comportamiento de Clientes Frente al Descuento")
@@ -162,7 +172,7 @@ with tab3:
         frecuencia=('cliente_id', 'count'),
         dias_pago_promedio=('dias_pago', 'mean'),
         tasa_cumplimiento=('cumple_politica', 'mean')
-    ).sort_values(by='total_descontado', ascending=False)
+    ).reset_index()
     
     # Segmentación de clientes
     clientes_estrella = kpis_cliente[(kpis_cliente['tasa_cumplimiento'] >= 0.9) & (kpis_cliente['dias_pago_promedio'] <= 15)].sort_values('total_descontado', ascending=False)
@@ -173,9 +183,9 @@ with tab3:
     with col1:
         st.subheader("⭐ Clientes Estrella")
         st.caption("Pagan a tiempo consistentemente y aprovechan la política correctamente.")
-        st.dataframe(clientes_estrella.head(10), use_container_width=True)
+        st.dataframe(clientes_estrella.head(10), use_container_width=True, hide_index=True)
 
     with col2:
-        st.subheader("⚠️ Clientes a Revisar")
+        st.subheader("⚠️ Clientes a Revisar (Oportunistas)")
         st.caption("Reciben descuentos pero tienden a pagar fuera de plazo.")
-        st.dataframe(clientes_a_revisar.head(10), use_container_width=True)
+        st.dataframe(clientes_a_revisar.head(10), use_container_width=True, hide_index=True)
