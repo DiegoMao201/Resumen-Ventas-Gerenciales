@@ -1,8 +1,8 @@
 # ==============================================================================
 # SCRIPT PARA: 📊 Comparativa de Rendimiento.py
-# VERSIÓN: RESTAURADA ORIGINAL - 07 de Julio, 2025
-# DESCRIPCIÓN: Se restaura el código a la funcionalidad original solicitada,
-#              con todos sus análisis de KPIs y gráficos comparativos.
+# VERSIÓN: RESTAURADA Y MEJORADA - 07 de Julio, 2025
+# DESCRIPCIÓN: Se restaura la funcionalidad original y se añade el módulo de
+#              análisis y conclusiones automáticas por vendedor en la matriz.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -27,8 +27,12 @@ if df_ventas_historico is None or df_ventas_historico.empty:
 
 @st.cache_data
 def calcular_kpis_globales(_df_ventas):
+    """
+    Calcula un set de KPIs para cada vendedor y el promedio general.
+    """
     df_ventas = _df_ventas.dropna(subset=['nomvendedor', 'nombre_articulo'])
     
+    # Identifica descuentos de forma global para usar en el cálculo del margen
     filtro_descuento = (df_ventas['nombre_articulo'].str.contains('descuento', case=False, na=False)) & \
                        (df_ventas['nombre_articulo'].str.contains('comercial', case=False, na=False))
     
@@ -45,8 +49,10 @@ def calcular_kpis_globales(_df_ventas):
         if df_vendedor_prods.empty: continue
 
         venta_bruta = df_vendedor_prods['valor_venta'].sum()
+        # Calcula el margen bruto a partir de los productos
         margen_bruto = (df_vendedor_prods['valor_venta'] - (df_vendedor_prods['costo_unitario'].fillna(0) * df_vendedor_prods['unidades_vendidas'].fillna(0))).sum()
         total_descuentos = abs(df_vendedor_dctos['valor_venta'].sum())
+        # El margen operativo es el margen bruto menos los descuentos concedidos
         margen_operativo = margen_bruto - total_descuentos
         clientes_unicos = df_vendedor_prods['cliente_id'].nunique()
         
@@ -93,10 +99,39 @@ def render_matriz_equipo(df_kpis, promedios, vendedor_seleccionado):
     st.subheader("Matriz Estratégica del Equipo (Ventas vs. Margen)")
     avg_ventas = promedios['Ventas Brutas']
     avg_margen = promedios['Margen Operativo (%)']
-    fig = px.scatter(df_kpis, x='Ventas Brutas', y='Margen Operativo (%)', size='Clientes Únicos', color='Vendedor', hover_name='Vendedor')
+    
+    fig = px.scatter(df_kpis, x='Ventas Brutas', y='Margen Operativo (%)',
+                     size='Clientes Únicos', color='Vendedor', hover_name='Vendedor',
+                     hover_data={'Vendedor': False, 'Clientes Únicos': True})
+    
+    fig.update_traces(marker=dict(sizemin=5))
     fig.add_vline(x=avg_ventas, line_width=1.5, line_dash="dash", line_color="grey", annotation_text="Promedio Ventas")
     fig.add_hline(y=avg_margen, line_width=1.5, line_dash="dash", line_color="grey", annotation_text="Promedio Margen")
+    
     st.plotly_chart(fig, use_container_width=True)
+
+    # --- ANÁLISIS AUTOMÁTICO Y CONCLUSIONES ---
+    st.subheader(f"Análisis Estratégico para: {vendedor_seleccionado}")
+    with st.container(border=True):
+        datos_vendedor = df_kpis[df_kpis['Vendedor'] == vendedor_seleccionado].iloc[0]
+        ventas_vendedor = datos_vendedor['Ventas Brutas']
+        margen_vendedor = datos_vendedor['Margen Operativo (%)']
+        
+        if ventas_vendedor >= avg_ventas and margen_vendedor >= avg_margen:
+            cuadrante = "⭐ Líderes (Rockstars)"
+            analisis = "Este vendedor es un pilar del equipo, generando alto volumen con alta rentabilidad. **Estrategia:** Proteger, invertir en su desarrollo y utilizarlo como mentor para replicar sus buenas prácticas."
+        elif ventas_vendedor >= avg_ventas and margen_vendedor < avg_margen:
+            cuadrante = "🐄 Constructores de Volumen"
+            analisis = "Este vendedor es excelente moviendo producto y generando flujo de caja, pero a costa de la rentabilidad. **Estrategia:** Coaching enfocado en técnicas de negociación, defensa de precios y venta de mix de productos con mayor margen."
+        elif ventas_vendedor < avg_ventas and margen_vendedor >= avg_margen:
+            cuadrante = "❓ Especialistas de Nicho"
+            analisis = "Este vendedor es muy eficiente en rentabilidad, pero con un alcance de ventas limitado. **Estrategia:** Identificar si su éxito se puede escalar. Coaching para aumentar su base de clientes y volumen sin sacrificar su buen margen."
+        else:
+            cuadrante = "🌱 En Desarrollo"
+            analisis = "Este vendedor necesita un plan de desarrollo integral en ambos frentes. **Estrategia:** Establecer metas claras y semanales, acompañamiento en campo y formación intensiva en producto y técnicas de venta."
+
+        st.markdown(f"**Posición:** `{vendedor_seleccionado}` se encuentra en el cuadrante de **{cuadrante}**.")
+        st.markdown(f"**Análisis y Recomendación:** {analisis}")
 
 # --- EJECUCIÓN PRINCIPAL ---
 st.title("📊 Comparativa de Rendimiento de Vendedores")
