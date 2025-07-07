@@ -1,9 +1,8 @@
 # ==============================================================================
 # SCRIPT PARA: 🧠 Centro de Control de Descuentos y Cartera
-# VERSIÓN: 7.2 GERENCIAL (CONEXIÓN CORREGIDA) - 07 de Julio, 2025
-# DESCRIPCIÓN: Versión final con lógica de cruce client-centric, análisis de
-#              vencimiento (aging), KPIs avanzados, filtros por fecha/vendedor
-#              y la conexión original a Dropbox restaurada.
+# VERSIÓN: 7.3 GERENCIAL (KeyError CORREGIDO) - 07 de Julio, 2025
+# DESCRIPCIÓN: Versión final con corrección de KeyError al estandarizar los
+#              nombres de las columnas ('fecha_saldado') al momento de la carga.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -11,12 +10,12 @@ import plotly.express as px
 import io
 import numpy as np
 from datetime import datetime, timedelta
-import dropbox # Importación de Dropbox
+import dropbox
 
 # --- CONFIGURACIÓN DE PÁGINA Y VALIDACIÓN DE ACCESO ---
 st.set_page_config(page_title="Control de Descuentos y Cartera", page_icon="🧠", layout="wide")
 
-st.title("🧠 Centro de Control de Descuentos y Cartera v7.2")
+st.title("🧠 Centro de Control de Descuentos y Cartera v7.3")
 st.markdown("Herramienta de análisis profundo para la efectividad de descuentos, salud de cartera y gestión de vencimientos.")
 
 if st.session_state.get('usuario') != "GERENTE":
@@ -28,7 +27,8 @@ if st.session_state.get('usuario') != "GERENTE":
 @st.cache_data(ttl=3600)
 def cargar_datos_fuente(dropbox_path_cobros):
     """
-    Carga los datos de ventas (desde session_state) y el archivo de cobros desde Dropbox.
+    Carga los datos de ventas y cobros. Renombra y estandariza las columnas
+    de cobros inmediatamente después de la carga para evitar KeyErrors.
     """
     try:
         df_ventas = st.session_state.get('df_ventas')
@@ -38,8 +38,6 @@ def cargar_datos_fuente(dropbox_path_cobros):
         
         with st.spinner("Cargando y validando archivo de cobros desde Dropbox..."):
             try:
-                # --- CÓDIGO DE CONEXIÓN A DROPBOX RESTAURADO ---
-                # Este bloque se ejecutará si los secretos de Streamlit están configurados.
                 dbx = dropbox.Dropbox(
                     app_key=st.secrets.dropbox.app_key,
                     app_secret=st.secrets.dropbox.app_secret,
@@ -51,26 +49,33 @@ def cargar_datos_fuente(dropbox_path_cobros):
 
             except Exception as e:
                 st.error(f"Error al conectar con Dropbox: {e}")
-                st.warning("La conexión a Dropbox falló. Asegúrate de que los 'secrets' de Streamlit estén configurados correctamente. Se usarán datos de ejemplo para continuar.")
-                # Datos de ejemplo como fallback si la conexión falla
+                st.warning("La conexión a Dropbox falló. Se usarán datos de ejemplo para continuar.")
                 data_cobros = {'Serie': ['F-001', 'F-003'], 'Fecha Emision': ['2025-05-01', '2025-05-15'], 'Fecha Saldado': ['2025-05-20', '2025-07-01']}
                 df_cobros = pd.DataFrame(data_cobros)
+        
+        # --- FIX APLICADO AQUÍ ---
+        # Renombrar y convertir tipos de datos inmediatamente después de cargar el archivo.
+        # Esto asegura que df_cobros_raw tenga los nombres de columna correctos.
+        df_cobros.rename(columns={'Fecha Saldado': 'fecha_saldado', 'Fecha Emision': 'fecha_emision'}, inplace=True)
+        df_cobros['fecha_saldado'] = pd.to_datetime(df_cobros['fecha_saldado'], errors='coerce')
+        df_cobros['fecha_emision'] = pd.to_datetime(df_cobros['fecha_emision'], errors='coerce')
         
         return df_ventas, df_cobros
     except Exception as e:
         st.error(f"Error crítico al cargar los archivos: {e}")
         return None, None
 
-# --- LÓGICA DE PROCESAMIENTO PROFUNDO (NUEVA LÓGICA CLIENT-CENTRIC) ---
+# --- LÓGICA DE PROCESAMIENTO PROFUNDO ---
 @st.cache_data
 def procesar_y_analizar_profundo(_df_ventas, _df_cobros, nombre_articulo_descuento, dias_pronto_pago):
     """
-    Función central reconstruida con una lógica client-centric para un análisis preciso.
+    Función central reconstruida. Ya no necesita renombrar columnas de cobros
+    porque se hace durante la carga de datos.
     """
     if _df_ventas is None or _df_cobros is None:
         return pd.DataFrame(), pd.DataFrame(), {}
 
-    # PASO 1: PREPARACIÓN Y LIMPIEZA PROFUNDA DE DATOS
+    # PASO 1: PREPARACIÓN Y LIMPIEZA
     df_ventas = _df_ventas.copy()
     df_cobros = _df_cobros.copy()
 
@@ -81,9 +86,7 @@ def procesar_y_analizar_profundo(_df_ventas, _df_cobros, nombre_articulo_descuen
     df_ventas['fecha_venta'] = pd.to_datetime(df_ventas['fecha_venta'], errors='coerce')
     df_ventas.dropna(subset=['valor_venta', 'Serie', 'nombre_cliente', 'nomvendedor', 'fecha_venta'], inplace=True)
 
-    df_cobros.rename(columns={'Fecha Saldado': 'fecha_saldado', 'Fecha Emision': 'fecha_emision'}, inplace=True)
-    df_cobros['fecha_saldado'] = pd.to_datetime(df_cobros['fecha_saldado'], errors='coerce')
-    df_cobros['fecha_emision'] = pd.to_datetime(df_cobros['fecha_emision'], errors='coerce')
+    # El DataFrame de cobros ya viene con los nombres y tipos de datos correctos
     df_cobros.dropna(subset=['Serie', 'fecha_saldado', 'fecha_emision'], inplace=True)
 
     # PASO 2: SEPARACIÓN DE VENTAS Y DESCUENTOS
@@ -100,7 +103,7 @@ def procesar_y_analizar_profundo(_df_ventas, _df_cobros, nombre_articulo_descuen
         nomvendedor=('nomvendedor', 'first')
     ).reset_index()
 
-    # PASO 3: ANÁLISIS DE CARTERA PAGADA (BASADO EN ARCHIVO DE COBROS)
+    # PASO 3: ANÁLISIS DE CARTERA PAGADA
     df_cobros['dias_pago'] = (df_cobros['fecha_saldado'] - df_cobros['fecha_emision']).dt.days
     df_pagadas_detalle = pd.merge(df_cobros, ventas_por_factura, on='Serie', how='inner')
     
@@ -163,7 +166,6 @@ st.sidebar.header("Filtros del Análisis ⚙️")
 
 # FILTRO 1: PERÍODO DE ANÁLISIS
 st.sidebar.subheader("Filtrar por Período")
-# Asegurar que las fechas mínimas/máximas no causen error si los dataframes están vacíos
 min_date_ventas = df_ventas_raw['fecha_venta'].min().date() if not df_ventas_raw.empty else datetime.now().date()
 max_date_ventas = df_ventas_raw['fecha_venta'].max().date() if not df_ventas_raw.empty else datetime.now().date()
 
@@ -174,11 +176,10 @@ if fecha_inicio > fecha_fin:
     st.sidebar.error("La fecha de inicio no puede ser posterior a la fecha de fin.")
     st.stop()
 
-# Aplicar filtro de fecha a los datos crudos
 fecha_inicio_ts = pd.to_datetime(fecha_inicio)
 fecha_fin_ts = pd.to_datetime(fecha_fin)
 
-# Filtramos ventas por fecha de documento y cobros por fecha de pago
+# Filtramos ventas por fecha de documento y cobros por fecha de pago. Esto ya no dará error.
 df_ventas_periodo = df_ventas_raw[(df_ventas_raw['fecha_venta'] >= fecha_inicio_ts) & (df_ventas_raw['fecha_venta'] <= fecha_fin_ts)]
 df_cobros_periodo = df_cobros_raw[(df_cobros_raw['fecha_saldado'] >= fecha_inicio_ts) & (df_cobros_raw['fecha_saldado'] <= fecha_fin_ts)]
 
@@ -189,27 +190,24 @@ vendedores_unicos = df_ventas_periodo['nomvendedor'].dropna().unique().tolist()
 lista_vendedores = ['Visión Gerencial (Todos)'] + sorted(vendedores_unicos)
 vendedor_seleccionado = st.sidebar.selectbox("Seleccionar Vendedor", options=lista_vendedores)
 
-# --- Procesamiento de Datos con la data ya filtrada por fecha ---
+# --- Procesamiento y Filtrado ---
 with st.spinner("Ejecutando análisis profundo de cartera..."):
-    # Se usan los datos completos para el análisis de pendientes, y los de período para pagadas.
-    # Esto asegura que una venta de antes del período, pero aún pendiente, aparezca en el aging.
     df_analisis_pagado_full, df_cartera_pendiente_full = procesar_y_analizar_profundo(
         df_ventas_raw, df_cobros_raw, "DESCUENTOS COMERCIALES", DIAS_PRONTO_PAGO
     )
-    # Filtramos los resultados del análisis de pagadas según el período de cobro
-    df_analisis_pagado = df_analisis_pagado_full[df_analisis_pagado_full['nombre_cliente'].isin(df_cobros_periodo['nombre_cliente'].unique())]
+    
+    # Extraemos el comportamiento de los clientes que pagaron en el período seleccionado
+    clientes_en_periodo = df_cobros_periodo['nombre_cliente'].unique()
+    df_analisis_pagado = df_analisis_pagado_full[df_analisis_pagado_full['nombre_cliente'].isin(clientes_en_periodo)]
 
-
-# --- Filtrado por Vendedor ---
 if vendedor_seleccionado != "Visión Gerencial (Todos)":
     df_pagado_filtrado = df_analisis_pagado[df_analisis_pagado['nomvendedor'] == vendedor_seleccionado].copy()
-    # La cartera pendiente se filtra por las ventas del vendedor, independientemente del período
     df_pendiente_filtrado = df_cartera_pendiente_full[df_cartera_pendiente_full['nomvendedor'] == vendedor_seleccionado].copy()
 else:
     df_pagado_filtrado = df_analisis_pagado.copy()
     df_pendiente_filtrado = df_cartera_pendiente_full.copy()
 
-# --- Cálculo de KPIs Dinámicos basados en los filtros ---
+# --- Cálculo de KPIs Dinámicos ---
 total_cartera_pendiente = df_pendiente_filtrado['valor_total_productos'].sum() if not df_pendiente_filtrado.empty else 0
 total_descuentos = df_pagado_filtrado['total_descontado'].sum()
 total_ventas_pagadas_periodo = df_pagado_filtrado['total_comprado_pagado'].sum()
@@ -218,7 +216,9 @@ ventas_periodo = df_ventas_periodo[df_ventas_periodo['valor_venta'] > 0]['valor_
 dias_periodo = (fecha_fin - fecha_inicio).days + 1
 dso = (total_cartera_pendiente / ventas_periodo) * dias_periodo if ventas_periodo > 0 else 0
 
-# --- KPIs Gerenciales ---
+# --- Renderizado de la App (KPIs, Tabs, Gráficos) ---
+# (El resto del código para mostrar la interfaz de Streamlit permanece igual)
+
 st.header("Indicadores Clave de Rendimiento (KPIs)")
 st.info(f"Análisis para el período del **{fecha_inicio.strftime('%d/%m/%Y')}** al **{fecha_fin.strftime('%d/%m/%Y')}** para **{vendedor_seleccionado}**.")
 
@@ -228,7 +228,6 @@ col2.metric("Cartera Pendiente Total", f"${total_cartera_pendiente:,.0f}", help=
 col3.metric("Total Dctos. (Período)", f"${total_descuentos:,.0f}", help="Suma de descuentos a clientes cuyas facturas se pagaron en el período seleccionado.")
 col4.metric("% Dcto. s/ Venta Pagada (Período)", f"{porcentaje_descuento:.2f}%", help="Porcentaje de la venta (pagada en el período) que se destinó a descuentos.")
 
-# --- PESTAÑAS DE ANÁLISIS ---
 st.markdown("---")
 tab1, tab2, tab3 = st.tabs([
     "📊 **Análisis de Cartera Pagada (Efectividad Dctos.)**", 
@@ -236,7 +235,6 @@ tab1, tab2, tab3 = st.tabs([
     "🗣️ **Conclusiones y Plan de Acción**"
 ])
 
-# --- PESTAÑA 1: CARTERA PAGADA ---
 with tab1:
     st.header(f"Análisis de Descuentos en Cartera Pagada")
     st.info("Este análisis se enfoca en las facturas **pagadas dentro del período seleccionado** para evaluar si los descuentos se justifican con un pronto pago.")
@@ -257,7 +255,6 @@ with tab1:
         with st.expander("Ver detalle de clientes (Cartera Pagada en el Período)"):
             st.dataframe(df_pagado_filtrado.sort_values(by="total_descontado", ascending=False), use_container_width=True, hide_index=True)
 
-# --- PESTAÑA 2: CARTERA PENDIENTE ---
 with tab2:
     st.header(f"Análisis de Vencimiento de Cartera (Aging)")
     st.info("Este análisis muestra **todas** las deudas vigentes para el vendedor seleccionado, clasificadas por su antigüedad.")
@@ -279,12 +276,10 @@ with tab2:
         with st.expander("Ver detalle de todas las facturas pendientes de cobro"):
             st.dataframe(df_pendiente_filtrado[['Serie', 'nombre_cliente', 'nomvendedor', 'fecha_venta', 'dias_antiguedad', 'valor_total_productos', 'Rango_Vencimiento']].sort_values(by="dias_antiguedad", ascending=False), use_container_width=True, hide_index=True)
 
-# --- PESTAÑA 3: CONCLUSIONES ---
 with tab3:
     st.header("Conclusiones Automáticas y Plan de Acción")
     st.info(f"Diagnóstico generado para el período del **{fecha_inicio.strftime('%d/%m/%Y')}** al **{fecha_fin.strftime('%d/%m/%Y')}** para **{vendedor_seleccionado}**.")
 
-    # Conclusiones sobre Cartera Pagada
     st.subheader("Diagnóstico de la Política de Descuentos (en el período)")
     if not df_pagado_filtrado.empty:
         clientes_criticos_df = df_pagado_filtrado[df_pagado_filtrado['Clasificacion'] == '❌ Crítico']
@@ -296,14 +291,13 @@ with tab3:
             **Plan de Acción:**
             1.  **Revisar Inmediatamente** la asignación de descuentos para los clientes en la categoría 'Crítico'.
             2.  **Capacitar** a la fuerza de ventas sobre la importancia de alinear descuentos con el comportamiento de pago real.
-            3.  **Considerar** políticas de descuento condicionales (ej: descuento aplicado en la próxima compra si la anterior se pagó a tiempo).
+            3.  **Considerar** políticas de descuento condicionales.
             """)
         else:
-            st.success("✅ ¡Política de Descuentos Efectiva! No se encontraron clientes críticos en la cartera pagada para este período. Los descuentos se están asignando correctamente a buenos pagadores.", icon="🎉")
+            st.success("✅ ¡Política de Descuentos Efectiva! No se encontraron clientes críticos en la cartera pagada para este período.", icon="🎉")
     else:
         st.info("No hay datos de cartera pagada para generar un diagnóstico sobre descuentos en este período.")
 
-    # Conclusiones sobre Cartera Pendiente
     st.subheader("Diagnóstico de la Salud de la Cartera (Total)")
     if not df_pendiente_filtrado.empty:
         cartera_vencida = df_pendiente_filtrado[df_pendiente_filtrado['dias_antiguedad'] > 30]['valor_total_productos'].sum()
@@ -313,11 +307,11 @@ with tab3:
                 st.warning(f"""
                 **💰 Riesgo de Liquidez Identificado:** El **{porcentaje_vencido:.1f}%** de la cartera pendiente (**${cartera_vencida:,.0f}**) está vencida (más de 30 días).
                 **Plan de Acción:**
-                1.  **Priorizar Cobro:** Enfocar la gestión de cobro en el segmento de '+90 días', que representa el mayor riesgo de incobrabilidad.
-                2.  **Contacto Proactivo:** Analizar los clientes con los mayores montos pendientes en la pestaña de 'Aging' para una acción de cobro directa e inmediata.
+                1.  **Priorizar Cobro:** Enfocar la gestión de cobro en el segmento de '+90 días', que representa el mayor riesgo.
+                2.  **Contacto Proactivo:** Analizar los clientes con los mayores montos pendientes en la pestaña de 'Aging' para una acción de cobro directa.
                 3.  **Revisar Límites de Crédito:** Evaluar si los clientes con deudas vencidas recurrentes deben tener una revisión de sus condiciones de crédito.
                 """)
             else:
                 st.success("👍 ¡Cartera Corriente! Toda la cartera pendiente está al día (menos de 30 días).", icon="✅")
     else:
-        st.success("👍 ¡Cartera Sana! No se registra cartera pendiente de cobro para los filtros seleccionados. Excelente gestión de liquidez.", icon="✨")
+        st.success("👍 ¡Cartera Sana! No se registra cartera pendiente de cobro para los filtros seleccionados.", icon="✨")
