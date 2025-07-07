@@ -1,8 +1,9 @@
 # ==============================================================================
 # SCRIPT PARA: 🧠 Centro de Control de Descuentos y Cartera
-# VERSIÓN: 7.5 GERENCIAL (MERGE CORREGIDO) - 07 de Julio, 2025
-# DESCRIPCIÓN: Versión final con corrección de KeyError en `groupby` al eliminar
-#              la columna duplicada 'nomvendedor' antes de la unión de datos.
+# VERSIÓN: 7.6 GERENCIAL (MERGE DEFINITIVO) - 07 de Julio, 2025
+# DESCRIPCIÓN: Versión final con corrección de KeyError al seleccionar solo
+#              columnas esenciales de Cobros antes del merge, eliminando
+#              conflictos de columnas duplicadas ('nombre_cliente', 'nomvendedor').
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -15,7 +16,7 @@ import dropbox
 # --- CONFIGURACIÓN DE PÁGINA Y VALIDACIÓN DE ACCESO ---
 st.set_page_config(page_title="Control de Descuentos y Cartera", page_icon="🧠", layout="wide")
 
-st.title("🧠 Centro de Control de Descuentos y Cartera v7.5")
+st.title("🧠 Centro de Control de Descuentos y Cartera v7.6")
 st.markdown("Herramienta de análisis profundo para la efectividad de descuentos, salud de cartera y gestión de vencimientos.")
 
 if st.session_state.get('usuario') != "GERENTE":
@@ -26,10 +27,6 @@ if st.session_state.get('usuario') != "GERENTE":
 # --- LÓGICA DE CARGA DE DATOS (CACHEADA PARA EFICIENCIA) ---
 @st.cache_data(ttl=3600)
 def cargar_datos_fuente(dropbox_path_cobros):
-    """
-    Carga los datos de ventas y cobros. Renombra y estandariza las columnas
-    de cobros inmediatamente después de la carga para evitar KeyErrors.
-    """
     try:
         df_ventas = st.session_state.get('df_ventas')
         if df_ventas is None:
@@ -81,13 +78,10 @@ def procesar_y_analizar_profundo(_df_ventas, _df_cobros, nombre_articulo_descuen
     df_ventas = _df_ventas.copy()
     df_cobros = _df_cobros.copy()
 
-    if 'valor_venta' in df_ventas.columns and df_ventas['valor_venta'].dtype == 'object':
-         df_ventas['valor_venta'] = df_ventas['valor_venta'].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
-    
     df_ventas['valor_venta'] = pd.to_numeric(df_ventas['valor_venta'], errors='coerce')
     df_ventas['fecha_venta'] = pd.to_datetime(df_ventas['fecha_venta'], errors='coerce')
     df_ventas.dropna(subset=['valor_venta', 'Serie', 'nombre_cliente', 'nomvendedor', 'fecha_venta'], inplace=True)
-    df_cobros.dropna(subset=['Serie', 'fecha_saldado', 'fecha_emision', 'nombre_cliente'], inplace=True)
+    df_cobros.dropna(subset=['Serie', 'fecha_saldado', 'fecha_emision'], inplace=True)
 
     df_facturas_raw = df_ventas[df_ventas['valor_venta'] > 0].copy()
     df_descuentos_raw = df_ventas[
@@ -104,13 +98,15 @@ def procesar_y_analizar_profundo(_df_ventas, _df_cobros, nombre_articulo_descuen
 
     df_cobros['dias_pago'] = (df_cobros['fecha_saldado'] - df_cobros['fecha_emision']).dt.days
 
-    # --- FIX APLICADO AQUÍ ---
-    # Se elimina la columna 'nomvendedor' de df_cobros antes del merge para evitar el conflicto
-    # de columnas duplicadas. Se confía en el 'nomvendedor' del archivo de ventas.
-    df_cobros_sin_vendedor = df_cobros.drop(columns=['nomvendedor'], errors='ignore')
-    df_pagadas_detalle = pd.merge(df_cobros_sin_vendedor, ventas_por_factura, on='Serie', how='inner')
+    # --- FIX DEFINITIVO APLICADO AQUÍ ---
+    # Seleccionamos solo las columnas esenciales de df_cobros para el merge.
+    # Esto evita conflictos con 'nomvendedor' Y 'nombre_cliente'.
+    columnas_esenciales_cobro = ['Serie', 'fecha_saldado', 'fecha_emision', 'dias_pago']
+    df_cobros_para_merge = df_cobros[columnas_esenciales_cobro]
     
-    # El resto del código funciona porque 'df_pagadas_detalle' ahora tiene una sola columna 'nomvendedor'
+    # Se realiza el merge sin riesgo de conflictos de nombres de columna.
+    df_pagadas_detalle = pd.merge(df_cobros_para_merge, ventas_por_factura, on='Serie', how='inner')
+    
     analisis_pagado_por_cliente = df_pagadas_detalle.groupby(['nombre_cliente', 'nomvendedor']).agg(
         dias_pago_promedio=('dias_pago', 'mean'),
         total_comprado_pagado=('valor_total_factura', 'sum'),
