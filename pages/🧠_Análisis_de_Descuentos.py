@@ -1,9 +1,8 @@
 # ==============================================================================
 # SCRIPT PARA: 🧠 Centro de Control de Descuentos y Cartera
-# VERSIÓN: 7.4 GERENCIAL (COLUMNAS CORREGIDAS) - 07 de Julio, 2025
-# DESCRIPCIÓN: Versión final con corrección de KeyError al mapear correctamente
-#              las columnas del archivo de cobros ('Fecha Documento') y
-#              estandarizarlas al momento de la carga.
+# VERSIÓN: 7.5 GERENCIAL (MERGE CORREGIDO) - 07 de Julio, 2025
+# DESCRIPCIÓN: Versión final con corrección de KeyError en `groupby` al eliminar
+#              la columna duplicada 'nomvendedor' antes de la unión de datos.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -16,7 +15,7 @@ import dropbox
 # --- CONFIGURACIÓN DE PÁGINA Y VALIDACIÓN DE ACCESO ---
 st.set_page_config(page_title="Control de Descuentos y Cartera", page_icon="🧠", layout="wide")
 
-st.title("🧠 Centro de Control de Descuentos y Cartera v7.4")
+st.title("🧠 Centro de Control de Descuentos y Cartera v7.5")
 st.markdown("Herramienta de análisis profundo para la efectividad de descuentos, salud de cartera y gestión de vencimientos.")
 
 if st.session_state.get('usuario') != "GERENTE":
@@ -54,18 +53,14 @@ def cargar_datos_fuente(dropbox_path_cobros):
                 data_cobros = {'Serie': ['F-001'], 'Fecha Documento': ['2025-05-01'], 'Fecha Saldado': ['2025-05-20'], 'NOMBRECLIENTE': ['CLIENTE EJEMPLO'], 'NOMVENDEDOR': ['VENDEDOR EJEMPLO']}
                 df_cobros = pd.DataFrame(data_cobros)
         
-        # --- FIX APLICADO AQUÍ ---
-        # Mapeo de columnas basado en la estructura real de tu archivo de cobros.
         column_mapping = {
             'Fecha Documento': 'fecha_emision',
             'Fecha Saldado': 'fecha_saldado',
             'NOMBRECLIENTE': 'nombre_cliente',
             'NOMVENDEDOR': 'nomvendedor'
-            # Agrega otros mapeos si son necesarios
         }
         df_cobros.rename(columns=column_mapping, inplace=True)
         
-        # Convertir a datetime después de renombrar
         df_cobros['fecha_emision'] = pd.to_datetime(df_cobros['fecha_emision'], errors='coerce')
         df_cobros['fecha_saldado'] = pd.to_datetime(df_cobros['fecha_saldado'], errors='coerce')
         
@@ -80,14 +75,9 @@ def cargar_datos_fuente(dropbox_path_cobros):
 # --- LÓGICA DE PROCESAMIENTO PROFUNDO ---
 @st.cache_data
 def procesar_y_analizar_profundo(_df_ventas, _df_cobros, nombre_articulo_descuento, dias_pronto_pago):
-    """
-    Función central reconstruida. Ya no necesita renombrar columnas porque
-    se hace durante la carga de datos.
-    """
     if _df_ventas is None or _df_cobros is None:
         return pd.DataFrame(), pd.DataFrame(), {}
 
-    # PASO 1: PREPARACIÓN Y LIMPIEZA
     df_ventas = _df_ventas.copy()
     df_cobros = _df_cobros.copy()
 
@@ -97,11 +87,8 @@ def procesar_y_analizar_profundo(_df_ventas, _df_cobros, nombre_articulo_descuen
     df_ventas['valor_venta'] = pd.to_numeric(df_ventas['valor_venta'], errors='coerce')
     df_ventas['fecha_venta'] = pd.to_datetime(df_ventas['fecha_venta'], errors='coerce')
     df_ventas.dropna(subset=['valor_venta', 'Serie', 'nombre_cliente', 'nomvendedor', 'fecha_venta'], inplace=True)
+    df_cobros.dropna(subset=['Serie', 'fecha_saldado', 'fecha_emision', 'nombre_cliente'], inplace=True)
 
-    # El DataFrame de cobros ya viene con los nombres y tipos de datos correctos
-    df_cobros.dropna(subset=['Serie', 'fecha_saldado', 'fecha_emision'], inplace=True)
-
-    # PASO 2: SEPARACIÓN DE VENTAS Y DESCUENTOS
     df_facturas_raw = df_ventas[df_ventas['valor_venta'] > 0].copy()
     df_descuentos_raw = df_ventas[
         (df_ventas['nombre_articulo'] == nombre_articulo_descuento) & (df_ventas['valor_venta'] < 0)
@@ -115,10 +102,15 @@ def procesar_y_analizar_profundo(_df_ventas, _df_cobros, nombre_articulo_descuen
         nomvendedor=('nomvendedor', 'first')
     ).reset_index()
 
-    # PASO 3: ANÁLISIS DE CARTERA PAGADA
     df_cobros['dias_pago'] = (df_cobros['fecha_saldado'] - df_cobros['fecha_emision']).dt.days
-    df_pagadas_detalle = pd.merge(df_cobros, ventas_por_factura, on='Serie', how='inner')
+
+    # --- FIX APLICADO AQUÍ ---
+    # Se elimina la columna 'nomvendedor' de df_cobros antes del merge para evitar el conflicto
+    # de columnas duplicadas. Se confía en el 'nomvendedor' del archivo de ventas.
+    df_cobros_sin_vendedor = df_cobros.drop(columns=['nomvendedor'], errors='ignore')
+    df_pagadas_detalle = pd.merge(df_cobros_sin_vendedor, ventas_por_factura, on='Serie', how='inner')
     
+    # El resto del código funciona porque 'df_pagadas_detalle' ahora tiene una sola columna 'nomvendedor'
     analisis_pagado_por_cliente = df_pagadas_detalle.groupby(['nombre_cliente', 'nomvendedor']).agg(
         dias_pago_promedio=('dias_pago', 'mean'),
         total_comprado_pagado=('valor_total_factura', 'sum'),
@@ -145,7 +137,6 @@ def procesar_y_analizar_profundo(_df_ventas, _df_cobros, nombre_articulo_descuen
     if not analisis_pagado.empty:
         analisis_pagado['Clasificacion'] = analisis_pagado.apply(clasificar_cliente_pagado, axis=1)
 
-    # PASO 4: ANÁLISIS DE CARTERA PENDIENTE (AGING)
     series_pagadas = df_cobros['Serie'].unique()
     df_pendientes = ventas_por_factura[~ventas_por_factura['Serie'].isin(series_pagadas)].copy()
     
@@ -166,17 +157,14 @@ def procesar_y_analizar_profundo(_df_ventas, _df_cobros, nombre_articulo_descuen
 # EJECUCIÓN PRINCIPAL Y RENDERIZADO
 # ==============================================================================
 
-# --- Carga de Datos ---
 df_ventas_raw, df_cobros_raw = cargar_datos_fuente("/data/Cobros.xlsx")
 
 if df_ventas_raw is None or df_cobros_raw is None:
     st.error("La carga de datos falló. No se puede continuar.")
     st.stop()
 
-# --- Barra Lateral de Filtros ---
 st.sidebar.header("Filtros del Análisis ⚙️")
 
-# FILTRO 1: PERÍODO DE ANÁLISIS
 st.sidebar.subheader("Filtrar por Período")
 min_date_ventas = df_ventas_raw['fecha_venta'].min().date() if not df_ventas_raw.empty else datetime.now().date()
 max_date_ventas = df_ventas_raw['fecha_venta'].max().date() if not df_ventas_raw.empty else datetime.now().date()
@@ -191,18 +179,15 @@ if fecha_inicio > fecha_fin:
 fecha_inicio_ts = pd.to_datetime(fecha_inicio)
 fecha_fin_ts = pd.to_datetime(fecha_fin)
 
-# Filtramos ventas por fecha de documento y cobros por fecha de pago. Esto ya no dará error.
 df_ventas_periodo = df_ventas_raw[(df_ventas_raw['fecha_venta'] >= fecha_inicio_ts) & (df_ventas_raw['fecha_venta'] <= fecha_fin_ts)]
 df_cobros_periodo = df_cobros_raw[(df_cobros_raw['fecha_saldado'] >= fecha_inicio_ts) & (df_cobros_raw['fecha_saldado'] <= fecha_fin_ts)]
 
-# FILTRO 2: VENDEDOR
 st.sidebar.subheader("Filtrar por Responsable")
 DIAS_PRONTO_PAGO = st.sidebar.slider("Definir 'Pronto Pago' (días)", min_value=5, max_value=90, value=30, help="Días máximos para considerar un pago como 'pronto pago'.")
 vendedores_unicos = df_ventas_periodo['nomvendedor'].dropna().unique().tolist()
 lista_vendedores = ['Visión Gerencial (Todos)'] + sorted(vendedores_unicos)
 vendedor_seleccionado = st.sidebar.selectbox("Seleccionar Vendedor", options=lista_vendedores)
 
-# --- Procesamiento y Filtrado ---
 with st.spinner("Ejecutando análisis profundo de cartera..."):
     df_analisis_pagado_full, df_cartera_pendiente_full = procesar_y_analizar_profundo(
         df_ventas_raw, df_cobros_raw, "DESCUENTOS COMERCIALES", DIAS_PRONTO_PAGO
@@ -218,16 +203,14 @@ else:
     df_pagado_filtrado = df_analisis_pagado.copy()
     df_pendiente_filtrado = df_cartera_pendiente_full.copy()
 
-# --- Cálculo de KPIs Dinámicos ---
 total_cartera_pendiente = df_pendiente_filtrado['valor_total_productos'].sum() if not df_pendiente_filtrado.empty else 0
 total_descuentos = df_pagado_filtrado['total_descontado'].sum()
 total_ventas_pagadas_periodo = df_pagado_filtrado['total_comprado_pagado'].sum()
 porcentaje_descuento = (total_descuentos / total_ventas_pagadas_periodo) * 100 if total_ventas_pagadas_periodo > 0 else 0
 ventas_periodo = df_ventas_periodo[df_ventas_periodo['valor_venta'] > 0]['valor_venta'].sum()
-dias_periodo = (fecha_fin - fecha_inicio).days + 1 if fecha_fin > fecha_inicio else 1
+dias_periodo = (fecha_fin - fecha_inicio).days + 1 if fecha_fin >= fecha_inicio else 1
 dso = (total_cartera_pendiente / ventas_periodo) * dias_periodo if ventas_periodo > 0 else 0
 
-# --- Renderizado de la App (KPIs, Tabs, Gráficos) ---
 st.header("Indicadores Clave de Rendimiento (KPIs)")
 st.info(f"Análisis para el período del **{fecha_inicio.strftime('%d/%m/%Y')}** al **{fecha_fin.strftime('%d/%m/%Y')}** para **{vendedor_seleccionado}**.")
 
