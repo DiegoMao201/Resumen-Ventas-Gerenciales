@@ -1,8 +1,8 @@
 # ==============================================================================
 # SCRIPT PARA: 🧠 Centro de Control de Descuentos y Cartera
-# VERSIÓN: 5.1 GERENCIAL (CORREGIDO) - 07 de Julio, 2025
-# DESCRIPCIÓN: Versión con corrección de error de sintaxis y lógica para
-#              manejar de forma robusta los dataframes vacíos.
+# VERSIÓN: 5.2 GERENCIAL (ROBUSTO) - 07 de Julio, 2025
+# DESCRIPCIÓN: Versión que corrige TypeError al manejar valores nulos en la
+#              lista de vendedores, haciendo la app más robusta.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -182,8 +182,15 @@ DIAS_PRONTO_PAGO = st.sidebar.slider(
     help="Este es el umbral para considerar si un cliente paga a tiempo."
 )
 
-# Obtener lista de vendedores únicos y añadir opción "Todos"
-lista_vendedores = ['Todos'] + sorted(df_ventas['nomvendedor'].unique().tolist())
+# ======================================================================
+# INICIO DE LA CORRECCIÓN
+# Se obtiene la lista de vendedores de forma segura, eliminando valores nulos
+# (`None` o `NaN`) antes de ordenar, para prevenir un TypeError.
+vendedores_unicos = df_ventas['nomvendedor'].dropna().unique().tolist()
+lista_vendedores = ['Todos'] + sorted(vendedores_unicos)
+# FIN DE LA CORRECCIÓN
+# ======================================================================
+
 vendedor_seleccionado = st.sidebar.selectbox(
     "Seleccionar Vendedor",
     options=lista_vendedores,
@@ -275,13 +282,9 @@ with tab2:
     if df_filtrado.empty:
         st.warning(f"No hay datos para mostrar para el vendedor '{vendedor_seleccionado}'.")
     else:
-        # ======================================================================
-        # INICIO DE LA CORRECCIÓN
         # Se calcula el valor máximo para la barra de progreso de forma segura,
         # evitando errores si el dataframe filtrado está vacío.
         max_pct_value = max(5, df_filtrado['pct_descuento'].max())
-        # FIN DE LA CORRECCIÓN
-        # ======================================================================
 
         st.dataframe(
             df_filtrado,
@@ -333,7 +336,7 @@ with tab3:
             st.info(f"""
             **Oportunidad de Crecimiento:** Existen **{len(clientes_oportunidad_df)}** clientes clasificados como 'buenos pagadores' que actualmente
             no reciben descuentos significativos. Podrían ser candidatos para un programa de lealtad que incentive compras mayores a cambio de descuentos.
-            """, icon="�")
+            """, icon="💡")
 
         st.markdown("---")
         st.subheader("Recomendaciones y Acciones Sugeridas:")
