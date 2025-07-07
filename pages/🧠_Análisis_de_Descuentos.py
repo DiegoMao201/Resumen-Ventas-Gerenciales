@@ -339,4 +339,3 @@ with tab3:
             top_3_oportunidad = clientes_oportunidad_df.sort_values('total_comprado', ascending=False).head(3)
             for _, row in top_3_oportunidad.iterrows():
                 st.success(f"   - **{row['nombre_cliente']}**: Días pago: **{row['dias_pago_promedio']:.0f}**, Compras totales: **${row['total_comprado']:,.0f}**")
-�
