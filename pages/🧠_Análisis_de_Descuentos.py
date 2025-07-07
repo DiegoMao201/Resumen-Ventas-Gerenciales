@@ -1,106 +1,107 @@
 # ==============================================================================
 # SCRIPT PARA: 🧠 Centro de Control de Descuentos y Cartera
-# VERSIÓN: 8.0 GERENCIAL (REFACTORIZADO Y ALINEADO) - 07 de Julio, 2025
-# DESCRIPCIÓN: Versión completamente reestructurada para integrarse con el
-#              ecosistema de datos de la sesión (st.session_state). Utiliza
-#              una lógica de procesamiento unificada, consistente y más precisa
-#              para el análisis de cartera y efectividad de descuentos.
+# VERSIÓN: 8.1 GERENCIAL (ENFOQUE HÍBRIDO) - 07 de Julio, 2025
+# DESCRIPCIÓN: Versión definitiva que adopta un enfoque híbrido. Carga los datos
+#              de ventas desde el st.session_state (consistente con otras apps)
+#              y carga un archivo de cobros granular por separado desde Dropbox
+#              para asegurar un análisis de cartera preciso y funcional.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 import numpy as np
 from datetime import datetime
+import dropbox
+import io
 
 # --- 1. CONFIGURACIÓN DE PÁGINA Y VALIDACIÓN DE ACCESO ---
 st.set_page_config(page_title="Control de Descuentos y Cartera", page_icon="🧠", layout="wide")
 
-st.title("🧠 Centro de Control de Descuentos y Cartera v8.0")
+st.title("🧠 Centro de Control de Descuentos y Cartera v8.1")
 st.markdown("Herramienta de análisis profundo para la efectividad de descuentos, salud de cartera y gestión de vencimientos.")
 
-# Validar que el usuario esté autenticado desde la página principal
 if st.session_state.get('usuario') != "GERENTE":
     st.error("🔒 Acceso Exclusivo para Gerencia.")
     st.info("Por favor, inicie sesión desde la página principal para acceder a esta herramienta.")
     st.stop()
 
-# --- 2. LÓGICA DE CARGA DE DATOS (AHORA DESDE SESSION_STATE) ---
+# --- 2. LÓGICA DE CARGA DE DATOS (ENFOQUE HÍBRIDO) ---
 @st.cache_data(ttl=3600)
-def cargar_datos_desde_sesion():
+def cargar_datos_combinados(dropbox_path_cobros):
     """
-    Carga los DataFrames de ventas y cobros desde el estado de la sesión.
-    Valida que los datos necesarios existan y tengan las columnas requeridas.
+    Carga los datos de ventas desde el estado de la sesión y los datos de cobros
+    granulares directamente desde Dropbox, combinando lo mejor de ambos mundos.
     """
+    # PASO 1: Cargar datos de VENTAS desde la sesión (fuente de verdad para costos, etc.)
     df_ventas = st.session_state.get('df_ventas')
-    # ### CAMBIO FUNDAMENTAL ###
-    # Se utiliza el df_cobros de la sesión. Se asume que este archivo DEBE tener
-    # la granularidad necesaria, es decir, 'Serie' y 'fecha_saldado'.
-    # Si 'df_cobros' solo tiene totales mensuales, este análisis no es posible.
-    # El código original cargaba un 'Cobros.xlsx' granular, por lo que asumimos
-    # que un archivo así existe y debe ser el que se carga en la sesión principal.
-    df_cobros = st.session_state.get('df_cobros') 
-
-    if df_ventas is None or df_cobros is None:
-        st.error("Los datos de ventas o cobros no se encontraron en la sesión. Por favor, vuelva a la página principal y cargue los datos primero.")
+    if df_ventas is None:
+        st.error("Los datos de ventas no se encontraron en la sesión. Por favor, vuelva a la página principal y cargue los datos primero.")
         return None, None
     
-    # Validar columnas esenciales
-    columnas_ventas_req = ['Serie', 'fecha_venta', 'nombre_cliente', 'nomvendedor', 'nombre_articulo', 'valor_venta', 'costo_unitario', 'unidades_vendidas']
-    columnas_cobros_req = ['Serie', 'fecha_saldado']
-
-    if not all(col in df_ventas.columns for col in columnas_ventas_req):
-        st.error(f"El DataFrame de ventas no contiene todas las columnas requeridas. Faltan: {set(columnas_ventas_req) - set(df_ventas.columns)}")
-        return None, None
-    
-    if not all(col in df_cobros.columns for col in columnas_cobros_req):
-        st.error(f"El DataFrame de cobros no contiene las columnas requeridas. Faltan: {set(columnas_cobros_req) - set(df_cobros.columns)}. Necesita granularidad por 'Serie'.")
-        return None, None
-        
-    # Copiar para evitar modificar el estado original
     df_ventas_copy = df_ventas.copy()
-    df_cobros_copy = df_cobros.copy()
-    
-    # Asegurar tipos de datos correctos (similar a tus otros scripts)
     df_ventas_copy['fecha_venta'] = pd.to_datetime(df_ventas_copy['fecha_venta'], errors='coerce')
-    df_cobros_copy['fecha_saldado'] = pd.to_datetime(df_cobros_copy['fecha_saldado'], errors='coerce')
     numeric_cols_ventas = ['valor_venta', 'costo_unitario', 'unidades_vendidas']
     for col in numeric_cols_ventas:
         df_ventas_copy[col] = pd.to_numeric(df_ventas_copy[col], errors='coerce')
-
     df_ventas_copy.dropna(subset=['fecha_venta', 'Serie'], inplace=True)
-    df_cobros_copy.dropna(subset=['fecha_saldado', 'Serie'], inplace=True)
 
-    return df_ventas_copy, df_cobros_copy
+    # PASO 2: Cargar datos de COBROS GRANULARES desde Dropbox
+    try:
+        with st.spinner("Cargando archivo de cobros granular desde Dropbox..."):
+            dbx = dropbox.Dropbox(
+                app_key=st.secrets.dropbox.app_key,
+                app_secret=st.secrets.dropbox.app_secret,
+                oauth2_refresh_token=st.secrets.dropbox.refresh_token
+            )
+            _, res = dbx.files_download(path=dropbox_path_cobros)
+            # Asumimos que es un Excel, si es CSV cambiar pd.read_excel por pd.read_csv
+            df_cobros_granular = pd.read_excel(io.BytesIO(res.content))
+            st.success("Archivo de cobros granular cargado exitosamente.", icon="✅")
 
-# --- 3. LÓGICA DE PROCESAMIENTO PROFUNDO (REFACTORIZADA) ---
+    except Exception as e:
+        st.error(f"Error crítico al cargar el archivo de cobros desde Dropbox: {e}")
+        st.info("Asegúrate de que la ruta y el formato del archivo en Dropbox sean correctos. La aplicación no puede continuar sin este archivo.")
+        return None, None
+        
+    # PASO 3: Limpiar y estandarizar el archivo de cobros cargado
+    # ### CAMBIO CLAVE ### - Mapeo de columnas para estandarizar
+    column_mapping = {
+        'Fecha Saldado': 'fecha_saldado',
+        # Asegúrate de que el nombre de la columna 'Serie' en tu Excel sea correcto
+        'Serie': 'Serie' 
+        # Añade otros mapeos si los nombres son diferentes, ej: 'Factura': 'Serie'
+    }
+    
+    # Validar que las columnas esperadas existan antes de renombrar
+    if 'Fecha Saldado' not in df_cobros_granular.columns or 'Serie' not in df_cobros_granular.columns:
+        st.error(f"Tu archivo de cobros de Dropbox DEBE contener las columnas 'Serie' y 'Fecha Saldado'. Columnas encontradas: {df_cobros_granular.columns.to_list()}")
+        return None, None
+
+    df_cobros_granular.rename(columns=column_mapping, inplace=True)
+    df_cobros_granular['fecha_saldado'] = pd.to_datetime(df_cobros_granular['fecha_saldado'], errors='coerce')
+    
+    # Devolvemos solo las columnas esenciales y sin duplicados por factura
+    df_cobros_esencial = df_cobros_granular[['Serie', 'fecha_saldado']].dropna().drop_duplicates(subset=['Serie'])
+    
+    return df_ventas_copy, df_cobros_esencial
+
+# --- 3. LÓGICA DE PROCESAMIENTO PROFUNDO (Intacta de v8.0, sigue siendo robusta) ---
 @st.cache_data
 def procesar_y_analizar_profundo(_df_ventas_periodo, _df_cobros_global, dias_pronto_pago):
-    """
-    Lógica de análisis central, completamente reescrita para mayor precisión.
-    - Usa df_ventas como la fuente de verdad para los detalles de la factura.
-    - Identifica descuentos de forma robusta.
-    - Calcula la cartera pagada y pendiente de forma consistente.
-    - Enriquece el análisis con el margen de rentabilidad.
-    """
     if _df_ventas_periodo is None or _df_cobros_global is None or _df_ventas_periodo.empty:
         return pd.DataFrame(), pd.DataFrame()
 
-    # ### CAMBIO LÓGICO ###
-    # El análisis se ejecuta sobre los datos YA filtrados por el usuario.
     df_ventas = _df_ventas_periodo.copy()
-
-    # 1. Separar ventas de productos y descuentos comerciales
+    
     filtro_descuento = (df_ventas['nombre_articulo'].str.contains('DESCUENTO', na=False, case=False)) & \
                        (df_ventas['nombre_articulo'].str.contains('COMERCIAL', na=False, case=False))
     
     df_productos_raw = df_ventas[~filtro_descuento].copy()
     df_descuentos_raw = df_ventas[filtro_descuento].copy()
 
-    # 2. Calcular Margen y agregar datos de la factura
     df_productos_raw['costo_total_linea'] = df_productos_raw['costo_unitario'].fillna(0) * df_productos_raw['unidades_vendidas'].fillna(0)
     df_productos_raw['margen_bruto'] = df_productos_raw['valor_venta'] - df_productos_raw['costo_total_linea']
     
-    # 3. Consolidar facturas para obtener el valor total y metadatos
     ventas_por_factura = df_productos_raw.groupby('Serie').agg(
         valor_total_factura=('valor_venta', 'sum'),
         margen_total_factura=('margen_bruto', 'sum'),
@@ -109,26 +110,19 @@ def procesar_y_analizar_profundo(_df_ventas_periodo, _df_cobros_global, dias_pro
         nomvendedor=('nomvendedor', 'first')
     ).reset_index()
 
-    # 4. Consolidar descuentos por factura
     descuentos_por_factura = df_descuentos_raw.groupby('Serie').agg(
         monto_descontado=('valor_venta', 'sum')
     ).reset_index()
     descuentos_por_factura['monto_descontado'] = abs(descuentos_por_factura['monto_descontado'])
 
-    # 5. Unir ventas con descuentos
     ventas_consolidadas = pd.merge(ventas_por_factura, descuentos_por_factura, on='Serie', how='left')
     ventas_consolidadas['monto_descontado'].fillna(0, inplace=True)
 
-    # 6. Identificar Cartera Pagada y Calcular Días de Pago
-    # ### LÓGICA DE MERGE MEJORADA ###
-    # Se usa el df_cobros global (sin filtrar por fecha) para encontrar CUALQUIER factura pagada.
-    df_cobros_esencial = _df_cobros_global[['Serie', 'fecha_saldado']].drop_duplicates(subset=['Serie'])
-    df_pagadas = pd.merge(ventas_consolidadas, df_cobros_esencial, on='Serie', how='inner')
+    df_pagadas = pd.merge(ventas_consolidadas, _df_cobros_global, on='Serie', how='inner')
     
     if not df_pagadas.empty:
         df_pagadas['dias_pago'] = (df_pagadas['fecha_saldado'] - df_pagadas['fecha_venta']).dt.days
     
-    # 7. Analizar Cartera Pendiente
     series_pagadas = df_pagadas['Serie'].unique()
     df_pendientes = ventas_consolidadas[~ventas_consolidadas['Serie'].isin(series_pagadas)].copy()
     
@@ -142,7 +136,6 @@ def procesar_y_analizar_profundo(_df_ventas_periodo, _df_cobros_global, dias_pro
             else: return "Vencida (+90 días)"
         df_pendientes['Rango_Vencimiento'] = df_pendientes['dias_antiguedad'].apply(clasificar_vencimiento)
 
-    # 8. Consolidar análisis por cliente para la cartera pagada
     if not df_pagadas.empty:
         analisis_pagado_por_cliente = df_pagadas.groupby(['nombre_cliente', 'nomvendedor']).agg(
             dias_pago_promedio=('dias_pago', 'mean'),
@@ -169,20 +162,20 @@ def procesar_y_analizar_profundo(_df_ventas_periodo, _df_cobros_global, dias_pro
     else:
         return pd.DataFrame(), df_pendientes
 
-
 # ==============================================================================
 # 4. EJECUCIÓN PRINCIPAL Y RENDERIZADO DE LA UI
 # ==============================================================================
 
-# Cargar datos desde la sesión una sola vez
-df_ventas_raw, df_cobros_raw = cargar_datos_desde_sesion()
+# ### CAMBIO CLAVE ### 
+# Llama a la nueva función de carga y pasa la ruta de tu archivo de Dropbox.
+# Asegúrate de que esta ruta sea la correcta para tu archivo.
+df_ventas_raw, df_cobros_granular_raw = cargar_datos_combinados("/data/Cobros.xlsx")
 
-if df_ventas_raw is None or df_cobros_raw is None:
+if df_ventas_raw is None or df_cobros_granular_raw is None:
     st.stop()
 
 st.sidebar.header("Filtros del Análisis ⚙️")
 
-# --- Filtros de la UI ---
 min_date = df_ventas_raw['fecha_venta'].min().date()
 max_date = df_ventas_raw['fecha_venta'].max().date()
 
@@ -193,8 +186,6 @@ if fecha_inicio > fecha_fin:
     st.sidebar.error("La fecha de inicio no puede ser posterior a la fecha de fin.")
     st.stop()
 
-# ### CAMBIO LÓGICO ###
-# Los DataFrames se filtran ANTES de pasarlos a la función de análisis.
 df_ventas_periodo = df_ventas_raw[
     (df_ventas_raw['fecha_venta'].dt.date >= fecha_inicio) & 
     (df_ventas_raw['fecha_venta'].dt.date <= fecha_fin)
@@ -205,18 +196,18 @@ vendedor_seleccionado = st.sidebar.selectbox("Seleccionar Vendedor", options=ven
 
 DIAS_PRONTO_PAGO = st.sidebar.slider("Definir 'Pronto Pago' (días)", min_value=5, max_value=90, value=30, help="Días máximos para considerar un pago como 'pronto pago'.")
 
-# Filtrado por vendedor
 if vendedor_seleccionado != "Visión Gerencial (Todos)":
     df_ventas_filtrado = df_ventas_periodo[df_ventas_periodo['nomvendedor'] == vendedor_seleccionado]
 else:
     df_ventas_filtrado = df_ventas_periodo
 
-# --- Ejecución del Análisis y Renderizado ---
 with st.spinner("Ejecutando análisis profundo de cartera..."):
+    # El df_cobros_granular_raw se pasa como el dato de cobros global
     df_analisis_pagado, df_cartera_pendiente = procesar_y_analizar_profundo(
-        df_ventas_filtrado, df_cobros_raw, DIAS_PRONTO_PAGO
+        df_ventas_filtrado, df_cobros_granular_raw, DIAS_PRONTO_PAGO
     )
 
+# El resto de la UI es igual a la versión 8.0, ya que los DataFrames de salida son los mismos.
 total_cartera_pendiente = df_cartera_pendiente['valor_total_factura'].sum() if not df_cartera_pendiente.empty else 0
 total_descuentos_periodo = df_analisis_pagado['total_descontado'].sum() if not df_analisis_pagado.empty else 0
 total_ventas_pagadas_periodo = df_analisis_pagado['total_comprado_pagado'].sum() if not df_analisis_pagado.empty else 0
