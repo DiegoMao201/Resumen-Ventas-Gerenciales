@@ -1,8 +1,8 @@
 # ==============================================================================
 # SCRIPT PARA: 🧠 Centro de Control de Descuentos y Cartera
-# VERSIÓN: 5.0 GERENCIAL - 07 de Julio, 2025
-# DESCRIPCIÓN: Versión interactiva y analítica para la gerencia.
-#              Enfocada en la justificación de descuentos vs. comportamiento de pago.
+# VERSIÓN: 5.1 GERENCIAL (CORREGIDO) - 07 de Julio, 2025
+# DESCRIPCIÓN: Versión con corrección de error de sintaxis y lógica para
+#              manejar de forma robusta los dataframes vacíos.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -275,6 +275,14 @@ with tab2:
     if df_filtrado.empty:
         st.warning(f"No hay datos para mostrar para el vendedor '{vendedor_seleccionado}'.")
     else:
+        # ======================================================================
+        # INICIO DE LA CORRECCIÓN
+        # Se calcula el valor máximo para la barra de progreso de forma segura,
+        # evitando errores si el dataframe filtrado está vacío.
+        max_pct_value = max(5, df_filtrado['pct_descuento'].max())
+        # FIN DE LA CORRECCIÓN
+        # ======================================================================
+
         st.dataframe(
             df_filtrado,
             column_config={
@@ -284,7 +292,13 @@ with tab2:
                 "total_comprado": st.column_config.NumberColumn("Total Comprado", format="$ {:,.0f}"),
                 "total_descontado": st.column_config.NumberColumn("Total Descontado", format="$ {:,.0f}"),
                 "numero_facturas": "N° Facturas",
-                "pct_descuento": st.column_config.ProgressColumn("% Dcto.", format="%.2f%%", min_value=0, max_value=max(5, df_filtrado['pct_descuento'].max())),
+                "pct_descuento": st.column_config.ProgressColumn(
+                    "% Dcto.",
+                    format="%.2f%%",
+                    min_value=0,
+                    # Se usa la variable segura calculada previamente
+                    max_value=max_pct_value
+                ),
                 "Clasificacion": st.column_config.Column("Clasificación", width="medium")
             },
             use_container_width=True,
@@ -300,7 +314,7 @@ with tab3:
         st.warning(f"No se pueden generar conclusiones para '{vendedor_seleccionado}' debido a la falta de datos.")
     else:
         clientes_criticos_df = df_filtrado[df_filtrado['Clasificacion'] == '❌ Crítico: Mal pagador con Dcto.']
-        clientes_oportunidad_df = df_filtrado[df_filtrado['Clasificacion'] == '� Oportunidad: Buen pagador sin Dcto.']
+        clientes_oportunidad_df = df_filtrado[df_filtrado['Clasificacion'] == '💡 Oportunidad: Buen pagador sin Dcto.']
 
         st.subheader("Hallazgos Clave:")
         
@@ -319,7 +333,7 @@ with tab3:
             st.info(f"""
             **Oportunidad de Crecimiento:** Existen **{len(clientes_oportunidad_df)}** clientes clasificados como 'buenos pagadores' que actualmente
             no reciben descuentos significativos. Podrían ser candidatos para un programa de lealtad que incentive compras mayores a cambio de descuentos.
-            """, icon="💡")
+            """, icon="�")
 
         st.markdown("---")
         st.subheader("Recomendaciones y Acciones Sugeridas:")
