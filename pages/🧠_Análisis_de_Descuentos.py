@@ -1,184 +1,185 @@
 # ==============================================================================
-# SCRIPT PARA: 🧠 Análisis de Descuentos
-# VERSIÓN: 3.1 CORREGIDA - 07 de Julio, 2025
-# DESCRIPCIÓN: Se corrige el error de recarga de la página al seleccionar un
-#              vendedor mediante el uso de st.session_state para persistir
-#              el resultado del análisis.
+# SCRIPT PARA: 🧠 Centro de Análisis de Cartera y Descuentos
+# VERSIÓN: 4.0 FINAL - 07 de Julio, 2025
+# DESCRIPCIÓN: Versión definitiva que utiliza el nuevo archivo 'Cobros.xlsx'
+#              para un análisis 100% preciso y rápido de la cartera y los
+#              descuentos, eliminando la necesidad de la lógica FIFO.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from datetime import datetime
 
-# --- CONFIGURACIÓN DE PÁGINA Y VALIDACIÓN DE DATOS ---
-st.set_page_config(page_title="Análisis de Descuentos", page_icon="🧠", layout="wide")
+# --- CONFIGURACIÓN DE PÁGINA Y VALIDACIÓN ---
+st.set_page_config(page_title="Análisis de Cartera y Dctos", page_icon="🧠", layout="wide")
 
-st.title("🧠 Análisis Estratégico de Descuentos")
+st.title("🧠 Centro de Análisis de Cartera y Descuentos")
 
 if st.session_state.get('usuario') != "GERENTE":
     st.error("🔒 Acceso Exclusivo para Gerencia.")
     st.stop()
 
-df_ventas_historico = st.session_state.get('df_ventas')
-if df_ventas_historico is None or df_ventas_historico.empty:
-    st.error("No se pudieron cargar los datos maestros. Vuelva a la página principal y recargue.")
-    st.stop()
-
-# ==============================================================================
-# LÓGICA DE ANÁLISIS (MOTOR FIFO FINAL Y OPTIMIZADO)
-# ==============================================================================
+# --- LÓGICA DE CARGA DE DATOS (INCLUYE EL NUEVO EXCEL DE COBROS) ---
 
 @st.cache_data
-def calcular_vinculos_fifo_optimizado(_df_ventas, nombre_exacto_descuento, fecha_inicio_politica, fecha_fin_rango):
+def cargar_datos_completos(dropbox_path_ventas, dropbox_path_cobros):
     """
-    Versión Definitiva: El cálculo SIEMPRE comienza desde el inicio de la política
-    para garantizar la lógica FIFO correcta. El usuario solo elige la fecha de fin.
+    Carga tanto el CSV de ventas como el nuevo Excel de cobros.
     """
+    try:
+        # Carga de Ventas (código existente)
+        df_ventas = st.session_state.get('df_ventas')
+        if df_ventas is None:
+            st.error("Los datos de ventas no se encontraron. Vuelva a la página principal.")
+            return None, None
+
+        # Carga del nuevo archivo de Cobros (Excel)
+        # Asumiendo que las credenciales de Dropbox ya están en st.secrets como en tu app principal
+        with st.spinner("Cargando archivo de cobros..."):
+            import dropbox
+            import io
+            dbx = dropbox.Dropbox(app_key=st.secrets.dropbox.app_key, app_secret=st.secrets.dropbox.app_secret, oauth2_refresh_token=st.secrets.dropbox.refresh_token)
+            _, res = dbx.files_download(path=dropbox_path_cobros)
+            df_cobros = pd.read_excel(io.BytesIO(res.content))
+        
+        return df_ventas, df_cobros
+    except Exception as e:
+        st.error(f"Error crítico al cargar los archivos: {e}")
+        return None, None
+
+@st.cache_data
+def procesar_y_unir_datos(_df_ventas, _df_cobros, nombre_articulo_descuento):
+    """
+    Une los datos de ventas y cobros para un análisis preciso.
+    """
+    # 1. Preparar Ventas y Descuentos
     df_ventas = _df_ventas.copy()
     df_ventas['fecha_venta'] = pd.to_datetime(df_ventas['fecha_venta'])
     
-    fecha_politica = pd.to_datetime(fecha_inicio_politica)
-    fecha_fin = pd.to_datetime(fecha_fin_rango)
+    df_productos = df_ventas[df_ventas['valor_venta'] > 0]
+    df_descuentos = df_ventas[df_ventas['nombre_articulo'] == nombre_articulo_descuento]
 
-    mask_periodo_completo = (df_ventas['fecha_venta'] >= fecha_politica) & (df_ventas['fecha_venta'] <= fecha_fin)
-    df_analisis = df_ventas[mask_periodo_completo]
+    # Agrupar ventas por factura para tener el valor total de la compra
+    ventas_agrupadas = df_productos.groupby('Serie').agg(
+        valor_compra=('valor_venta', 'sum'),
+        fecha_venta=('fecha_venta', 'first'),
+        nomvendedor=('nomvendedor', 'first'),
+        nombre_cliente=('nombre_cliente', 'first')
+    ).reset_index()
 
-    filtro_facturas = (df_analisis['valor_venta'] > 0) & (df_analisis['TipoDocumento'].str.contains('FACTURA', na=False, case=False))
-    filtro_descuentos = (df_analisis['valor_venta'] < 0) & (df_analisis['nombre_articulo'] == nombre_exacto_descuento)
-
-    facturas = df_analisis[filtro_facturas].sort_values(by=['cliente_id', 'fecha_venta'])
-    descuentos = df_analisis[filtro_descuentos].sort_values(by=['cliente_id', 'fecha_venta'])
-
-    if descuentos.empty or facturas.empty:
-        return pd.DataFrame()
-
-    facturas['rank'] = facturas.groupby('cliente_id').cumcount()
-    descuentos['rank'] = descuentos.groupby('cliente_id').cumcount()
-
-    df_vinculado = pd.merge(descuentos, facturas, on=['cliente_id', 'rank'], suffixes=('_dcto', '_factura'))
-
-    if df_vinculado.empty:
-        return pd.DataFrame()
-
-    df_vinculado['dias_pago'] = (df_vinculado['fecha_venta_dcto'] - df_vinculado['fecha_venta_factura']).dt.days
-    df_vinculado = df_vinculado[df_vinculado['dias_pago'] >= 0] 
-
-    df_resultado = df_vinculado.rename(columns={
-        'nomvendedor_factura': 'nomvendedor', 'nombre_cliente_factura': 'nombre_cliente',
-        'valor_venta_factura': 'valor_compra'
+    # 2. Preparar Cobros
+    df_cobros = _df_cobros.copy()
+    # Renombrar columnas para facilitar el manejo
+    df_cobros = df_cobros.rename(columns={
+        'Fecha Documento': 'fecha_documento',
+        'Fecha Saldado': 'fecha_saldado',
+        'IMPORTE': 'importe_factura',
+        'DIAS_VENCIDO': 'dias_vencido',
+        'Estado': 'estado_factura'
     })
-    df_resultado['valor_descuento'] = abs(df_resultado['valor_venta_dcto'])
-    df_resultado['cumple_politica'] = df_resultado['dias_pago'] <= 15
-    df_resultado['porcentaje_descuento'] = (df_resultado['valor_descuento'] / df_resultado['valor_compra']) * 100
+    df_cobros['fecha_documento'] = pd.to_datetime(df_cobros['fecha_documento'])
+    df_cobros['fecha_saldado'] = pd.to_datetime(df_cobros['fecha_saldado'])
+
+    # 3. UNIÓN DE DATOS (MERGE)
+    # Unimos las ventas con su información de cobro correspondiente
+    df_completo = pd.merge(ventas_agrupadas, df_cobros[['Serie', 'fecha_saldado']], on='Serie', how='left')
+
+    # 4. CÁLCULOS
+    # Calcular días de pago reales solo para las facturas que han sido saldadas
+    df_completo['dias_pago'] = (df_completo['fecha_saldado'] - df_completo['fecha_venta']).dt.days
+
+    # Agrupar descuentos por cliente para el análisis cruzado
+    descuentos_por_cliente = df_descuentos.groupby('nombre_cliente').agg(
+        total_descontado=('valor_venta', 'sum')
+    ).reset_index()
+    descuentos_por_cliente['total_descontado'] = abs(descuentos_por_cliente['total_descontado'])
+
+    # 5. ANÁLISIS CRUZADO FINAL
+    # Agrupar los datos completos por cliente para obtener días de pago promedio
+    analisis_cliente = df_completo.dropna(subset=['dias_pago']).groupby('nombre_cliente').agg(
+        dias_pago_promedio=('dias_pago', 'mean'),
+        total_comprado=('valor_compra', 'sum')
+    ).reset_index()
+
+    # Unir los promedios de pago con los totales descontados
+    analisis_final = pd.merge(analisis_cliente, descuentos_por_cliente, on='nombre_cliente', how='left').fillna(0)
     
-    columnas_finales = ['nomvendedor', 'nombre_cliente', 'cliente_id', 'valor_compra', 'valor_descuento', 'dias_pago', 'cumple_politica', 'porcentaje_descuento']
-    return df_resultado[columnas_finales]
+    return df_completo, df_descuentos, analisis_final
 
-def generar_consejos_vendedor(kpis):
-    consejos = []
-    if kpis['tasa_cumplimiento'] < 0.8:
-        consejos.append(f"**Punto de Atención:** Tu tasa de cumplimiento de la política es del {kpis['tasa_cumplimiento']:.1%}. Un número importante de descuentos se otorga a pagos fuera de plazo. **Sugerencia:** Refuerza los términos de pago con los clientes antes de ofrecer el descuento.")
-    else:
-        consejos.append(f"**Fortaleza:** ¡Excelente gestión de la política con una tasa de cumplimiento del {kpis['tasa_cumplimiento']:.1%}! Tus clientes entienden y respetan los plazos.")
-    if kpis['dias_pago_promedio'] > 15:
-        consejos.append(f"**Oportunidad de Mejora:** El promedio de pago de tus clientes con descuento es de **{kpis['dias_pago_promedio']:.1f} días**. **Sugerencia:** Inicia el recordatorio de pago unos días antes del vencimiento del plazo de 15 días para asegurar el cumplimiento.")
-    else:
-        consejos.append(f"**Fortaleza:** Logras que tus clientes paguen en un promedio de **{kpis['dias_pago_promedio']:.1f} días** para acceder al descuento, ¡manteniendo la cartera sana!")
-    return consejos
 
-# ==============================================================================
-# EJECUCIÓN PRINCIPAL Y RENDERIZADO DE UI
-# ==============================================================================
+# --- EJECUCIÓN PRINCIPAL Y RENDERIZADO DE UI ---
 
-# --- Constantes de la lógica de negocio ---
-NOMBRE_ARTICULO_DESCUENTO = "DESCUENTOS COMERCIALES"
-FECHA_INICIO_POLITICA = "2024-06-01"
+# --- Carga de Datos ---
+df_ventas, df_cobros = cargar_datos_completos(
+    dropbox_path_ventas="/data/ventas_detalle.csv",
+    dropbox_path_cobros="/Cobros.xlsx" # Asegúrate que esta sea la ruta correcta en tu Dropbox
+)
 
-# --- Inicialización del estado de la sesión ---
-if 'df_analisis' not in st.session_state:
-    st.session_state.df_analisis = None
-if 'periodo_analisis' not in st.session_state:
-    st.session_state.periodo_analisis = ""
+if df_ventas is None or df_cobros is None:
+    st.stop()
 
-# --- FILTROS INTERACTIVOS EN LA BARRA LATERAL ---
-st.sidebar.header("Filtros del Análisis")
-st.sidebar.info("El análisis siempre empieza el 1 de Junio de 2024. Seleccione solo hasta qué fecha desea analizar.")
-fecha_max_datos = df_ventas_historico['fecha_venta'].max()
-fecha_min_seleccion = pd.to_datetime(FECHA_INICIO_POLITICA).date()
+# --- Procesamiento de Datos ---
+df_cartera, df_descuentos, df_analisis_cruzado = procesar_y_unir_datos(
+    df_ventas,
+    df_cobros,
+    nombre_articulo_descuento="DESCUENTOS COMERCIALES"
+)
 
-fecha_fin = st.sidebar.date_input("Analizar hasta la fecha:", value=fecha_max_datos.date(), min_value=fecha_min_seleccion, max_value=fecha_max_datos.date())
+# --- Pestañas de Análisis ---
+st.markdown("---")
+tab1, tab2, tab3 = st.tabs(["📊 Análisis de Cartera (Cobros)", "💸 Análisis de Descuentos Otorgados", "🎯 Visión Cruzada: Descuentos vs. Pago"])
 
-if st.sidebar.button("🚀 Generar Análisis", type="primary", use_container_width=True):
-    with st.spinner('Realizando cálculo FIFO optimizado... ¡El nuevo motor es muy rápido!'):
-        # Guardamos el resultado en el estado de la sesión
-        st.session_state.df_analisis = calcular_vinculos_fifo_optimizado(df_ventas_historico, NOMBRE_ARTICULO_DESCUENTO, FECHA_INICIO_POLITICA, fecha_fin)
-        st.session_state.periodo_analisis = f"Análisis generado desde el **{FECHA_INICIO_POLITICA}** hasta el **{fecha_fin.strftime('%d-%b-%Y')}**."
-
-# --- SECCIÓN DE VISUALIZACIÓN PRINCIPAL ---
-# Ahora la visualización depende de si hay datos en el estado de la sesión, no del botón.
-if st.session_state.df_analisis is not None:
-    df_vinculado = st.session_state.df_analisis
-    st.success(st.session_state.periodo_analisis)
-
-    if df_vinculado.empty:
-        st.warning(f"No se encontraron '{NOMBRE_ARTICULO_DESCUENTO}' para el periodo seleccionado.")
-        st.stop()
+with tab1:
+    st.header("Salud de la Cartera de Clientes")
+    df_cartera_pagada = df_cartera.dropna(subset=['dias_pago'])
     
-    df_vinculado.dropna(subset=['nomvendedor'], inplace=True)
-    if df_vinculado.empty:
-        st.warning("Se encontraron descuentos, pero no tienen un vendedor asociado.")
-        st.stop()
+    dias_pago_promedio = df_cartera_pagada['dias_pago'].mean()
+    total_facturas_pagadas = len(df_cartera_pagada)
+    facturas_fuera_plazo = len(df_cartera_pagada[df_cartera_pagada['dias_pago'] > 15])
 
-    # --- Pestañas de Análisis ---
-    tab1, tab2, tab3 = st.tabs(["📊 Visión General", "👨‍💼 Análisis por Vendedor", "👥 Análisis por Cliente"])
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Días Promedio de Pago (DSO Real)", f"{dias_pago_promedio:.1f} días")
+    col2.metric("Total Facturas Pagadas", f"{total_facturas_pagadas:,}")
+    col3.metric("% Facturas Pagadas > 15 días", f"{(facturas_fuera_plazo/total_facturas_pagadas)*100:.1f}%")
+    
+    st.subheader("Distribución de los Días de Pago Reales")
+    fig_hist = px.histogram(df_cartera_pagada, x='dias_pago', nbins=50, title="Frecuencia de Pagos por Días")
+    st.plotly_chart(fig_hist, use_container_width=True)
 
-    with tab1:
-        st.header("Indicadores Globales de la Política de Descuentos")
-        total_descuentos = df_vinculado['valor_descuento'].sum()
-        dias_pago_promedio_global = df_vinculado['dias_pago'].mean()
-        tasa_cumplimiento_global = df_vinculado['cumple_politica'].mean()
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Monto Total en Descuentos", f"${total_descuentos:,.0f}")
-        col2.metric("Días Promedio de Pago", f"{dias_pago_promedio_global:.1f} días")
-        col3.metric("Tasa de Cumplimiento (≤15d)", f"{tasa_cumplimiento_global:.1%}")
-        st.markdown("---")
-        st.subheader("Distribución de los Días de Pago")
-        fig_hist = px.histogram(df_vinculado, x='dias_pago', nbins=30, title="Frecuencia de Pagos por Días Transcurridos")
-        fig_hist.add_vline(x=15, line_width=3, line_dash="dash", line_color="red", annotation_text="Límite 15 Días")
-        st.plotly_chart(fig_hist, use_container_width=True)
+with tab2:
+    st.header("Análisis de los Descuentos Otorgados")
+    total_descuentos_monto = abs(df_descuentos['valor_venta'].sum())
+    num_descuentos = len(df_descuentos)
+    
+    col1, col2 = st.columns(2)
+    col1.metric("Monto Total en Descuentos", f"${total_descuentos_monto:,.0f}")
+    col2.metric("Número de Descuentos Aplicados", f"{num_descuentos:,}")
+    
+    st.subheader("Descuentos por Vendedor")
+    dctos_vendedor = df_descuentos.groupby('nomvendedor')['valor_venta'].sum().abs().sort_values(ascending=False)
+    st.bar_chart(dctos_vendedor)
 
-    with tab2:
-        st.header("Rendimiento Individual por Vendedor")
-        vendedores = sorted(df_vinculado['nomvendedor'].unique())
-        vendedor_sel = st.selectbox("Seleccione un Vendedor", options=vendedores, key="sb_vendedor_dcto")
-        df_vendedor = df_vinculado[df_vinculado['nomvendedor'] == vendedor_sel]
-        if not df_vendedor.empty:
-            kpis_vendedor = {'total_descuento': df_vendedor['valor_descuento'].sum(), 'dias_pago_promedio': df_vendedor['dias_pago'].mean(), 'tasa_cumplimiento': df_vendedor['cumple_politica'].mean()}
-            col1, col2, col3 = st.columns(3)
-            col1.metric(f"Monto Descuentos ({vendedor_sel})", f"${kpis_vendedor['total_descuento']:,.0f}")
-            col2.metric(f"Días Promedio Pago ({vendedor_sel})", f"{kpis_vendedor['dias_pago_promedio']:.1f} días")
-            col3.metric(f"Tasa Cumplimiento ({vendedor_sel})", f"{kpis_vendedor['tasa_cumplimiento']:.1%}")
-            st.markdown("---")
-            st.subheader("🤖 Coach Virtual: Consejos para " + vendedor_sel)
-            with st.container(border=True):
-                consejos = generar_consejos_vendedor(kpis_vendedor)
-                for consejo in consejos: st.markdown(f"- {consejo}")
-            st.subheader("Detalle de Descuentos Otorgados")
-            st.dataframe(df_vendedor[['nombre_cliente', 'valor_compra', 'valor_descuento', 'dias_pago', 'cumple_politica']], use_container_width=True, hide_index=True)
-
-    with tab3:
-        st.header("Comportamiento de Clientes Frente al Descuento")
-        kpis_cliente = df_vinculado.groupby('nombre_cliente').agg(total_descontado=('valor_descuento', 'sum'), frecuencia=('cliente_id', 'count'), dias_pago_promedio=('dias_pago', 'mean'), tasa_cumplimiento=('cumple_politica', 'mean')).reset_index()
-        clientes_estrella = kpis_cliente[(kpis_cliente['tasa_cumplimiento'] >= 0.9) & (kpis_cliente['dias_pago_promedio'] <= 15)].sort_values('total_descontado', ascending=False)
-        clientes_a_revisar = kpis_cliente[(kpis_cliente['tasa_cumplimiento'] < 0.5) | (kpis_cliente['dias_pago_promedio'] > 20)].sort_values('dias_pago_promedio', ascending=False)
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader("⭐ Clientes Estrella")
-            st.caption("Pagan a tiempo consistentemente.")
-            st.dataframe(clientes_estrella.head(10), use_container_width=True, hide_index=True)
-        with col2:
-            st.subheader("⚠️ Clientes a Revisar (Oportunistas)")
-            st.caption("Reciben descuentos pero tienden a pagar fuera de plazo.")
-            st.dataframe(clientes_a_revisar.head(10), use_container_width=True, hide_index=True)
-else:
-    st.info("⬅️ Para comenzar, seleccione hasta qué fecha desea analizar en la barra lateral y haga clic en 'Generar Análisis'.")
+with tab3:
+    st.header("¿Quién aprovecha realmente los descuentos?")
+    st.info("Esta tabla cruza los días promedio que un cliente tarda en pagar con el total de descuentos que ha recibido. Idealmente, los clientes con más descuentos deberían tener menos días de pago.")
+    
+    df_analisis_cruzado['pct_descuento'] = (df_analisis_cruzado['total_descontado'] / df_analisis_cruzado['total_comprado']).fillna(0) * 100
+    
+    st.dataframe(df_analisis_cruzado.sort_values(by='total_descontado', ascending=False),
+                 column_config={
+                     "nombre_cliente": "Cliente",
+                     "dias_pago_promedio": st.column_config.NumberColumn("Días Prom. Pago", format="%.1f"),
+                     "total_comprado": st.column_config.NumberColumn("Total Comprado", format="$ {:,.0f}"),
+                     "total_descontado": st.column_config.NumberColumn("Total Descontado", format="$ {:,.0f}"),
+                     "pct_descuento": st.column_config.ProgressColumn("% Descuento s/Compra", format="%.2f%%", min_value=0, max_value=max(5, df_analisis_cruzado['pct_descuento'].max()))
+                 }, use_container_width=True, hide_index=True)
+    
+    st.subheader("Visualización Estratégica: Días de Pago vs. Descuento Recibido")
+    fig_scatter = px.scatter(df_analisis_cruzado,
+                             x='dias_pago_promedio',
+                             y='total_descontado',
+                             size='total_comprado',
+                             hover_name='nombre_cliente',
+                             color='pct_descuento',
+                             title="Comportamiento de Pago vs. Descuentos")
+    fig_scatter.add_vline(x=15, line_width=2, line_dash="dash", line_color="green", annotation_text="Meta 15 Días")
+    st.plotly_chart(fig_scatter, use_container_width=True)
