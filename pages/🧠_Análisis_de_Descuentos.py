@@ -1,10 +1,9 @@
 # ==============================================================================
 # SCRIPT PARA: 🧠 Centro de Control de Descuentos y Cartera
-# VERSIÓN: 8.2 GERENCIAL (CRUCE DE DATOS PRECISO) - 07 de Julio, 2025
-# DESCRIPCIÓN: Versión con lógica de cruce de datos robustecida. Se utiliza una
-#              llave compuesta (Serie + Fecha) para garantizar la unión precisa
-#              entre ventas y cobros, eliminando ambigüedades y asegurando la
-#              integridad de los cálculos.
+# VERSIÓN: 8.3 GERENCIAL (CORRECCIÓN DE CASE-SENSITIVE) - 07 de Julio, 2025
+# DESCRIPCIÓN: Versión final con ajuste en el nombre de las columnas para
+#              coincidir exactamente con el archivo de Excel ('IMPORTE' en vez
+#              de 'Importe'), solucionando el error de validación.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -17,7 +16,7 @@ import io
 # --- 1. CONFIGURACIÓN DE PÁGINA Y VALIDACIÓN DE ACCESO ---
 st.set_page_config(page_title="Control de Descuentos y Cartera", page_icon="🧠", layout="wide")
 
-st.title("🧠 Centro de Control de Descuentos y Cartera v8.2")
+st.title("🧠 Centro de Control de Descuentos y Cartera v8.3")
 st.markdown("Herramienta de análisis profundo con cruce de datos de alta precisión para un análisis confiable.")
 
 if st.session_state.get('usuario') != "GERENTE":
@@ -25,7 +24,7 @@ if st.session_state.get('usuario') != "GERENTE":
     st.info("Por favor, inicie sesión desde la página principal para acceder a esta herramienta.")
     st.stop()
 
-# --- 2. LÓGICA DE CARGA DE DATOS (VALIDACIÓN MEJORADA) ---
+# --- 2. LÓGICA DE CARGA DE DATOS (CON NOMBRES DE COLUMNA CORREGIDOS) ---
 @st.cache_data(ttl=3600)
 def cargar_datos_combinados(dropbox_path_cobros):
     # Carga de ventas desde la sesión
@@ -47,16 +46,16 @@ def cargar_datos_combinados(dropbox_path_cobros):
         st.error(f"Error crítico al cargar el archivo de cobros desde Dropbox: {e}")
         return None, None
         
-    # ### CAMBIO CLAVE ### - Validación de todas las columnas necesarias en Cobros
-    columnas_requeridas_cobros = ['Serie', 'Fecha Documento', 'Fecha Saldado', 'Importe']
+    # ### CAMBIO CLAVE ### - Se ajusta la lista de columnas requeridas a los nombres exactos del archivo Excel.
+    columnas_requeridas_cobros = ['Serie', 'Fecha Documento', 'Fecha Saldado', 'IMPORTE']
     if not all(col in df_cobros_granular.columns for col in columnas_requeridas_cobros):
         st.error(f"Tu archivo de cobros de Dropbox DEBE contener las columnas: {columnas_requeridas_cobros}. Columnas encontradas: {df_cobros_granular.columns.to_list()}")
         return None, None
 
-    # Estandarización de nombres y tipos
-    df_cobros_granular.rename(columns={'Fecha Documento': 'fecha_documento', 'Fecha Saldado': 'fecha_saldado', 'Importe': 'importe'}, inplace=True)
+    # ### CAMBIO CLAVE ### - Se ajusta el mapeo para usar 'IMPORTE' como origen.
+    df_cobros_granular.rename(columns={'Fecha Documento': 'fecha_documento', 'Fecha Saldado': 'fecha_saldado', 'IMPORTE': 'importe'}, inplace=True)
     
-    # ### CAMBIO CLAVE ### - Normalización de fechas a solo YYYY-MM-DD
+    # Normalización de fechas a solo YYYY-MM-DD
     df_ventas_copy['fecha_venta_norm'] = pd.to_datetime(df_ventas_copy['fecha_venta'], errors='coerce').dt.normalize()
     df_cobros_granular['fecha_documento_norm'] = pd.to_datetime(df_cobros_granular['fecha_documento'], errors='coerce').dt.normalize()
     df_cobros_granular['fecha_saldado'] = pd.to_datetime(df_cobros_granular['fecha_saldado'], errors='coerce').dt.normalize()
@@ -93,7 +92,6 @@ def procesar_y_analizar_profundo(_df_ventas_periodo, _df_cobros_global, dias_pro
     df_productos_raw['costo_total_linea'] = df_productos_raw['costo_unitario'].fillna(0) * df_productos_raw['unidades_vendidas'].fillna(0)
     df_productos_raw['margen_bruto'] = df_productos_raw['valor_venta'] - df_productos_raw['costo_total_linea']
     
-    # ### CAMBIO CLAVE ### - Agregamos por la nueva llave_factura
     ventas_por_factura = df_productos_raw.groupby('llave_factura').agg(
         Serie=('Serie', 'first'),
         valor_total_factura=('valor_venta', 'sum'),
@@ -111,7 +109,6 @@ def procesar_y_analizar_profundo(_df_ventas_periodo, _df_cobros_global, dias_pro
     ventas_consolidadas = pd.merge(ventas_por_factura, descuentos_por_factura, on='llave_factura', how='left')
     ventas_consolidadas['monto_descontado'].fillna(0, inplace=True)
 
-    # ### CAMBIO CLAVE ### - El merge ahora usa la llave_factura para una precisión del 100%
     df_pagadas = pd.merge(ventas_consolidadas, _df_cobros_global, on='llave_factura', how='inner')
     
     if not df_pagadas.empty:
@@ -197,7 +194,6 @@ with st.spinner("Ejecutando análisis profundo de cartera..."):
         df_ventas_filtrado, df_cobros_granular_raw, DIAS_PRONTO_PAGO
     )
 
-# El resto de la UI es igual a la versión 8.1, ya que los DataFrames de salida son los mismos y robustos.
 total_cartera_pendiente = df_cartera_pendiente['valor_total_factura'].sum() if not df_cartera_pendiente.empty else 0
 total_descuentos_periodo = df_analisis_pagado['total_descontado'].sum() if not df_analisis_pagado.empty else 0
 total_ventas_pagadas_periodo = df_analisis_pagado['total_comprado_pagado'].sum() if not df_analisis_pagado.empty else 0
