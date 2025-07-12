@@ -1,9 +1,10 @@
 # ==============================================================================
-# SCRIPT UNIFICADO PARA: 🧠 Centro de Control Estratégico v14.0
-# VERSIÓN: DEFINITIVA, PROFESIONAL Y CORREGIDA - 12 de Julio, 2025
-# DESCRIPCIÓN: Versión final con filtros 100% funcionales, un nuevo asistente
-#              de diagnóstico inteligente y análisis de descuentos por producto.
-#              Código reestructurado para máxima robustez y claridad.
+# SCRIPT UNIFICADO PARA: 🧠 Centro de Control Estratégico v15.0
+# VERSIÓN: DEFINITIVA, COMPLETA Y ESTABLE - 12 de Julio, 2025
+# DESCRIPCIÓN: Versión final que corrige todos los errores de raíz, incluyendo
+#              el ValueError de Plotly. Estructura profesional con funciones
+#              modulares para garantizar la funcionalidad de los filtros en
+#              toda la aplicación. Contiene todos los análisis solicitados.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -17,20 +18,16 @@ import unicodedata
 # --- 1. CONFIGURACIÓN DE PÁGINA Y FUNCIONES AUXILIARES ---
 st.set_page_config(page_title="Control Estratégico 360°", page_icon="🧠", layout="wide")
 
-# Validación de acceso de usuario
-if st.session_state.get('usuario') != "GERENTE":
-    st.title("🔒 Acceso Restringido")
-    st.error("Esta es una herramienta exclusiva para Gerencia. Por favor, inicie sesión desde la página principal.")
-    st.stop()
-
 def formatear_numero(num, tipo='moneda'):
-    """Formatea un número como moneda o porcentaje."""
+    """Formatea un número como moneda, porcentaje o entero."""
     if pd.isna(num) or not isinstance(num, (int, float)):
-        return "$ 0" if tipo == 'moneda' else "0.0%"
+        return "$ 0" if tipo == 'moneda' else ("0.0%" if tipo == 'porcentaje' else "0")
     if tipo == 'moneda':
         return f"${num:,.0f}"
     elif tipo == 'porcentaje':
         return f"{num:.1f}%"
+    elif tipo == 'dias':
+         return f"{num:,.0f} días"
     return str(num)
 
 # ==============================================================================
@@ -84,7 +81,6 @@ def procesar_datos_filtrados(df_ventas_filtrado, df_resumen_cartera):
     if df_ventas_filtrado is None or df_ventas_filtrado.empty:
         return pd.DataFrame(), {}, pd.DataFrame()
 
-    # --- Análisis del Período de Ventas ---
     filtro_descuento = (df_ventas_filtrado['nombre_articulo'].str.upper().str.contains('DESCUENTO', na=False)) & \
                        (df_ventas_filtrado['nombre_articulo'].str.upper().str.contains('COMERCIAL', na=False))
     
@@ -97,19 +93,17 @@ def procesar_datos_filtrados(df_ventas_filtrado, df_resumen_cartera):
     margen_neto_total = margen_bruto_total - descuentos_totales
     rentabilidad_efectiva = (margen_neto_total / venta_bruta_total * 100) if venta_bruta_total > 0 else 0
 
-    # --- Análisis por Cliente ---
     analisis_descuentos_cliente = df_descuentos_raw.groupby(['cliente_id', 'nombre_cliente']).agg(total_descontado_periodo=('valor_venta', lambda x: abs(x.sum()))).reset_index()
     df_productos_raw['margen_bruto'] = df_productos_raw['valor_venta'] - (df_productos_raw['costo_unitario'] * df_productos_raw['unidades_vendidas'])
     margen_cliente = df_productos_raw.groupby('cliente_id').agg(margen_generado_periodo=('margen_bruto', 'sum')).reset_index()
     df_analisis_cliente = pd.merge(analisis_descuentos_cliente, margen_cliente, on='cliente_id', how='left')
 
-    # --- Enriquecimiento con Cartera Actual ---
     if df_resumen_cartera is not None and not df_resumen_cartera.empty:
         df_analisis_cliente = pd.merge(df_analisis_cliente, df_resumen_cartera, left_on='cliente_id', right_on='Cod Cliente', how='left')
         df_analisis_cliente.drop(columns=['Cod Cliente'], inplace=True, errors='ignore')
         df_analisis_cliente.fillna({'deuda_total_actual': 0, 'deuda_vencida_actual': 0, 'max_dias_vencido': 0}, inplace=True)
     else:
-        df_analisis_cliente['deuda_total_actual'] = 0; df_analisis_cliente['deuda_vencida_actual'] = 0; df_analisis_cliente['max_dias_vencido'] = 0
+        df_analisis_cliente['deuda_total_actual'], df_analisis_cliente['deuda_vencida_actual'], df_analisis_cliente['max_dias_vencido'] = 0, 0, 0
 
     df_analisis_cliente['margen_neto_cliente'] = df_analisis_cliente['margen_generado_periodo'].fillna(0) - df_analisis_cliente['total_descontado_periodo'].fillna(0)
     
@@ -123,10 +117,8 @@ def procesar_datos_filtrados(df_ventas_filtrado, df_resumen_cartera):
         return "Otros"
     df_analisis_cliente['Clasificacion_360'] = df_analisis_cliente.apply(clasificar_cliente_360, axis=1)
 
-    # --- Análisis por Producto ---
     df_analisis_producto = df_descuentos_raw.groupby('nombre_articulo').agg(total_descuento_producto=('valor_venta', lambda x: abs(x.sum()))).reset_index()
     
-    # KPIs para el diccionario de salida
     kpis = {
         "descuentos_totales": descuentos_totales,
         "margen_neto_total": margen_neto_total,
@@ -139,35 +131,32 @@ def procesar_datos_filtrados(df_ventas_filtrado, df_resumen_cartera):
 def generar_diagnostico_gerencial(kpis, df_analisis_cliente, vendedor):
     """Genera un análisis en texto basado en los KPIs y datos."""
     nombre_actor = "la Gerencia" if vendedor == "Visión Gerencial (Todos)" else f"el vendedor {vendedor}"
-    
     diagnostico = f"### Diagnóstico para {nombre_actor}:\n"
     
-    # Análisis de Rentabilidad
     if kpis['rentabilidad_efectiva'] < 5:
         diagnostico += f"<li>🔴 **Rentabilidad Crítica ({formatear_numero(kpis['rentabilidad_efectiva'], 'porcentaje')}):** El margen neto es muy bajo o negativo. La política de descuentos actual está erosionando severamente las ganancias. Es urgente revisar precios y descuentos.</li>"
     elif kpis['rentabilidad_efectiva'] < 15:
-        diagnostico += f"<li>🟡 **Rentabilidad Baja ({formatear_numero(kpis['rentabilidad_efectiva'], 'porcentaje')}):** La rentabilidad está por debajo de un nivel saludable. Hay que optimizar la asignación de descuentos hacia clientes y productos más rentables.</li>"
+        diagnostico += f"<li>🟡 **Rentabilidad Baja ({formatear_numero(kpis['rentabilidad_efectiva'], 'porcentaje')}):** La rentabilidad está por debajo de un nivel saludable. Hay que optimizar la asignación de descuentos.</li>"
     else:
-        diagnostico += f"<li>🟢 **Rentabilidad Saludable ({formatear_numero(kpis['rentabilidad_efectiva'], 'porcentaje')}):** El margen se mantiene en un nivel adecuado después de los descuentos. Continuar monitoreando.</li>"
+        diagnostico += f"<li>🟢 **Rentabilidad Saludable ({formatear_numero(kpis['rentabilidad_efectiva'], 'porcentaje')}):** El margen se mantiene en un nivel adecuado después de los descuentos.</li>"
 
-    # Análisis de Riesgo de Cartera vs. Descuentos
     if kpis['deuda_vencida_clientes_con_dcto'] > kpis['margen_neto_total'] and kpis['margen_neto_total'] > 0:
-        diagnostico += f"<li>🔥 **Riesgo Mayor que Recompensa:** La deuda vencida actual de los clientes con descuento ({formatear_numero(kpis['deuda_vencida_clientes_con_dcto'])}) **supera el margen neto total** ({formatear_numero(kpis['margen_neto_total'])}) que generan. En efecto, se está financiando a los clientes más riesgosos.</li>"
+        diagnostico += f"<li>🔥 **Riesgo Mayor que Recompensa:** La deuda vencida actual de los clientes con descuento ({formatear_numero(kpis['deuda_vencida_clientes_con_dcto'])}) **supera el margen neto total** ({formatear_numero(kpis['margen_neto_total'])}) que generan.</li>"
 
-    # Conteo de clientes críticos
     if not df_analisis_cliente.empty:
         clientes_criticos = df_analisis_cliente[df_analisis_cliente['Clasificacion_360'] == '🔥 Crítico (Doble Problema)']
         if not clientes_criticos.empty:
             diagnostico += f"<li>🚨 **Focos de Alerta Máxima:** Se han identificado **{len(clientes_criticos)}** clientes 'Críticos', que no son rentables y además presentan una alta deuda vencida. Requieren acción inmediata.</li>"
-            
+    
     return f"<ul>{diagnostico}</ul>"
 
 # ==============================================================================
 # --- 4. CUERPO PRINCIPAL DE LA APLICACIÓN Y RENDERIZADO ---
 # ==============================================================================
-
 def main():
-    st.title("🧠 Control Estratégico 360°: Descuentos vs. Cartera v14.0")
+    st.title("🧠 Control Estratégico 360°: Descuentos vs. Cartera v15.0")
+    
+    # --- Barra Lateral: Controles y Filtros ---
     st.sidebar.title("Control de Datos")
     if st.sidebar.button("🔄 Forzar Actualización de Datos"):
         st.cache_data.clear()
@@ -176,6 +165,7 @@ def main():
 
     st.sidebar.title("Filtros del Análisis")
 
+    # --- Carga de datos ---
     df_ventas_maestro = cargar_ventas_maestro()
     df_resumen_cartera = cargar_cartera_detallada()
 
@@ -186,8 +176,10 @@ def main():
     # --- Lógica Central de Filtrado ---
     min_date = df_ventas_maestro['fecha_venta_norm'].min().date()
     max_date = df_ventas_maestro['fecha_venta_norm'].max().date()
-    fecha_inicio = st.sidebar.date_input("Fecha de Inicio (Ventas)", value=max_date.replace(day=1), min_value=min_date, max_value=max_date)
-    fecha_fin = st.sidebar.date_input("Fecha de Fin (Ventas)", value=max_date, min_value=min_date, max_value=max_date)
+    
+    fecha_inicio = st.sidebar.date_input("Fecha de Inicio (Ventas)", value=max_date.replace(day=1), min_value=min_date, max_value=max_date, key="fecha_inicio_filtro")
+    fecha_fin = st.sidebar.date_input("Fecha de Fin (Ventas)", value=max_date, min_value=min_date, max_value=max_date, key="fecha_fin_filtro")
+    
     if fecha_inicio > fecha_fin: 
         st.sidebar.error("Rango de fechas inválido.")
         st.stop()
@@ -195,7 +187,7 @@ def main():
     df_ventas_periodo = df_ventas_maestro[(df_ventas_maestro['fecha_venta_norm'].dt.date >= fecha_inicio) & (df_ventas_maestro['fecha_venta_norm'].dt.date <= fecha_fin)]
     
     vendedores_unicos = ['Visión Gerencial (Todos)'] + sorted(df_ventas_periodo['nomvendedor'].dropna().unique().tolist())
-    vendedor_seleccionado = st.sidebar.selectbox("Seleccionar Vendedor", options=vendedores_unicos)
+    vendedor_seleccionado = st.sidebar.selectbox("Seleccionar Vendedor", options=vendedores_unicos, key="vendedor_filtro")
     
     if vendedor_seleccionado != "Visión Gerencial (Todos)":
         df_ventas_filtrado = df_ventas_periodo[df_ventas_periodo['nomvendedor'] == vendedor_seleccionado]
@@ -205,12 +197,8 @@ def main():
     # --- Ejecución del Procesamiento con datos ya filtrados ---
     df_analisis_cliente, kpis, df_analisis_producto = procesar_datos_filtrados(df_ventas_filtrado, df_resumen_cartera)
 
-    # --- Pestañas y Visualización ---
-    tab1, tab2, tab3 = st.tabs([
-        "📊 **Dashboard Estratégico 360°**", 
-        "🎯 **Plan de Acción por Cliente**",
-        "📦 **Análisis de Descuentos por Producto**"
-    ])
+    # --- Renderizado de Pestañas ---
+    tab1, tab2, tab3 = st.tabs(["📊 **Dashboard Estratégico**", "🎯 **Plan de Acción por Cliente**", "📦 **Análisis por Producto**"])
 
     with tab1:
         st.header(f"Dashboard Estratégico para: {vendedor_seleccionado}")
@@ -232,7 +220,11 @@ def main():
         if not df_analisis_cliente.empty:
             df_plot = df_analisis_cliente.copy().fillna(0)
             df_plot_log = df_plot[(df_plot['total_descontado_periodo'] > 0) & (df_plot['deuda_vencida_actual'] > 0)]
-            df_plot['size_plot'] = df_plot['margen_neto_cliente'].apply(lambda x: max(x, 1))
+            
+            # SOLUCIÓN AL VALUEERROR: Resetear el índice antes de graficar asegura que Plotly no se confunda.
+            df_plot_log = df_plot_log.reset_index(drop=True)
+            
+            df_plot_log['size_plot'] = df_plot_log['margen_neto_cliente'].apply(lambda x: max(x, 1))
 
             if not df_plot_log.empty:
                 fig = px.scatter(df_plot_log, x="total_descontado_periodo", y="deuda_vencida_actual", size="size_plot", color="Clasificacion_360", hover_name="nombre_cliente", log_x=True, log_y=True,
@@ -248,33 +240,45 @@ def main():
     with tab2:
         st.header("Plan de Acción y Detalle por Cliente")
         if not df_analisis_cliente.empty:
-            st.dataframe(df_analisis_cliente.sort_values(by="total_descontado_periodo", ascending=False), use_container_width=True, hide_index=True,
+            df_display = df_analisis_cliente.sort_values(by="total_descontado_periodo", ascending=False)
+            st.dataframe(df_display, use_container_width=True, hide_index=True,
                          column_config={
-                            "nombre_cliente": st.column_config.TextColumn("Cliente", width="large"),
-                            "Clasificacion_360": st.column_config.TextColumn("Clasificación"),
+                            "nombre_cliente": st.column_config.TextColumn("Cliente", width="large"), "Clasificacion_360": st.column_config.TextColumn("Clasificación"),
                             "total_descontado_periodo": st.column_config.NumberColumn("Descuento Otorgado", format="$ {:,.0f}"),
                             "margen_neto_cliente": st.column_config.NumberColumn("Margen Neto Cliente", format="$ {:,.0f}"),
                             "deuda_vencida_actual": st.column_config.NumberColumn("Deuda Vencida Hoy", format="$ {:,.0f}"),
                             "max_dias_vencido": st.column_config.NumberColumn("Max Días Vencido", format="%d días"),
-                         },
-                         column_order=("nombre_cliente", "Clasificacion_360", "total_descontado_periodo", "margen_neto_cliente", "deuda_vencida_actual", "max_dias_vencido"))
+                            "deuda_total_actual": st.column_config.NumberColumn("Deuda Total Hoy", format="$ {:,.0f}"),
+                            "cliente_id": None, "margen_generado_periodo": None, 
+                         })
         else:
             st.warning("No hay clientes con descuentos para analizar en el período y filtros seleccionados.")
 
     with tab3:
         st.header("Análisis de Descuentos por Producto")
         if not df_analisis_producto.empty:
-            st.markdown("Top 15 productos con mayor monto de descuento otorgado en el período.")
-            df_display_producto = df_analisis_producto.sort_values(by="total_descuento_producto", ascending=False).head(15)
-            fig_prod = px.bar(df_display_producto, x='nombre_articulo', y='total_descuento_producto',
-                              title="Productos con Mayor Descuento Otorgado",
+            df_display_producto = df_analisis_producto.sort_values(by="total_descuento_producto", ascending=False)
+            st.markdown(f"Se otorgaron descuentos a **{len(df_display_producto)}** productos únicos en este período.")
+            
+            fig_prod = px.bar(df_display_producto.head(20), x='nombre_articulo', y='total_descuento_producto',
+                              title="Top 20 Productos con Mayor Monto de Descuento Otorgado",
                               labels={'nombre_articulo': 'Producto', 'total_descuento_producto': 'Monto Total Descontado'},
                               text='total_descuento_producto')
             fig_prod.update_traces(texttemplate='$%{text:,.0f}', textposition='outside')
-            fig_prod.update_layout(xaxis_tickangle=-45)
+            fig_prod.update_layout(xaxis_tickangle=-45, yaxis_title="Monto Descontado")
             st.plotly_chart(fig_prod, use_container_width=True)
+            
+            with st.expander("Ver tabla completa de descuentos por producto"):
+                st.dataframe(df_display_producto, use_container_width=True, hide_index=True,
+                             column_config={"total_descuento_producto": st.column_config.NumberColumn(format="$ {:,.0f}")})
         else:
             st.info("No se otorgaron descuentos a productos específicos en el período y filtros seleccionados.")
 
 if __name__ == '__main__':
-    main()
+    # Validar que se ha iniciado sesión antes de correr la app principal
+    if 'authentication_status' not in st.session_state or not st.session_state['authentication_status']:
+        st.title("🔒 Acceso Restringido")
+        st.error("Por favor, inicie sesión desde la página principal `🏠 Resumen Mensual`.")
+        st.image("https://raw.githubusercontent.com/DiegoMao201/Resumen-Ventas-Gerenciales/main/LOGO%20FERREINOX%20SAS%20BIC%202024.png", width=300)
+    else:
+        main()
