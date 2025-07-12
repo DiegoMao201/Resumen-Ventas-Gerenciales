@@ -130,7 +130,7 @@ def procesar_datos_filtrados(df_ventas_filtrado, df_cartera_completa):
         "deuda_vencida_clientes_con_dcto": df_analisis_cliente['deuda_vencida_actual'].sum()
     }
 
-    return df_analisis_cliente, kpis, df_ventas_periodo
+    return df_analisis_cliente, kpis, df_ventas_filtrado
 
 def generar_diagnostico_gerencial(kpis, df_analisis_cliente, vendedor):
     """Genera un diagnóstico dinámico y accionable con nombres de clientes."""
@@ -342,7 +342,7 @@ def render_app():
             labels = ['Corriente', '1-30 días', '31-60 días', '61-90 días', 'Más de 90 días']
             df_cartera_filtrada['Rango_Vencimiento'] = pd.cut(df_cartera_filtrada['Dias Vencido'], bins=bins, labels=labels, right=True)
             
-            aging_summary = df_cartera_filtrada.groupby('Rango_Vencimiento')['Importe'].sum().reset_index()
+            aging_summary = df_cartera_filtrada.groupby('Rango_Vencimiento', observed=True)['Importe'].sum().reset_index()
             
             fig_aging = px.bar(aging_summary, x='Rango_Vencimiento', y='Importe', text='Importe',
                                title='Distribución de la Cartera por Antigüedad de Vencimiento',
