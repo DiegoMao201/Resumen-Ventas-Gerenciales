@@ -1,10 +1,10 @@
 # ==============================================================================
-# SCRIPT UNIFICADO PARA: 🧠 Centro de Control Estratégico v15.0
-# VERSIÓN: DEFINITIVA, COMPLETA Y ESTABLE - 12 de Julio, 2025
-# DESCRIPCIÓN: Versión final que corrige todos los errores de raíz, incluyendo
-#              el ValueError de Plotly. Estructura profesional con funciones
-#              modulares para garantizar la funcionalidad de los filtros en
-#              toda la aplicación. Contiene todos los análisis solicitados.
+# SCRIPT UNIFICADO PARA: 🧠 Centro de Control Estratégico v16.0
+# VERSIÓN: FINAL, ESTABLE Y COMPLETA - 12 de Julio, 2025
+# DESCRIPCIÓN: Versión definitiva que corrige el bug de autenticación,
+#              asegura la funcionalidad de todos los filtros y contiene
+#              la totalidad de los análisis y KPIs desarrollados.
+#              Este es el código completo y final.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -129,34 +129,33 @@ def procesar_datos_filtrados(df_ventas_filtrado, df_resumen_cartera):
     return df_analisis_cliente, kpis, df_analisis_producto
 
 def generar_diagnostico_gerencial(kpis, df_analisis_cliente, vendedor):
-    """Genera un análisis en texto basado en los KPIs y datos."""
     nombre_actor = "la Gerencia" if vendedor == "Visión Gerencial (Todos)" else f"el vendedor {vendedor}"
     diagnostico = f"### Diagnóstico para {nombre_actor}:\n"
     
     if kpis['rentabilidad_efectiva'] < 5:
-        diagnostico += f"<li>🔴 **Rentabilidad Crítica ({formatear_numero(kpis['rentabilidad_efectiva'], 'porcentaje')}):** El margen neto es muy bajo o negativo. La política de descuentos actual está erosionando severamente las ganancias. Es urgente revisar precios y descuentos.</li>"
+        diagnostico += f"<li>🔴 **Rentabilidad Crítica ({formatear_numero(kpis['rentabilidad_efectiva'], 'porcentaje')}):** El margen neto es muy bajo o negativo. La política de descuentos actual está erosionando severamente las ganancias.</li>"
     elif kpis['rentabilidad_efectiva'] < 15:
-        diagnostico += f"<li>🟡 **Rentabilidad Baja ({formatear_numero(kpis['rentabilidad_efectiva'], 'porcentaje')}):** La rentabilidad está por debajo de un nivel saludable. Hay que optimizar la asignación de descuentos.</li>"
+        diagnostico += f"<li>🟡 **Rentabilidad Baja ({formatear_numero(kpis['rentabilidad_efectiva'], 'porcentaje')}):** La rentabilidad está por debajo de un nivel saludable. Optimizar la asignación de descuentos.</li>"
     else:
-        diagnostico += f"<li>🟢 **Rentabilidad Saludable ({formatear_numero(kpis['rentabilidad_efectiva'], 'porcentaje')}):** El margen se mantiene en un nivel adecuado después de los descuentos.</li>"
+        diagnostico += f"<li>🟢 **Rentabilidad Saludable ({formatear_numero(kpis['rentabilidad_efectiva'], 'porcentaje')}):** El margen se mantiene en un nivel adecuado.</li>"
 
     if kpis['deuda_vencida_clientes_con_dcto'] > kpis['margen_neto_total'] and kpis['margen_neto_total'] > 0:
-        diagnostico += f"<li>🔥 **Riesgo Mayor que Recompensa:** La deuda vencida actual de los clientes con descuento ({formatear_numero(kpis['deuda_vencida_clientes_con_dcto'])}) **supera el margen neto total** ({formatear_numero(kpis['margen_neto_total'])}) que generan.</li>"
+        diagnostico += f"<li>🔥 **Riesgo Mayor que Recompensa:** La deuda vencida ({formatear_numero(kpis['deuda_vencida_clientes_con_dcto'])}) de los clientes con descuento supera el margen neto total ({formatear_numero(kpis['margen_neto_total'])}) que generan.</li>"
 
     if not df_analisis_cliente.empty:
         clientes_criticos = df_analisis_cliente[df_analisis_cliente['Clasificacion_360'] == '🔥 Crítico (Doble Problema)']
         if not clientes_criticos.empty:
-            diagnostico += f"<li>🚨 **Focos de Alerta Máxima:** Se han identificado **{len(clientes_criticos)}** clientes 'Críticos', que no son rentables y además presentan una alta deuda vencida. Requieren acción inmediata.</li>"
+            diagnostico += f"<li>🚨 **Focos de Alerta Máxima:** Se han identificado **{len(clientes_criticos)}** clientes 'Críticos', que no son rentables y además presentan una alta deuda vencida.</li>"
     
     return f"<ul>{diagnostico}</ul>"
 
 # ==============================================================================
 # --- 4. CUERPO PRINCIPAL DE LA APLICACIÓN Y RENDERIZADO ---
 # ==============================================================================
-def main():
-    st.title("🧠 Control Estratégico 360°: Descuentos vs. Cartera v15.0")
+def render_app():
+    """Renderiza toda la interfaz de usuario de la aplicación."""
+    st.title("🧠 Control Estratégico 360°: Descuentos vs. Cartera v16.0")
     
-    # --- Barra Lateral: Controles y Filtros ---
     st.sidebar.title("Control de Datos")
     if st.sidebar.button("🔄 Forzar Actualización de Datos"):
         st.cache_data.clear()
@@ -220,10 +219,7 @@ def main():
         if not df_analisis_cliente.empty:
             df_plot = df_analisis_cliente.copy().fillna(0)
             df_plot_log = df_plot[(df_plot['total_descontado_periodo'] > 0) & (df_plot['deuda_vencida_actual'] > 0)]
-            
-            # SOLUCIÓN AL VALUEERROR: Resetear el índice antes de graficar asegura que Plotly no se confunda.
             df_plot_log = df_plot_log.reset_index(drop=True)
-            
             df_plot_log['size_plot'] = df_plot_log['margen_neto_cliente'].apply(lambda x: max(x, 1))
 
             if not df_plot_log.empty:
@@ -249,7 +245,7 @@ def main():
                             "deuda_vencida_actual": st.column_config.NumberColumn("Deuda Vencida Hoy", format="$ {:,.0f}"),
                             "max_dias_vencido": st.column_config.NumberColumn("Max Días Vencido", format="%d días"),
                             "deuda_total_actual": st.column_config.NumberColumn("Deuda Total Hoy", format="$ {:,.0f}"),
-                            "cliente_id": None, "margen_generado_periodo": None, 
+                            "cliente_id": None, "margen_generado_periodo": None, "Cod Cliente": None
                          })
         else:
             st.warning("No hay clientes con descuentos para analizar en el período y filtros seleccionados.")
@@ -274,11 +270,24 @@ def main():
         else:
             st.info("No se otorgaron descuentos a productos específicos en el período y filtros seleccionados.")
 
+# ==============================================================================
+# --- 5. PUNTO DE ENTRADA DE LA APLICACIÓN CON VALIDACIÓN DE LOGIN ---
+# ==============================================================================
 if __name__ == '__main__':
-    # Validar que se ha iniciado sesión antes de correr la app principal
-    if 'authentication_status' not in st.session_state or not st.session_state['authentication_status']:
-        st.title("🔒 Acceso Restringido")
-        st.error("Por favor, inicie sesión desde la página principal `🏠 Resumen Mensual`.")
-        st.image("https://raw.githubusercontent.com/DiegoMao201/Resumen-Ventas-Gerenciales/main/LOGO%20FERREINOX%20SAS%20BIC%202024.png", width=300)
+    # --- VERIFICACIÓN DE AUTENTICACIÓN ---
+    # Este es el único punto de entrada a la aplicación.
+    # Se asume que la página de login principal establece st.session_state['autenticado'] = True
+    # o st.session_state['authentication_status'] = True. Verificamos ambos por robustez.
+    
+    usuario_autenticado = st.session_state.get('autenticado', False) or st.session_state.get('authentication_status', False)
+
+    if usuario_autenticado:
+        # Si el usuario está autenticado, se ejecuta la aplicación principal.
+        render_app()
     else:
-        main()
+        # Si no, se muestra el mensaje de acceso restringido y se detiene la ejecución.
+        st.title("🔒 Acceso Restringido")
+        st.error("Por favor, inicie sesión desde la página principal `🏠 Resumen Mensual` para continuar.")
+        st.warning("Si ya inició sesión, por favor regrese a la página principal y vuelva a navegar aquí. Esto puede suceder si la sesión expiró.")
+        st.image("https://raw.githubusercontent.com/DiegoMao201/Resumen-Ventas-Gerenciales/main/LOGO%20FERREINOX%20SAS%20BIC%202024.png", width=400)
+        st.stop()
