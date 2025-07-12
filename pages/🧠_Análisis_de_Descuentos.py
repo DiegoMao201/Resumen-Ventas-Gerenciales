@@ -1,8 +1,8 @@
 # ==============================================================================
-# SCRIPT UNIFICADO PARA: 🧠 Centro de Control de Descuentos y Cartera v9.0
-# VERSIÓN: FINAL INTEGRADA - 12 de Julio, 2025
-# DESCRIPCIÓN: Fusiona el análisis por vendedor con el cruce de cartera
-#              para un análisis exhaustivo de la justificación de descuentos.
+# SCRIPT UNIFICADO PARA: 🧠 Centro de Control de Descuentos y Cartera v10.0
+# VERSIÓN: GERENCIAL ESTRATÉGICA - 12 de Julio, 2025
+# DESCRIPCIÓN: Versión de alto nivel con KPIs de impacto, tablas detalladas
+#              por sección y lógica robustecida para la toma de decisiones.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -13,10 +13,9 @@ import dropbox
 import io
 
 # --- 1. CONFIGURACIÓN DE PÁGINA Y VALIDACIÓN DE ACCESO ---
-st.set_page_config(page_title="Control de Descuentos y Cartera", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="Control Estratégico de Cartera", page_icon="🧠", layout="wide")
 
-st.title("🧠 Centro de Control de Descuentos y Cartera v9.0")
-st.markdown("Análisis profundo de la justificación de descuentos comerciales y salud de la cartera por vendedor.")
+st.title("🧠 Control Estratégico de Cartera y Descuentos v10.0")
 
 if st.session_state.get('usuario') != "GERENTE":
     st.error("🔒 Acceso Exclusivo para Gerencia.")
@@ -38,7 +37,6 @@ def cargar_datos_combinados(dropbox_path_cobros):
             dbx = dropbox.Dropbox(app_key=st.secrets.dropbox.app_key, app_secret=st.secrets.dropbox.app_secret, oauth2_refresh_token=st.secrets.dropbox.refresh_token)
             _, res = dbx.files_download(path=dropbox_path_cobros)
             df_cobros_granular = pd.read_excel(io.BytesIO(res.content))
-            st.success("Archivo de cobros granular cargado.", icon="✅")
     except Exception as e:
         st.error(f"Error crítico al cargar el archivo de cobros desde Dropbox: {e}")
         return None, None
@@ -49,21 +47,15 @@ def cargar_datos_combinados(dropbox_path_cobros):
         return None, None
 
     df_cobros_granular.rename(columns={'Fecha Documento': 'fecha_documento', 'Fecha Saldado': 'fecha_saldado', 'IMPORTE': 'importe'}, inplace=True)
-
-    # Normalización y creación de llaves
     df_ventas_copy['fecha_venta_norm'] = pd.to_datetime(df_ventas_copy['fecha_venta'], errors='coerce').dt.normalize()
     df_cobros_granular['fecha_documento_norm'] = pd.to_datetime(df_cobros_granular['fecha_documento'], errors='coerce').dt.normalize()
     df_cobros_granular['fecha_saldado'] = pd.to_datetime(df_cobros_granular['fecha_saldado'], errors='coerce').dt.normalize()
-
     df_ventas_copy['llave_factura'] = df_ventas_copy['Serie'].astype(str) + "_" + df_ventas_copy['fecha_venta_norm'].astype(str)
     df_cobros_granular['llave_factura'] = df_cobros_granular['Serie'].astype(str) + "_" + df_cobros_granular['fecha_documento_norm'].astype(str)
-
     df_cobros_esencial = df_cobros_granular[['llave_factura', 'fecha_saldado']].dropna().drop_duplicates(subset=['llave_factura'])
-
     numeric_cols = ['valor_venta', 'costo_unitario', 'unidades_vendidas']
     for col in numeric_cols:
-        df_ventas_copy[col] = pd.to_numeric(df_ventas_copy[col], errors='coerce')
-
+        df_ventas_copy[col] = pd.to_numeric(df_ventas_copy[col], errors='coerce').fillna(0)
     df_ventas_copy.dropna(subset=['fecha_venta_norm', 'Serie', 'llave_factura'], inplace=True)
     return df_ventas_copy, df_cobros_esencial
 
@@ -71,18 +63,17 @@ def cargar_datos_combinados(dropbox_path_cobros):
 @st.cache_data
 def procesar_y_analizar_profundo(_df_ventas_periodo, _df_cobros_global, dias_politica_pago):
     if _df_ventas_periodo is None or _df_cobros_global is None or _df_ventas_periodo.empty:
-        return pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame(), 0, 0
 
     df_ventas = _df_ventas_periodo.copy()
     
-    # Identificar descuentos con mayor precisión
     filtro_descuento = (df_ventas['nombre_articulo'].str.upper().str.contains('DESCUENTO', na=False)) & \
                        (df_ventas['nombre_articulo'].str.upper().str.contains('COMERCIAL', na=False))
     
     df_productos_raw = df_ventas[~filtro_descuento]
     df_descuentos_raw = df_ventas[filtro_descuento]
 
-    df_productos_raw['costo_total_linea'] = df_productos_raw['costo_unitario'].fillna(0) * df_productos_raw['unidades_vendidas'].fillna(0)
+    df_productos_raw['costo_total_linea'] = df_productos_raw['costo_unitario'] * df_productos_raw['unidades_vendidas']
     df_productos_raw['margen_bruto'] = df_productos_raw['valor_venta'] - df_productos_raw['costo_total_linea']
     
     ventas_por_factura = df_productos_raw.groupby('llave_factura').agg(
@@ -102,16 +93,15 @@ def procesar_y_analizar_profundo(_df_ventas_periodo, _df_cobros_global, dias_pol
     ventas_consolidadas = pd.merge(ventas_por_factura, descuentos_por_factura, on='llave_factura', how='left')
     ventas_consolidadas['monto_descontado'].fillna(0, inplace=True)
 
-    # Cruce con cartera para saber qué se ha pagado
     df_pagadas = pd.merge(ventas_consolidadas, _df_cobros_global, on='llave_factura', how='inner')
     
     if not df_pagadas.empty:
         df_pagadas['dias_pago'] = (df_pagadas['fecha_saldado'] - df_pagadas['fecha_venta']).dt.days
+        df_pagadas.fillna({'dias_pago': 0}, inplace=True) # Manejo de nulos
 
     series_pagadas = df_pagadas['llave_factura'].unique()
     df_pendientes = ventas_consolidadas[~ventas_consolidadas['llave_factura'].isin(series_pagadas)].copy()
     
-    # Análisis de cartera pendiente (Aging)
     if not df_pendientes.empty:
         hoy = pd.to_datetime(datetime.now())
         df_pendientes['dias_antiguedad'] = (hoy - df_pendientes['fecha_venta']).dt.days
@@ -122,20 +112,18 @@ def procesar_y_analizar_profundo(_df_ventas_periodo, _df_cobros_global, dias_pol
             else: return "Vencida (+90 días)"
         df_pendientes['Rango_Vencimiento'] = df_pendientes['dias_antiguedad'].apply(clasificar_vencimiento)
 
-    # Análisis de clientes con facturas pagadas
+    df_clientes_pagados = pd.DataFrame()
     if not df_pagadas.empty:
-        analisis_pagado_por_cliente = df_pagadas.groupby(['nombre_cliente', 'nomvendedor']).agg(
+        df_clientes_pagados = df_pagadas.groupby(['nombre_cliente', 'nomvendedor']).agg(
             dias_pago_promedio=('dias_pago', 'mean'),
             total_comprado_pagado=('valor_total_factura', 'sum'),
             total_descontado=('monto_descontado', 'sum'),
             margen_total_generado=('margen_total_factura', 'sum'),
-            numero_facturas_pagadas=('llave_factura', 'nunique')
         ).reset_index()
         
-        analisis_pagado_por_cliente['pct_descuento'] = (analisis_pagado_por_cliente['total_descontado'] / analisis_pagado_por_cliente['total_comprado_pagado']).replace([np.inf, -np.inf], 0).fillna(0) * 100
-        analisis_pagado_por_cliente['pct_margen'] = (analisis_pagado_por_cliente['margen_total_generado'] / analisis_pagado_por_cliente['total_comprado_pagado']).replace([np.inf, -np.inf], 0).fillna(0) * 100
+        df_clientes_pagados['pct_descuento'] = (df_clientes_pagados['total_descontado'] / df_clientes_pagados['total_comprado_pagado']).replace([np.inf, -np.inf], 0).fillna(0) * 100
+        df_clientes_pagados['pct_margen'] = (df_clientes_pagados['margen_total_generado'] / df_clientes_pagados['total_comprado_pagado']).replace([np.inf, -np.inf], 0).fillna(0) * 100
 
-        # ### LÓGICA DE CLASIFICACIÓN MEJORADA ###
         def clasificar_cliente_pagado(row):
             paga_a_tiempo = row['dias_pago_promedio'] <= dias_politica_pago
             recibe_descuento = row['total_descontado'] > 0
@@ -143,11 +131,13 @@ def procesar_y_analizar_profundo(_df_ventas_periodo, _df_cobros_global, dias_pol
             elif paga_a_tiempo and not recibe_descuento: return "💡 Oportunidad"
             elif not paga_a_tiempo and recibe_descuento: return "❌ Crítico"
             else: return "⚠️ Alerta"
-            
-        analisis_pagado_por_cliente['Clasificacion'] = analisis_pagado_por_cliente.apply(clasificar_cliente_pagado, axis=1)
-        return analisis_pagado_por_cliente, df_pendientes
-    else:
-        return pd.DataFrame(), df_pendientes
+        df_clientes_pagados['Clasificacion'] = df_clientes_pagados.apply(clasificar_cliente_pagado, axis=1)
+
+    # Calcular KPIs gerenciales
+    venta_bruta_total = df_productos_raw['valor_venta'].sum()
+    margen_bruto_total = df_productos_raw['margen_bruto'].sum()
+        
+    return df_clientes_pagados, df_pendientes, venta_bruta_total, margen_bruto_total
 
 # ==============================================================================
 # 4. EJECUCIÓN PRINCIPAL Y RENDERIZADO DE LA UI
@@ -159,10 +149,7 @@ if df_ventas_raw is None or df_cobros_granular_raw is None:
     st.stop()
 
 st.sidebar.header("Filtros del Análisis ⚙️")
-
-min_date = df_ventas_raw['fecha_venta_norm'].min().date()
-max_date = df_ventas_raw['fecha_venta_norm'].max().date()
-
+min_date, max_date = df_ventas_raw['fecha_venta_norm'].min().date(), df_ventas_raw['fecha_venta_norm'].max().date()
 fecha_inicio = st.sidebar.date_input("Fecha de Inicio", value=max_date.replace(day=1), min_value=min_date, max_value=max_date)
 fecha_fin = st.sidebar.date_input("Fecha de Fin", value=max_date, min_value=min_date, max_value=max_date)
 
@@ -170,81 +157,101 @@ if fecha_inicio > fecha_fin:
     st.sidebar.error("La fecha de inicio no puede ser posterior a la fecha de fin.")
     st.stop()
 
-df_ventas_periodo = df_ventas_raw[
-    (df_ventas_raw['fecha_venta_norm'].dt.date >= fecha_inicio) & 
-    (df_ventas_raw['fecha_venta_norm'].dt.date <= fecha_fin)
-]
-
-# Unificar selección de vendedor con la lógica del primer script
+df_ventas_periodo = df_ventas_raw[(df_ventas_raw['fecha_venta_norm'].dt.date >= fecha_inicio) & (df_ventas_raw['fecha_venta_norm'].dt.date <= fecha_fin)]
 vendedores_unicos = ['Visión Gerencial (Todos)'] + sorted(df_ventas_periodo['nomvendedor'].dropna().unique().tolist())
 vendedor_seleccionado = st.sidebar.selectbox("Seleccionar Vendedor o Visión General", options=vendedores_unicos)
 
-# Se fija la política de pago a 30 días como base del análisis
 DIAS_POLITICA_PAGO = 30
-st.sidebar.info(f"Política de Pronto Pago fijada en **{DIAS_POLITICA_PAGO} días** para el análisis.")
+st.sidebar.info(f"Política de Pronto Pago fijada en **{DIAS_POLITICA_PAGO} días**.")
 
 if vendedor_seleccionado != "Visión Gerencial (Todos)":
     df_ventas_filtrado = df_ventas_periodo[df_ventas_periodo['nomvendedor'] == vendedor_seleccionado]
 else:
     df_ventas_filtrado = df_ventas_periodo
 
-with st.spinner(f"Ejecutando análisis profundo para {vendedor_seleccionado}..."):
-    df_analisis_pagado, df_cartera_pendiente = procesar_y_analizar_profundo(
+with st.spinner(f"Ejecutando análisis estratégico para {vendedor_seleccionado}..."):
+    df_clientes_pagados, df_cartera_pendiente, venta_bruta_total, margen_bruto_total = procesar_y_analizar_profundo(
         df_ventas_filtrado, df_cobros_granular_raw, DIAS_POLITICA_PAGO
     )
 
-# --- KPIs y Visualización ---
-total_cartera_pendiente = df_cartera_pendiente['valor_total_factura'].sum() if not df_cartera_pendiente.empty else 0
-total_descuentos_periodo = df_analisis_pagado['total_descontado'].sum() if not df_analisis_pagado.empty else 0
-
-st.header(f"Análisis para: {vendedor_seleccionado}")
-st.info(f"Período analizado: del **{fecha_inicio.strftime('%d/%m/%Y')}** al **{fecha_fin.strftime('%d/%m/%Y')}**.")
-
-tab1, tab2, tab3 = st.tabs([
-    "📊 **Análisis de Efectividad de Descuentos**", 
-    "⏳ **Análisis de Cartera Pendiente (Aging)**",
-    "🗣️ **Plan de Acción y Conclusiones**"
+# --- Definición de Pestañas ---
+tab1, tab2, tab3, tab4 = st.tabs([
+    "📈 **Resumen Gerencial**", 
+    "✅ **Cartera Pagada (Detalle)**",
+    "⏳ **Cartera Pendiente (Aging)**",
+    "🎯 **Plan de Acción**"
 ])
 
+# --- Pestaña 1: Resumen Gerencial ---
 with tab1:
-    st.header("Matriz de Efectividad de Descuentos (Cartera Pagada)")
-    if df_analisis_pagado.empty:
-        st.warning("No hay datos de facturas pagadas para los filtros seleccionados.")
-    else:
-        st.subheader("Comportamiento de Pago vs. % Descuento Otorgado")
-        st.markdown("""
-        Esta matriz visualiza la efectividad de tu política de descuentos. Cada burbuja es un cliente.
-        - **Eje X (Días Promedio de Pago):** Más a la derecha, más tardan en pagar.
-        - **Eje Y (% Descuento):** Más arriba, mayor es el descuento que se les otorga.
-        - **Color (Clasificación):** Muestra si el descuento está justificado.
-        - **Tamaño (Total Comprado):** Clientes más grandes tienen burbujas más grandes.
-        """
-        )
+    st.header(f"Resumen Estratégico para: {vendedor_seleccionado}")
+    st.info(f"Período analizado: del **{fecha_inicio.strftime('%d/%m/%Y')}** al **{fecha_fin.strftime('%d/%m/%Y')}**.")
+    
+    # KPIs Gerenciales
+    st.subheader("Indicadores Clave de Rentabilidad y Riesgo")
+    
+    total_descuentos_otorgados = df_clientes_pagados['total_descontado'].sum() if not df_clientes_pagados.empty else 0
+    margen_real = margen_bruto_total - total_descuentos_otorgados
+    rentabilidad_efectiva = (margen_real / venta_bruta_total * 100) if venta_bruta_total > 0 else 0
+    
+    clientes_criticos_df = df_clientes_pagados[df_clientes_pagados['Clasificacion'] == '❌ Crítico'] if not df_clientes_pagados.empty else pd.DataFrame()
+    fuga_de_rentabilidad = clientes_criticos_df['total_descontado'].sum() if not clientes_criticos_df.empty else 0
+    
+    total_cartera_pendiente = df_cartera_pendiente['valor_total_factura'].sum() if not df_cartera_pendiente.empty else 0
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("🔥 Fuga de Rentabilidad", f"${fuga_de_rentabilidad:,.0f}", help="Suma de descuentos a clientes que pagan tarde. ¡Es dinero perdido!")
+    col2.metric("💰 Rentabilidad Efectiva", f"{rentabilidad_efectiva:.1f}%", help="(Margen Bruto - Descuentos) / Venta Bruta")
+    col3.metric("💸 Total Descuentos Otorgados", f"${total_descuentos_otorgados:,.0f}")
+    col4.metric("⏳ Cartera Pendiente Total", f"${total_cartera_pendiente:,.0f}")
+    
+    st.markdown("---")
+    
+    st.subheader("Matriz de Efectividad de Descuentos")
+    if not df_clientes_pagados.empty and df_clientes_pagados['total_comprado_pagado'].sum() > 0:
+        # SOLUCIÓN AL ERROR: Asegurar que los datos para el tamaño no son nulos o negativos
+        df_plot = df_clientes_pagados[df_clientes_pagados['total_comprado_pagado'] > 0].copy()
+        df_plot.fillna(0, inplace=True)
 
         fig_scatter = px.scatter(
-            df_analisis_pagado, x='dias_pago_promedio', y='pct_descuento',
+            df_plot, x='dias_pago_promedio', y='pct_descuento',
             size='total_comprado_pagado', color='Clasificacion', hover_name='nombre_cliente',
-            title=f"Matriz de Clientes: Eficiencia de Descuentos para {vendedor_seleccionado}",
-            labels={'dias_pago_promedio': 'Días Promedio de Pago', 'pct_descuento': '% Descuento sobre Compra', 'pct_margen': 'Margen (%)'},
+            title=f"Eficiencia de Descuentos para {vendedor_seleccionado}",
+            labels={'dias_pago_promedio': 'Días Promedio de Pago', 'pct_descuento': '% Descuento sobre Compra'},
             color_discrete_map={"✅ Justificado": "#28a745", "💡 Oportunidad": "#007bff", "❌ Crítico": "#dc3545", "⚠️ Alerta": "#ffc107"},
             hover_data=['total_comprado_pagado', 'total_descontado', 'pct_margen'],
             size_max=60)
         fig_scatter.add_vline(x=DIAS_POLITICA_PAGO, line_width=3, line_dash="dash", line_color="black", annotation_text=f"Meta {DIAS_POLITICA_PAGO} días")
         st.plotly_chart(fig_scatter, use_container_width=True)
-    
-        with st.expander("Ver detalle completo de clientes analizados (Cartera Pagada)"):
-            st.dataframe(df_analisis_pagado.sort_values(by="total_descontado", ascending=False), use_container_width=True, hide_index=True)
-
-with tab2:
-    st.header("Análisis de Vencimiento de Cartera (Aging)")
-    if df_cartera_pendiente.empty:
-        st.success("¡Felicidades! No hay cartera pendiente de cobro para los filtros seleccionados.")
     else:
-        aging_summary = df_cartera_pendiente.groupby('Rango_Vencimiento')['valor_total_factura'].sum().reset_index()
+        st.info("No hay suficientes datos de clientes pagados en este período para generar la matriz de efectividad.")
+
+# --- Pestaña 2: Cartera Pagada (Detalle) ---
+with tab2:
+    st.header("Análisis Detallado de Cartera Pagada")
+    if not df_clientes_pagados.empty:
+        st.write("A continuación se listan todos los clientes que realizaron pagos en el período, ordenados desde el que más tarda en pagar en promedio.")
+        st.dataframe(
+            df_clientes_pagados.sort_values(by="dias_pago_promedio", ascending=False),
+            use_container_width=True, hide_index=True,
+            column_config={
+                "nombre_cliente": st.column_config.TextColumn("Cliente"),
+                "dias_pago_promedio": st.column_config.NumberColumn("Días Pago Prom.", format="%d días"),
+                "total_comprado_pagado": st.column_config.NumberColumn("Total Comprado", format="$ {:,.0f}"),
+                "total_descontado": st.column_config.NumberColumn("Total Dcto.", format="$ {:,.0f}"),
+                "pct_descuento": st.column_config.ProgressColumn("% Dcto.", format="%.1f%%", min_value=0, max_value=max(10, df_clientes_pagados.pct_descuento.max())),
+                "pct_margen": st.column_config.ProgressColumn("% Margen", format="%.1f%%", min_value=min(0, df_clientes_pagados.pct_margen.min()), max_value=max(10, df_clientes_pagados.pct_margen.max()))
+            }
+        )
+    else:
+        st.warning("No se encontraron clientes con facturas pagadas en el período seleccionado.")
+
+# --- Pestaña 3: Cartera Pendiente (Aging) ---
+with tab3:
+    st.header("Análisis de Vencimiento de Cartera (Aging)")
+    if not df_cartera_pendiente.empty:
         st.subheader("Resumen de Cartera por Antigüedad")
-        col1, col2 = st.columns(2)
-        col1.metric("Monto Total Pendiente", f"${total_cartera_pendiente:,.0f}")
-        
+        aging_summary = df_cartera_pendiente.groupby('Rango_Vencimiento')['valor_total_factura'].sum().reset_index()
         fig_pie = px.pie(
             aging_summary, names='Rango_Vencimiento', values='valor_total_factura',
             title='Distribución de la Cartera Pendiente',
@@ -253,57 +260,49 @@ with tab2:
         )
         st.plotly_chart(fig_pie, use_container_width=True)
         
-        with st.expander("Ver detalle de todas las facturas pendientes de cobro"):
-            st.dataframe(df_cartera_pendiente[['Serie', 'nombre_cliente', 'fecha_venta', 'dias_antiguedad', 'valor_total_factura', 'Rango_Vencimiento']].sort_values(by="dias_antiguedad", ascending=False), use_container_width=True, hide_index=True)
-
-with tab3:
-    st.header("Conclusiones Automáticas y Plan de Acción")
-    st.info(f"Diagnóstico generado para **{vendedor_seleccionado}** en el período seleccionado.")
-
-    st.subheader("Diagnóstico de la Política de Descuentos")
-    if not df_analisis_pagado.empty:
-        clientes_criticos_df = df_analisis_pagado[df_analisis_pagado['Clasificacion'] == '❌ Crítico']
-        if not clientes_criticos_df.empty:
-            monto_critico = clientes_criticos_df['total_descontado'].sum()
-            st.error(f"""
-            **🔥 Fuga de Rentabilidad Detectada:** Se han otorgado **${monto_critico:,.0f}** en descuentos a **{len(clientes_criticos_df)}** clientes
-            que **NO CUMPLEN** la política de pronto pago (pagan en promedio después de {DIAS_POLITICA_PAGO} días).
-            
-            **Plan de Acción Inmediato:**
-            1.  **Revisar y Suspender Descuentos:** Analizar la lista de clientes 'Críticos' (disponible en la primera pestaña) y considerar suspender futuros descuentos hasta que mejoren su comportamiento de pago.
-            2.  **Comunicación Clara:** El vendedor debe comunicar al cliente que el 'Descuento Comercial' está condicionado al pago dentro de los 30 días.
-            3.  **Evaluar Rentabilidad Neta:** Verificar si el `pct_margen` de estos clientes justifica mantener la relación comercial a pesar del mal comportamiento de pago.
-            """)
-            st.dataframe(clientes_criticos_df[['nombre_cliente', 'dias_pago_promedio', 'total_descontado', 'pct_margen']].sort_values('total_descontado', ascending=False), hide_index=True)
-        else:
-            st.success("✅ ¡Política de Descuentos Efectiva! No se encontraron descuentos otorgados a clientes que pagan tarde.", icon="🎉")
-
-        clientes_oportunidad_df = df_analisis_pagado[df_analisis_pagado['Clasificacion'] == '💡 Oportunidad']
-        if not clientes_oportunidad_df.empty:
-            st.info(f"""
-            **💡 Oportunidad de Fidelización:** Se han identificado **{len(clientes_oportunidad_df)}** clientes que pagan puntualmente pero no reciben descuentos.
-            
-            **Plan de Acción:**
-            1.  **Recompensar Lealtad:** Considerar ofrecerles un descuento comercial en su próxima compra como premio por su buen comportamiento de pago.
-            2.  **Aumentar Volumen de Compra:** Utilizar el descuento como un incentivo para incrementar su frecuencia o volumen de compra.
-            """)
-
+        st.subheader("Detalle de Facturas Pendientes de Cobro")
+        st.dataframe(
+            df_cartera_pendiente[['Serie', 'nombre_cliente', 'fecha_venta', 'dias_antiguedad', 'valor_total_factura', 'Rango_Vencimiento']].sort_values(by="dias_antiguedad", ascending=False),
+            use_container_width=True, hide_index=True,
+            column_config={"valor_total_factura": st.column_config.NumberColumn(format="$ {:,.0f}")}
+        )
     else:
-        st.info("No hay datos de cartera pagada para generar un diagnóstico sobre descuentos en este período.")
+        st.success("🎉 ¡Felicidades! No hay cartera pendiente de cobro para los filtros seleccionados.")
 
-    st.subheader("Diagnóstico de la Salud de la Cartera")
-    if not df_cartera_pendiente.empty:
-        cartera_vencida = df_cartera_pendiente[df_cartera_pendiente['dias_antiguedad'] > 30]['valor_total_factura'].sum()
-        if total_cartera_pendiente > 0 and cartera_vencida > 0:
-            porcentaje_vencido = (cartera_vencida / total_cartera_pendiente) * 100
-            st.warning(f"""
-            **💰 Riesgo de Liquidez Identificado:** El **{porcentaje_vencido:.1f}%** de la cartera pendiente (**${cartera_vencida:,.0f}**) está vencida.
-            
-            **Plan de Acción:**
-            1.  **Priorizar Cobro:** Enfocar la gestión de cobro en los clientes con mayor antigüedad (ver detalle en la pestaña 'Aging').
-            2.  **Revisar Límites de Crédito:** Evaluar las condiciones de crédito para clientes con deudas vencidas recurrentes.
-            """)
-        else:
-            st.success("👍 ¡Cartera Corriente! Toda la cartera pendiente originada en este periodo está al día.", icon="✅")
+# --- Pestaña 4: Plan de Acción ---
+with tab4:
+    st.header("Plan de Acción Estratégico")
+
+    st.subheader("🔥 Foco #1: Contener Fugas de Rentabilidad")
+    st.markdown("Estos son los clientes **críticos** que recibieron descuentos pero **no cumplieron** con la política de pago. La acción aquí es **revisar y potencialmente suspender** sus descuentos.")
+    if not clientes_criticos_df.empty:
+        st.dataframe(
+            clientes_criticos_df.sort_values("total_descontado", ascending=False),
+            use_container_width=True, hide_index=True,
+            column_config={
+                "nombre_cliente": st.column_config.TextColumn("Cliente Crítico"),
+                "total_descontado": st.column_config.NumberColumn("Monto Descuento Perdido", format="$ {:,.0f}"),
+                "dias_pago_promedio": st.column_config.NumberColumn("Paga en Prom. (días)", format="%d"),
+                "pct_margen": st.column_config.NumberColumn("Margen Real (%)", format="%.1f%%")
+            }
+        )
     else:
-        st.success("👍 ¡Cartera Sana! No se registra cartera pendiente de cobro para los filtros seleccionados.", icon="✨")
+        st.success("✅ ¡Excelente! No hay clientes críticos en este período.")
+
+    st.markdown("---")
+
+    st.subheader("💡 Foco #2: Capitalizar Oportunidades de Crecimiento")
+    st.markdown("Estos son los clientes **leales** que pagan a tiempo pero **no reciben descuentos**. Son una oportunidad para **fidelizar y aumentar ventas** con un descuento justificado.")
+    clientes_oportunidad_df = df_clientes_pagados[df_clientes_pagados['Clasificacion'] == '💡 Oportunidad'] if not df_clientes_pagados.empty else pd.DataFrame()
+    if not clientes_oportunidad_df.empty:
+        st.dataframe(
+            clientes_oportunidad_df.sort_values("total_comprado_pagado", ascending=False),
+            use_container_width=True, hide_index=True,
+            column_config={
+                "nombre_cliente": st.column_config.TextColumn("Cliente Leal"),
+                "total_comprado_pagado": st.column_config.NumberColumn("Total Comprado", format="$ {:,.0f}"),
+                "dias_pago_promedio": st.column_config.NumberColumn("Paga en Prom. (días)", format="%d")
+            }
+        )
+    else:
+        st.info("No se identificaron clientes leales sin descuentos en este período.")
