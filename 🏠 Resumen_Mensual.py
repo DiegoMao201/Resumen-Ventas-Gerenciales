@@ -1,8 +1,8 @@
 # ==============================================================================
 # SCRIPT COMPLETO Y DEFINITIVO PARA: 🏠 Resumen Mensual.py
 # VERSIÓN FINAL: 29 de Junio, 2025
-# DESCRIPCIÓN: Versión final con todas las correcciones de lógica de datos y 
-#              errores de frontend aplicadas.
+# DESCRIPCIÓN: Versión final con todas las correcciones de lógica de datos,
+#              errores de frontend y botón de actualización forzada.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -11,6 +11,7 @@ import plotly.express as px
 import dropbox
 import io
 import unicodedata
+import time # ✨ NUEVO: Importamos la librería time para dar feedback visual al usuario
 
 # ==============================================================================
 # 1. CONFIGURACIÓN CENTRALIZADA (Sin cambios)
@@ -38,6 +39,26 @@ DATA_CONFIG = {
 }
 
 st.set_page_config(page_title=APP_CONFIG["page_title"], page_icon="🏠", layout="wide", initial_sidebar_state="expanded")
+
+# ✨ NUEVO: Estilos CSS para el botón de actualización.
+st.markdown("""
+<style>
+    /* Estilo para el botón de actualización para hacerlo más grande y visible */
+    div[data-testid="stButton"] > button[kind="primary"] {
+        height: 3em;
+        font-size: 1.2em;
+        font-weight: bold;
+        border: 2px solid #FF4B4B;
+        background-color: #FF4B4B;
+        color: white;
+    }
+    div[data-testid="stButton"] > button[kind="primary"]:hover {
+        border-color: #FF6B6B;
+        background-color: #FF6B6B;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 
 # ==============================================================================
 # 2. LÓGICA DE PROCESAMIENTO DE DATOS
@@ -337,6 +358,21 @@ def render_dashboard():
 
             st.title("🏠 Resumen de Rendimiento")
             st.header(f"{DATA_CONFIG['mapeo_meses'].get(mes_sel_num, '')} {anio_sel}")
+
+            # ✨ NUEVO: BOTÓN DE ACTUALIZACIÓN FORZADA
+            if st.button("🔄 ¡Actualizar Todos los Datos!", type="primary", use_container_width=True, help="Fuerza la recarga de los archivos desde Dropbox. Útil si los datos se actualizaron recientemente."):
+                # 1. Limpia toda la caché de datos de la aplicación
+                st.cache_data.clear()
+                # 2. Elimina los dataframes de la sesión para forzar su recarga
+                if 'df_ventas' in st.session_state:
+                    del st.session_state.df_ventas
+                if 'df_cobros' in st.session_state:
+                    del st.session_state.df_cobros
+                # 3. Muestra un mensaje al usuario y reinicia el script
+                st.toast("Limpiando caché y recargando datos... ¡Un momento!", icon="⏳")
+                time.sleep(3) # Pausa para que el usuario lea el mensaje
+                st.rerun()
+
             vista_para = st.session_state.usuario if len(df_vista['nomvendedor'].unique()) == 1 else 'Múltiples Seleccionados'
             st.markdown(f"**Vista para:** `{vista_para}`")
             
@@ -493,6 +529,7 @@ def main():
     else:
         render_dashboard()
         if st.sidebar.button("Salir", key="btn_logout"):
+            # Limpia TODA la sesión para un logout seguro y completo
             keys_to_clear = list(st.session_state.keys())
             for key in keys_to_clear:
                 del st.session_state[key]
