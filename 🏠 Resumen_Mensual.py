@@ -52,7 +52,7 @@ def normalizar_texto(texto):
     if not isinstance(texto, str): return texto
     try:
         texto_sin_tildes = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
-        return texto_sin_tildes.upper().replace('-', ' ').strip().replace('  ', ' ')
+        return texto_sin_tildes.upper().replace('_', ' ').strip().replace('  ', ' ')
     except (TypeError, AttributeError): return texto
 
 APP_CONFIG['complementarios']['exclude_super_categoria'] = normalizar_texto(APP_CONFIG['complementarios']['exclude_super_categoria'])
@@ -101,15 +101,13 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
             for col in cols_a_normalizar:
                 if col in df.columns: df[col] = df[col].apply(normalizar_texto)
 
-            # --- INICIO DE LA CORRECCIÓN DEFINITIVA PARA NOTAS DE CRÉDITO ---
+            # --- INICIO DE LA CORRECCIÓN DEFINITIVA ---
             if 'TipoDocumento' in df.columns and 'valor_venta' in df.columns:
-                # La columna 'TipoDocumento' ya fue normalizada a mayúsculas.
-                # Buscamos filas que contengan "NOTA" Y "CREDIT" para ser más flexibles (ej. NOTA_CREDIT, NOTA DE CREDITO).
-                credit_note_mask = df['TipoDocumento'].str.contains('NOTA', na=False) & df['TipoDocumento'].str.contains('CREDIT', na=False)
+                # Se busca el identificador exacto 'NOTA CREDITO' (después de normalizar 'NOTA_CREDITO').
+                credit_note_mask = df['TipoDocumento'] == 'NOTA CREDITO'
                 
-                # Para estas filas, forzamos que el valor sea negativo.
-                # Tomamos el valor absoluto para corregir números que se hayan procesado como positivos
-                # y luego lo multiplicamos por -1. Esto es a prueba de errores.
+                # Para estas filas, se toma el valor absoluto y se convierte en negativo.
+                # Esto garantiza que siempre resten, sin importar cómo se ingresó el dato.
                 df.loc[credit_note_mask, 'valor_venta'] = -df.loc[credit_note_mask, 'valor_venta'].abs()
             # --- FIN DE LA CORRECCIÓN ---
 
@@ -120,7 +118,6 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
         return pd.DataFrame(columns=nombres_columnas)
 
 def calcular_marquilla_optimizado(df_periodo):
-    # (Código original sin cambios)
     if df_periodo.empty or 'nombre_articulo' not in df_periodo.columns or 'codigo_vendedor' not in df_periodo.columns or 'cliente_id' not in df_periodo.columns:
         return pd.DataFrame(columns=['codigo_vendedor', 'nomvendedor', 'promedio_marquilla'])
     df_temp = df_periodo[['codigo_vendedor', 'nomvendedor', 'cliente_id', 'nombre_articulo']].copy()
@@ -133,7 +130,6 @@ def calcular_marquilla_optimizado(df_periodo):
     return df_final_marquilla.rename(columns={'puntaje_marquilla': 'promedio_marquilla'})
 
 def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel):
-    # (Código restaurado a su versión original, usando 'valor_venta' para los cálculos)
     df_ventas_kpi = df_ventas_periodo[~df_ventas_periodo['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
     
     if not df_ventas_kpi.empty:
@@ -242,8 +238,6 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     
     return df_final, df_albaranes_reales_pendientes
 
-# (Las funciones de la interfaz de usuario y la ejecución principal no necesitan cambios y se mantienen como en tu código original)
-# ... El resto del código es idéntico al que ya tenías ...
 # ==============================================================================
 # 3. LÓGICA DE LA INTERFAZ DE USUARIO (UI)
 # ==============================================================================
