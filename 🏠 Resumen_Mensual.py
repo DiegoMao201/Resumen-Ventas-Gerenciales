@@ -73,6 +73,12 @@ APP_CONFIG['categorias_clave_venta'] = [normalizar_texto(cat) for cat in APP_CON
 
 @st.cache_data(ttl=1800)
 def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
+    """
+    Carga un archivo CSV desde Dropbox, lo decodifica, lo lee en un DataFrame de pandas
+    y realiza una limpieza inicial de datos.
+    Maneja el error "No columns to parse from file" verificando si el DataFrame
+    está vacío inmediatamente después de la lectura.
+    """
     try:
         with dropbox.Dropbox(app_key=st.secrets.dropbox.app_key, app_secret=st.secrets.dropbox.app_secret, oauth2_refresh_token=st.secrets.dropbox.refresh_token) as dbx:
             _, res = dbx.files_download(path=ruta_archivo)
@@ -103,31 +109,33 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
             
             # --- INICIO DE LA CORRECCIÓN MEJORADA PARA CARACTERES NO NUMÉRICOS EN VALORES ---
             # Columnas que deben ser numéricas y pueden contener caracteres no deseados
-            numeric_cols_to_clean = ['valor_venta', 'valor_cobro', 'unidades_vendidas', 'costo_unitario', 'marca_producto']
+            # Añadimos 'marca_producto' a esta lista si también puede venir con formatos extraños
+            numeric_cols_to_clean = ['valor_venta', 'valor_cobro', 'unidades_vendidas', 'costo_unitario']
             
             for col in numeric_cols_to_clean:
                 if col in df.columns:
                     # Convierte a string para asegurar que .str.replace() funcione
                     df[col] = df[col].astype(str) 
-                    # Elimina cualquier carácter que no sea dígito, punto (decimal), o signo menos
-                    # Consideramos el signo menos al inicio y el punto decimal
-                    # Esto eliminará #, $, comas de miles, etc.
+                    # Elimina cualquier carácter que NO sea un dígito, un punto (para decimales),
+                    # o un signo menos (para números negativos).
+                    # Esto es crucial para eliminar símbolos como '#', '$', comas de miles, etc.
                     df[col] = df[col].str.replace(r'[^\d\.\-]', '', regex=True)
-                    # Convierte a numérico, forzando errores a NaN
+                    # Convierte a numérico, forzando errores a NaN si la limpieza no fue suficiente
                     df[col] = pd.to_numeric(df[col], errors='coerce')
             
-            # Las columnas 'anio' y 'mes' ya deberían ser limpias, pero las convertimos a numérico
-            # para asegurar que sean del tipo correcto y luego a int.
-            for col in ['anio', 'mes']:
+            # Las columnas 'anio' y 'mes' también se convierten a numérico
+            # Se mantienen separadas por si no necesitan la misma limpieza agresiva de caracteres
+            for col in ['anio', 'mes', 'marca_producto']: # Se incluye 'marca_producto' si es un código numérico
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce')
+
             # --- FIN DE LA CORRECCIÓN MEJORADA ---
 
             # Elimina filas donde 'anio' o 'mes' son NaN (esenciales para el filtrado de tiempo)
             df.dropna(subset=['anio', 'mes'], inplace=True) 
             
             # Asegura que 'anio' y 'mes' sean enteros después de la conversión y dropna
-            df = df.astype({'anio': int, 'mes': int})
+            df = df = df.astype({'anio': int, 'mes': int})
             
             # Convierte 'codigo_vendedor' a string para un manejo consistente
             if 'codigo_vendedor' in df.columns:
@@ -140,7 +148,7 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
                 df['fecha_cobro'] = pd.to_datetime(df['fecha_cobro'], errors='coerce')
             
             # Mapea y normaliza la columna 'marca_producto' a 'nombre_marca'
-            # Es importante que 'marca_producto' ya sea numérica o NaN antes de este mapeo
+            # Es crucial que 'marca_producto' sea numérica ANTES de este mapeo para que funcione el .map()
             if 'marca_producto' in df.columns:
                 df['nombre_marca'] = df['marca_producto'].map(DATA_CONFIG["mapeo_marcas"]).fillna('No Especificada')
             
