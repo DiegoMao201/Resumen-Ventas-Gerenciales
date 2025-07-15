@@ -62,7 +62,7 @@ def normalizar_texto(texto):
         return texto
     try:
         texto_sin_tildes = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
-        return texto_sin_tildes.upper().replace('-', ' ').strip().replace(' ', ' ') # Asegura que espacios dobles se conviertan en simples
+        return texto_sin_tildes.upper().replace('-', ' ').strip().replace('  ', ' ') # Asegura que espacios dobles se conviertan en simples
     except (TypeError, AttributeError):
         return texto
 
@@ -78,85 +78,73 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
             _, res = dbx.files_download(path=ruta_archivo)
             contenido_csv = res.content.decode('latin-1')
             
-            # Intenta leer el CSV. Si el archivo está vacío o malformado (sin columnas),
-            # pandas puede crear un DataFrame vacío o lanzar un error si no se usa header=None.
-            # Al usar header=None, si no hay datos, pandas creará un DF sin columnas o con 0 filas.
             df = pd.read_csv(io.StringIO(contenido_csv), header=None, sep=',', on_bad_lines='skip', dtype=str)
 
-            # --- VERIFICACIÓN CLAVE PARA EL ERROR "No columns to parse from file" ---
-            # Si el DataFrame está vacío después de la lectura, significa que el archivo
-            # no contenía datos parseables como columnas.
             if df.empty or df.shape[1] == 0:
                 st.warning(f"El archivo '{ruta_archivo}' parece estar vacío o malformado (sin columnas). Se cargará un DataFrame vacío para este archivo.")
-                # Retorna un DataFrame vacío con las columnas esperadas para evitar errores downstream
                 return pd.DataFrame(columns=nombres_columnas)
-            # --- FIN DE LA VERIFICACIÓN CLAVE ---
-            
-            # Si el número de columnas leídas no coincide con el esperado, rellena o trunca
+
             if df.shape[1] != len(nombres_columnas):
                 st.warning(f"Formato en '{ruta_archivo}': Se esperaban {len(nombres_columnas)} columnas pero se encontraron {df.shape[1]}. Ajustando columnas.")
-                # Reindexa para asegurar que el número de columnas sea el esperado.
-                # Las columnas extras se eliminarán, las faltantes se llenarán con NaN.
                 df = df.reindex(columns=range(len(nombres_columnas)))
             
-            df.columns = nombres_columnas # Asigna los nombres de columna definidos
+            df.columns = nombres_columnas
             
-            # --- INICIO DE LA CORRECCIÓN MEJORADA PARA CARACTERES NO NUMÉRICOS EN VALORES ---
-            # Columnas que deben ser numéricas y pueden contener caracteres no deseados
-            # Añadimos 'marca_producto' a esta lista si también puede venir con formatos extraños
             numeric_cols_to_clean = ['valor_venta', 'valor_cobro', 'unidades_vendidas', 'costo_unitario']
             
             for col in numeric_cols_to_clean:
                 if col in df.columns:
-                    # Convierte a string para asegurar que .str.replace() funcione
-                    df[col] = df[col].astype(str) 
-                    # Elimina cualquier carácter que NO sea un dígito, un punto (para decimales),
-                    # o un signo menos (para números negativos).
-                    # Esto es crucial para eliminar símbolos como '#', '$', comas de miles, etc.
+                    df[col] = df[col].astype(str)
                     df[col] = df[col].str.replace(r'[^\d\.\-]', '', regex=True)
-                    # Convierte a numérico, forzando errores a NaN si la limpieza no fue suficiente
                     df[col] = pd.to_numeric(df[col], errors='coerce')
-            
-            # Las columnas 'anio' y 'mes' también se convierten a numérico
-            # Se mantienen separadas por si no necesitan la misma limpieza agresiva de caracteres
-            for col in ['anio', 'mes', 'marca_producto']: # Se incluye 'marca_producto' si es un código numérico
+
+            for col in ['anio', 'mes', 'marca_producto']:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce')
 
-            # --- FIN DE LA CORRECCIÓN MEJORADA ---
-
-            # Elimina filas donde 'anio' o 'mes' son NaN (esenciales para el filtrado de tiempo)
-            df.dropna(subset=['anio', 'mes'], inplace=True) 
+            df.dropna(subset=['anio', 'mes'], inplace=True)
             
-            # Asegura que 'anio' y 'mes' sean enteros después de la conversión y dropna
-            df = df = df.astype({'anio': int, 'mes': int})
+            df = df.astype({'anio': int, 'mes': int})
             
-            # Convierte 'codigo_vendedor' a string para un manejo consistente
             if 'codigo_vendedor' in df.columns:
                 df['codigo_vendedor'] = df['codigo_vendedor'].astype(str)
             
-            # Convierte fechas a formato datetime, forzando errores a NaT (Not a Time)
             if 'fecha_venta' in df.columns:
                 df['fecha_venta'] = pd.to_datetime(df['fecha_venta'], errors='coerce')
-            if 'fecha_cobro' in df.columns: # Asegurarse de que también se maneje para cobros
+            if 'fecha_cobro' in df.columns:
                 df['fecha_cobro'] = pd.to_datetime(df['fecha_cobro'], errors='coerce')
             
-            # Mapea y normaliza la columna 'marca_producto' a 'nombre_marca'
-            # Es crucial que 'marca_producto' sea numérica ANTES de este mapeo para que funcione el .map()
             if 'marca_producto' in df.columns:
                 df['nombre_marca'] = df['marca_producto'].map(DATA_CONFIG["mapeo_marcas"]).fillna('No Especificada')
             
-            # Normaliza otras columnas de texto clave
             cols_a_normalizar = ['super_categoria', 'categoria_producto', 'nombre_marca', 'nomvendedor', 'TipoDocumento']
             for col in cols_a_normalizar:
                 if col in df.columns:
                     df[col] = df[col].apply(normalizar_texto)
             
+            # ==================================================================
+            # INICIO DE LA CORRECCIÓN PARA NOTAS DE CRÉDITO
+            # ==================================================================
+            # Esta lógica garantiza que las 'NOTA CREDIT' siempre resten valor,
+            # sin importar cómo se haya ingresado el dato en el archivo original.
+            if 'TipoDocumento' in df.columns and 'valor_venta' in df.columns:
+                # Se crea una máscara para identificar las filas de notas de crédito.
+                # La columna 'TipoDocumento' ya ha sido normalizada por el código anterior.
+                credit_note_mask = df['TipoDocumento'] == 'NOTA CREDIT'
+                
+                # Para estas filas, se toma el valor absoluto de 'valor_venta' y se 
+                # convierte en negativo. Esto soluciona dos problemas:
+                # 1. Notas de crédito que fueron ingresadas como un número positivo.
+                # 2. Evita un doble negativo si el valor ya era negativo.
+                df.loc[credit_note_mask, 'valor_venta'] = -df.loc[credit_note_mask, 'valor_venta'].abs()
+            # ==================================================================
+            # FIN DE LA CORRECCIÓN
+            # ==================================================================
+            
             return df
+            
     except Exception as e:
-        # Captura cualquier otra excepción durante el proceso de carga
         st.error(f"Error crítico al cargar '{ruta_archivo}': {e}. Por favor, verifique el archivo en Dropbox.")
-        # Retorna un DataFrame vacío con las columnas esperadas en caso de error
         return pd.DataFrame(columns=nombres_columnas)
 
 def calcular_marquilla_optimizado(df_periodo):
@@ -335,7 +323,7 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     df_final['presupuesto_complementarios'] = df_final['presupuesto'] * APP_CONFIG['complementarios']['presupuesto_pct']
     df_final['presupuesto_sub_meta'] = df_final['presupuesto_complementarios'] * APP_CONFIG['sub_meta_complementarios']['presupuesto_pct']
     
-    return df_final, df_albaranes_pendientes
+    return df_final, df_albaranes_reales_pendientes
 
 # ==============================================================================
 # 3. LÓGICA DE LA INTERFAZ DE USUARIO (UI)
