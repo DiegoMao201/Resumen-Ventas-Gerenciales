@@ -5,7 +5,7 @@ import plotly.express as px
 import dropbox
 import io
 import unicodedata
-import time # Importamos la librería time para dar feedback visual al usuario
+import time
 
 # ==============================================================================
 # 1. CONFIGURACIÓN CENTRALIZADA
@@ -45,18 +45,15 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-
 # ==============================================================================
 # 2. LÓGICA DE PROCESAMIENTO DE DATOS
 # ==============================================================================
 def normalizar_texto(texto):
-    if not isinstance(texto, str):
-        return texto
+    if not isinstance(texto, str): return texto
     try:
         texto_sin_tildes = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
         return texto_sin_tildes.upper().replace('-', ' ').strip().replace('  ', ' ')
-    except (TypeError, AttributeError):
-        return texto
+    except (TypeError, AttributeError): return texto
 
 APP_CONFIG['complementarios']['exclude_super_categoria'] = normalizar_texto(APP_CONFIG['complementarios']['exclude_super_categoria'])
 APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo'] = normalizar_texto(APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo'])
@@ -71,37 +68,22 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
             df = pd.read_csv(io.StringIO(contenido_csv), header=None, sep=',', on_bad_lines='skip', dtype=str)
 
             if df.empty or df.shape[1] == 0:
-                st.warning(f"El archivo '{ruta_archivo}' parece estar vacío. Se cargará un DataFrame vacío.")
                 return pd.DataFrame(columns=nombres_columnas)
 
             if df.shape[1] != len(nombres_columnas):
-                st.warning(f"Formato en '{ruta_archivo}': Se esperaban {len(nombres_columnas)} cols pero se encontraron {df.shape[1]}. Ajustando.")
                 df = df.reindex(columns=range(len(nombres_columnas)))
             
             df.columns = nombres_columnas
             
-            # --- INICIO DE LA CORRECCIÓN: LÓGICA DE LIMPIEZA NUMÉRICA MEJORADA ---
             numeric_cols_to_clean = ['valor_venta', 'valor_cobro', 'unidades_vendidas', 'costo_unitario']
-            
             for col in numeric_cols_to_clean:
                 if col in df.columns:
                     s = df[col].astype(str).str.strip()
-                    
-                    # 1. Identificar números en formato contable como (123.45)
                     is_in_parens = s.str.startswith('(') & s.str.endswith(')')
-                    
-                    # 2. Limpieza general: remover cualquier caracter que NO sea dígito, punto o guion.
                     s_cleaned = s.str.replace(r'[^\d\.\-]', '', regex=True)
-                    
-                    # 3. Convertir a tipo numérico. Los errores se convierten en NaN.
                     numeric_s = pd.to_numeric(s_cleaned, errors='coerce')
-                    
-                    # 4. Aplicar el signo negativo a los valores que estaban entre paréntesis.
-                    # Se usa .abs() para asegurar que el resultado sea negativo y evitar dobles negativos.
                     numeric_s.loc[is_in_parens] = -numeric_s.loc[is_in_parens].abs()
-                    
                     df[col] = numeric_s
-            # --- FIN DE LA CORRECCIÓN ---
 
             for col in ['anio', 'mes', 'marca_producto']:
                 if col in df.columns:
@@ -110,41 +92,39 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
             df.dropna(subset=['anio', 'mes'], inplace=True)
             df = df.astype({'anio': int, 'mes': int})
             
-            if 'codigo_vendedor' in df.columns:
-                df['codigo_vendedor'] = df['codigo_vendedor'].astype(str)
-            
-            if 'fecha_venta' in df.columns:
-                df['fecha_venta'] = pd.to_datetime(df['fecha_venta'], errors='coerce')
-            if 'fecha_cobro' in df.columns:
-                df['fecha_cobro'] = pd.to_datetime(df['fecha_cobro'], errors='coerce')
-            
-            if 'marca_producto' in df.columns:
-                df['nombre_marca'] = df['marca_producto'].map(DATA_CONFIG["mapeo_marcas"]).fillna('No Especificada')
+            if 'codigo_vendedor' in df.columns: df['codigo_vendedor'] = df['codigo_vendedor'].astype(str)
+            if 'fecha_venta' in df.columns: df['fecha_venta'] = pd.to_datetime(df['fecha_venta'], errors='coerce')
+            if 'fecha_cobro' in df.columns: df['fecha_cobro'] = pd.to_datetime(df['fecha_cobro'], errors='coerce')
+            if 'marca_producto' in df.columns: df['nombre_marca'] = df['marca_producto'].map(DATA_CONFIG["mapeo_marcas"]).fillna('No Especificada')
             
             cols_a_normalizar = ['super_categoria', 'categoria_producto', 'nombre_marca', 'nomvendedor', 'TipoDocumento']
             for col in cols_a_normalizar:
-                if col in df.columns:
-                    df[col] = df[col].apply(normalizar_texto)
-            
+                if col in df.columns: df[col] = df[col].apply(normalizar_texto)
+
+            # --- CAMBIO FUNDAMENTAL: CREACIÓN DE LA COLUMNA 'venta_neta' ---
+            if 'valor_venta' in df.columns and 'unidades_vendidas' in df.columns:
+                df['valor_venta'] = df['valor_venta'].fillna(0)
+                df['unidades_vendidas'] = df['unidades_vendidas'].fillna(0)
+                # Esta es la fórmula clave: valor absoluto del precio por las unidades.
+                # El signo de la transacción ahora depende solo del signo de las unidades.
+                df['venta_neta'] = df['valor_venta'].abs() * df['unidades_vendidas']
+            elif 'valor_venta' in df.columns:
+                 df['venta_neta'] = df['valor_venta'] # Fallback por si no hay unidades
+
             return df
             
     except Exception as e:
-        st.error(f"Error crítico al cargar '{ruta_archivo}': {e}. Por favor, verifique el archivo en Dropbox.")
+        st.error(f"Error crítico al cargar '{ruta_archivo}': {e}.")
         return pd.DataFrame(columns=nombres_columnas)
 
 def calcular_marquilla_optimizado(df_periodo):
-    if df_periodo.empty or 'nombre_articulo' not in df_periodo.columns or 'codigo_vendedor' not in df_periodo.columns or 'cliente_id' not in df_periodo.columns:
-        return pd.DataFrame(columns=['codigo_vendedor', 'nomvendedor', 'promedio_marquilla'])
-    
+    if df_periodo.empty: return pd.DataFrame(columns=['codigo_vendedor', 'nomvendedor', 'promedio_marquilla'])
     df_temp = df_periodo[['codigo_vendedor', 'nomvendedor', 'cliente_id', 'nombre_articulo']].copy()
     df_temp['nombre_articulo'] = df_temp['nombre_articulo'].astype(str)
-    
     for palabra in APP_CONFIG['marquillas_clave']:
         df_temp[palabra] = df_temp['nombre_articulo'].str.contains(palabra, case=False, na=False)
-    
     df_cliente_marcas = df_temp.groupby(['codigo_vendedor', 'nomvendedor', 'cliente_id'])[APP_CONFIG['marquillas_clave']].any()
     df_cliente_marcas['puntaje_marquilla'] = df_cliente_marcas[APP_CONFIG['marquillas_clave']].sum(axis=1)
-    
     df_final_marquilla = df_cliente_marcas.groupby(['codigo_vendedor', 'nomvendedor'])['puntaje_marquilla'].mean().reset_index()
     return df_final_marquilla.rename(columns={'puntaje_marquilla': 'promedio_marquilla'})
 
@@ -152,8 +132,9 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     df_ventas_kpi = df_ventas_periodo[~df_ventas_periodo['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
     
     if not df_ventas_kpi.empty:
+        # SE USA LA NUEVA COLUMNA 'venta_neta' PARA LA SUMA
         resumen_ventas = df_ventas_kpi.groupby(['codigo_vendedor', 'nomvendedor']).agg(
-            ventas_totales=('valor_venta', 'sum'), 
+            ventas_totales=('venta_neta', 'sum'), 
             impactos=('cliente_id', 'nunique')
         ).reset_index()
     else:
@@ -166,14 +147,14 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
 
     df_ventas_comp = df_ventas_kpi[df_ventas_kpi['super_categoria'] != APP_CONFIG['complementarios']['exclude_super_categoria']].copy()
     if not df_ventas_comp.empty:
-        resumen_complementarios = df_ventas_comp.groupby(['codigo_vendedor','nomvendedor']).agg(ventas_complementarios=('valor_venta', 'sum')).reset_index()
+        resumen_complementarios = df_ventas_comp.groupby(['codigo_vendedor','nomvendedor']).agg(ventas_complementarios=('venta_neta', 'sum')).reset_index()
     else:
         resumen_complementarios = pd.DataFrame(columns=['codigo_vendedor','nomvendedor', 'ventas_complementarios'])
 
     marca_sub_meta = APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo']
     df_ventas_sub_meta = df_ventas_kpi[df_ventas_kpi['nombre_marca'] == marca_sub_meta].copy()
     if not df_ventas_sub_meta.empty:
-        resumen_sub_meta = df_ventas_sub_meta.groupby(['codigo_vendedor','nomvendedor']).agg(ventas_sub_meta=('valor_venta', 'sum')).reset_index()
+        resumen_sub_meta = df_ventas_sub_meta.groupby(['codigo_vendedor','nomvendedor']).agg(ventas_sub_meta=('venta_neta', 'sum')).reset_index()
     else:
         resumen_sub_meta = pd.DataFrame(columns=['codigo_vendedor','nomvendedor', 'ventas_sub_meta'])
 
@@ -182,7 +163,7 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     grouping_keys = ['Serie', 'cliente_id', 'codigo_articulo', 'codigo_vendedor']
     
     if not df_albaranes_historicos_bruto.empty and all(col in df_albaranes_historicos_bruto.columns for col in grouping_keys):
-        df_neto_historico = df_albaranes_historicos_bruto.groupby(grouping_keys).agg(valor_neto=('valor_venta', 'sum')).reset_index()
+        df_neto_historico = df_albaranes_historicos_bruto.groupby(grouping_keys).agg(valor_neto=('venta_neta', 'sum')).reset_index()
         df_grupos_cancelados_global = df_neto_historico[df_neto_historico['valor_neto'] == 0]
     else:
         df_grupos_cancelados_global = pd.DataFrame(columns=grouping_keys)
@@ -190,8 +171,7 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     df_albaranes_bruto_periodo = df_ventas_periodo[df_ventas_periodo['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
     
     if not df_albaranes_bruto_periodo.empty and not df_grupos_cancelados_global.empty:
-        common_cols_for_merge = [col for col in grouping_keys if col in df_albaranes_bruto_periodo.columns and col in df_grupos_cancelados_global.columns]
-        
+        common_cols_for_merge = [col for col in grouping_keys if col in df_albaranes_bruto_periodo.columns]
         if common_cols_for_merge:
             df_albaranes_reales_pendientes = df_albaranes_bruto_periodo.merge(
                 df_grupos_cancelados_global[common_cols_for_merge], on=common_cols_for_merge, how='left', indicator=True
@@ -202,7 +182,7 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
         df_albaranes_reales_pendientes = df_albaranes_bruto_periodo.copy()
 
     if not df_albaranes_reales_pendientes.empty:
-        resumen_albaranes = df_albaranes_reales_pendientes[df_albaranes_reales_pendientes['valor_venta'] > 0].groupby(['codigo_vendedor', 'nomvendedor']).agg(albaranes_pendientes=('valor_venta', 'sum')).reset_index()
+        resumen_albaranes = df_albaranes_reales_pendientes[df_albaranes_reales_pendientes['venta_neta'] > 0].groupby(['codigo_vendedor', 'nomvendedor']).agg(albaranes_pendientes=('venta_neta', 'sum')).reset_index()
     else:
         resumen_albaranes = pd.DataFrame(columns=['codigo_vendedor', 'nomvendedor', 'albaranes_pendientes'])
 
@@ -232,7 +212,8 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
                 (df_ventas_historicas_kpi['mes'] == mes_sel) & 
                 (df_ventas_historicas_kpi['nomvendedor'].isin(lista_vendedores_norm))
             ]
-            ventas_anio_anterior = df_grupo_historico_kpi['valor_venta'].sum() if not df_grupo_historico_kpi.empty else 0
+            # USANDO 'venta_neta' PARA CÁLCULO HISTÓRICO
+            ventas_anio_anterior = df_grupo_historico_kpi['venta_neta'].sum() if not df_grupo_historico_kpi.empty else 0
             presupuesto_dinamico = ventas_anio_anterior * incremento_mostradores
             
             cols_a_sumar = ['ventas_totales', 'cobros_totales', 'impactos', 'presupuestocartera', 'ventas_complementarios', 'ventas_sub_meta', 'albaranes_pendientes']
@@ -243,8 +224,7 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
             
             registro = {'nomvendedor': normalizar_texto(grupo), 'codigo_vendedor': normalizar_texto(grupo), **suma_grupo, 'promedio_marquilla': promedio_marquilla_grupo}
             
-            if presupuesto_dinamico > 0:
-                registro['presupuesto'] = presupuesto_dinamico
+            if presupuesto_dinamico > 0: registro['presupuesto'] = presupuesto_dinamico
             registros_agrupados.append(registro)
             
     df_agrupado = pd.DataFrame(registros_agrupados)
@@ -260,7 +240,7 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     return df_final, df_albaranes_reales_pendientes
 
 # ==============================================================================
-# 3. LÓGICA DE LA INTERFAZ DE USUARIO (UI)
+# 3. LÓGICA DE LA INTERFAZ DE USUARIO (UI) - MODIFICADA
 # ==============================================================================
 def generar_comentario_asesor(avance_v, avance_c, marquilla_p, avance_comp, avance_sub_meta):
     comentarios = []
@@ -309,27 +289,23 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
 
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Análisis de Portafolio", "🏆 Ranking de Rendimiento", "⭐ Clientes Clave", "⚙️ Ventas por Categoría"])
     
+    # SE USA 'venta_neta' EN TODAS LAS GRÁFICAS Y TABLAS DE VENTAS
     with tab1:
         st.subheader("Análisis de Marcas y Categorías Estratégicas")
         col1, col2 = st.columns(2)
         with col1:
             st.markdown("##### Composición de Ventas por Marca")
-            if not df_ventas_enfocadas.empty and 'nombre_marca' in df_ventas_enfocadas.columns and 'valor_venta' in df_ventas_enfocadas.columns:
-                df_marcas = df_ventas_enfocadas.groupby('nombre_marca')['valor_venta'].sum().reset_index()
-                fig = px.treemap(df_marcas, path=[px.Constant("Todas las Marcas"), 'nombre_marca'], values='valor_venta')
-                fig.update_layout(margin=dict(t=25, l=25, r=25, b=25))
+            if not df_ventas_enfocadas.empty and 'nombre_marca' in df_ventas_enfocadas.columns:
+                df_marcas = df_ventas_enfocadas.groupby('nombre_marca')['venta_neta'].sum().reset_index()
+                fig = px.treemap(df_marcas, path=[px.Constant("Todas las Marcas"), 'nombre_marca'], values='venta_neta')
                 st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("No hay datos de marcas de productos para mostrar.")
         with col2:
             st.markdown("##### Ventas de Marquillas Clave")
-            if not df_ventas_enfocadas.empty and 'nombre_articulo' in df_ventas_enfocadas.columns and 'valor_venta' in df_ventas_enfocadas.columns:
-                ventas_marquillas = {p: df_ventas_enfocadas[df_ventas_enfocadas['nombre_articulo'].str.contains(p, case=False, na=False)]['valor_venta'].sum() for p in APP_CONFIG['marquillas_clave']}
+            if not df_ventas_enfocadas.empty and 'nombre_articulo' in df_ventas_enfocadas.columns:
+                ventas_marquillas = {p: df_ventas_enfocadas[df_ventas_enfocadas['nombre_articulo'].str.contains(p, case=False, na=False)]['venta_neta'].sum() for p in APP_CONFIG['marquillas_clave']}
                 df_ventas_marquillas = pd.DataFrame(list(ventas_marquillas.items()), columns=['Marquilla', 'Ventas']).sort_values('Ventas', ascending=False)
                 fig = px.pie(df_ventas_marquillas, names='Marquilla', values='Ventas', title="Distribución Venta Marquillas", hole=0.4)
                 st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("No hay datos de marquillas para mostrar.")
     
     with tab2:
         st.subheader("Ranking de Cumplimiento de Metas")
@@ -338,67 +314,53 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
             df_ranking_con_meta['avance_ventas'] = (df_ranking_con_meta['ventas_totales'] / df_ranking_con_meta['presupuesto']) * 100
             df_ranking_con_meta.sort_values('avance_ventas', ascending=True, inplace=True)
             fig = px.bar(df_ranking_con_meta, x='avance_ventas', y='nomvendedor', orientation='h', text='avance_ventas', title="Cumplimiento de Meta de Ventas (%)")
-            fig.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
-            fig.update_layout(xaxis_title="Cumplimiento (%)", yaxis_title=None)
             st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No hay datos de presupuesto para generar el ranking.")
     
     with tab3:
         st.subheader("Top 10 Clientes del Periodo")
-        if not df_ventas_enfocadas.empty and 'TipoDocumento' in df_ventas_enfocadas.columns and 'nombre_cliente' in df_ventas_enfocadas.columns and 'valor_venta' in df_ventas_enfocadas.columns:
+        if not df_ventas_enfocadas.empty:
             df_ventas_clientes_kpi = df_ventas_enfocadas[~df_ventas_enfocadas['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)]
-            top_clientes = df_ventas_clientes_kpi.groupby('nombre_cliente')['valor_venta'].sum().nlargest(10).reset_index()
-            st.dataframe(top_clientes, column_config={"nombre_cliente": "Cliente", "valor_venta": st.column_config.NumberColumn("Total Compra", format="$ %d")}, use_container_width=True, hide_index=True)
-        else:
-            st.info("No hay datos de clientes para este periodo.")
+            top_clientes = df_ventas_clientes_kpi.groupby('nombre_cliente')['venta_neta'].sum().nlargest(10).reset_index()
+            st.dataframe(top_clientes, column_config={"nombre_cliente": "Cliente", "venta_neta": st.column_config.NumberColumn("Total Compra", format="$ %d")}, use_container_width=True, hide_index=True)
     
     with tab4:
         st.subheader(f"Desempeño en Categorías Clave para: {enfoque_sel}")
         categorias_objetivo = sorted(list(set(APP_CONFIG['categorias_clave_venta'])))
         df_ventas_cat = df_ventas_enfocadas[df_ventas_enfocadas['categoria_producto'].isin(categorias_objetivo)]
         
-        if df_ventas_cat.empty:
-            st.info("No se encontraron ventas en las categorías clave para la selección actual.")
-        else:
+        if not df_ventas_cat.empty:
             col1, col2 = st.columns([0.5, 0.5])
             with col1:
                 st.markdown("##### Ventas por Categoría")
-                resumen_cat = df_ventas_cat.groupby('categoria_producto').agg(Ventas=('valor_venta', 'sum')).reset_index()
-                total_ventas_enfocadas = df_ventas_enfocadas['valor_venta'].sum()
-                if total_ventas_enfocadas > 0:
-                    resumen_cat['Participacion (%)'] = (resumen_cat['Ventas'] / total_ventas_enfocadas) * 100
-                else:
-                    resumen_cat['Participacion (%)'] = 0
-                resumen_cat = resumen_cat.sort_values('Ventas', ascending=False)
+                resumen_cat = df_ventas_cat.groupby('categoria_producto').agg(Ventas=('venta_neta', 'sum')).reset_index()
+                total_ventas_enfocadas = df_ventas_enfocadas['venta_neta'].sum()
+                resumen_cat['Participacion (%)'] = (resumen_cat['Ventas'] / total_ventas_enfocadas * 100) if total_ventas_enfocadas > 0 else 0
                 st.dataframe(resumen_cat, column_config={"categoria_producto": "Categoría", "Ventas": st.column_config.NumberColumn("Total Venta", format="$ %d"),"Participacion (%)": st.column_config.ProgressColumn("Part. sobre Venta Total", format="%.2f%%", min_value=0, max_value=resumen_cat['Participacion (%)'].max())}, use_container_width=True, hide_index=True)
             with col2:
                 st.markdown("##### Distribución de Ventas")
                 fig = px.pie(resumen_cat, names='categoria_producto', values='Ventas', title="Distribución entre Categorías Clave", hole=0.4)
-                fig.update_traces(textinfo='percent+label', textposition='inside')
                 st.plotly_chart(fig, use_container_width=True)
 
+# ==============================================================================
+# 4. LÓGICA DE EJECUCIÓN PRINCIPAL - SIN CAMBIOS
+# ==============================================================================
 def render_dashboard():
     st.sidebar.markdown("---")
     st.sidebar.header("Filtros de Periodo")
     df_ventas_historicas = st.session_state.df_ventas
     df_cobros_historicos = st.session_state.df_cobros
-    
     if 'anio' not in df_ventas_historicas.columns or df_ventas_historicas.empty:
-        st.error("No hay datos históricos de ventas para analizar. Por favor, asegúrese de que los archivos se cargan correctamente.")
+        st.error("No hay datos históricos de ventas para analizar.")
         return
 
     lista_anios = sorted(df_ventas_historicas['anio'].unique(), reverse=True)
     anio_reciente = int(df_ventas_historicas['anio'].max())
     mes_reciente = int(df_ventas_historicas[df_ventas_historicas['anio'] == anio_reciente]['mes'].max())
-    
     anio_sel = st.sidebar.selectbox("Elija el Año", lista_anios, index=0, key="sb_anio")
     lista_meses_num = sorted(df_ventas_historicas[df_ventas_historicas['anio'] == anio_sel]['mes'].unique())
-    
     if not lista_meses_num:
         st.warning(f"No hay datos de ventas para el año {anio_sel}.")
         return
-        
     index_mes_defecto = lista_meses_num.index(mes_reciente) if anio_sel == anio_reciente and mes_reciente in lista_meses_num else 0
     mes_sel_num = st.sidebar.selectbox("Elija el Mes", options=lista_meses_num, format_func=lambda x: DATA_CONFIG['mapeo_meses'].get(x, 'N/A'), index=index_mes_defecto, key="sb_mes")
 
@@ -464,8 +426,7 @@ def render_dashboard():
                 for comentario in comentarios: st.markdown(f"- {comentario}")
 
             st.subheader("Métricas Clave del Periodo")
-            
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3 = st.columns(3); col4, col5, col6 = st.columns(3)
             with col1:
                 st.metric("Ventas Reales (Facturadas)", f"${ventas_total:,.0f}", f"{ventas_total - meta_ventas:,.0f} vs Meta")
                 st.progress(min(avance_ventas / 100, 1.0), text=f"Avance Ventas: {avance_ventas:.1f}%")
@@ -475,8 +436,6 @@ def render_dashboard():
             with col3:
                 st.metric("Valor Albaranes Pendientes", f"${total_albaranes:,.0f}", "Mercancía por facturar")
                 st.progress(0, text="Gestión de remisiones")
-
-            col4, col5, col6 = st.columns(3)
             with col4:
                 st.metric("Venta Complementarios", f"${comp_total:,.0f}", f"{comp_total - meta_comp:,.0f} vs Meta")
                 st.progress(min(avance_comp / 100, 1.0), text=f"Avance: {avance_comp:.1f}%")
@@ -491,13 +450,13 @@ def render_dashboard():
             st.markdown("---")
             st.subheader("Desglose por Vendedor / Grupo")
             cols_desglose = ['Estatus', 'nomvendedor', 'ventas_totales', 'presupuesto', 'cobros_totales', 'presupuestocartera', 'albaranes_pendientes', 'impactos', 'promedio_marquilla']
-            st.dataframe(df_vista[cols_desglose], column_config={
+            st.dataframe(df_vista[cols_desglose], use_container_width=True, hide_index=True, column_config={
                 "Estatus": st.column_config.TextColumn("🚦", width="small"), "nomvendedor": "Vendedor/Grupo", 
                 "ventas_totales": st.column_config.NumberColumn("Ventas Reales", format="$ %d"), "presupuesto": st.column_config.NumberColumn("Meta Ventas", format="$ %d"),
                 "cobros_totales": st.column_config.NumberColumn("Recaudo", format="$ %d"),"presupuestocartera": st.column_config.NumberColumn("Meta Recaudo", format="$ %d"),
                 "albaranes_pendientes": st.column_config.NumberColumn("Valor Albaranes", format="$ %d"),"impactos": st.column_config.NumberColumn("Clientes Únicos", format="%d"),
                 "promedio_marquilla": st.column_config.ProgressColumn("Prom. Marquilla", format="%.2f", min_value=0, max_value=len(APP_CONFIG['marquillas_clave']))
-            }, use_container_width=True, hide_index=True)
+            })
 
             render_analisis_detallado(df_vista, df_ventas_periodo)
 
@@ -512,20 +471,15 @@ def render_dashboard():
                 nombres_a_filtrar_albaranes.extend([normalizar_texto(v) for v in lista_vendedores])
             
             df_albaranes_vista = df_albaranes_pendientes[df_albaranes_pendientes['nomvendedor'].isin(nombres_a_filtrar_albaranes)]
-            df_albaranes_a_mostrar = df_albaranes_vista[df_albaranes_vista['valor_venta'] > 0]
+            df_albaranes_a_mostrar = df_albaranes_vista[df_albaranes_vista['venta_neta'] > 0]
 
-            if df_albaranes_a_mostrar.empty:
-                st.info("No hay albaranes pendientes de facturación para la selección actual en este periodo.")
-            else:
-                st.dataframe(df_albaranes_a_mostrar[['Serie', 'fecha_venta', 'nombre_cliente', 'valor_venta', 'nomvendedor']], 
-                    column_config={
+            if not df_albaranes_a_mostrar.empty:
+                st.dataframe(df_albaranes_a_mostrar[['Serie', 'fecha_venta', 'nombre_cliente', 'venta_neta', 'nomvendedor']], 
+                    use_container_width=True, hide_index=True, column_config={
                         "Serie": "Documento", "fecha_venta": "Fecha", "nombre_cliente": "Cliente",
-                        "valor_venta": st.column_config.NumberColumn("Valor Pendiente", format="$ %d"), "nomvendedor": "Vendedor"
-                    }, use_container_width=True, hide_index=True)
+                        "venta_neta": st.column_config.NumberColumn("Valor Pendiente", format="$ %d"), "nomvendedor": "Vendedor"
+                    })
 
-# ==============================================================================
-# 4. LÓGICA DE AUTENTICACIÓN Y EJECUCIÓN PRINCIPAL
-# ==============================================================================
 def main():
     if 'df_ventas' not in st.session_state:
         with st.spinner('Cargando datos maestros, por favor espere...'):
@@ -537,9 +491,7 @@ def main():
     st.sidebar.image(APP_CONFIG["url_logo"], use_container_width=True)
     st.sidebar.header("Control de Acceso")
     
-    if 'autenticado' not in st.session_state:
-        st.session_state.autenticado = False
-
+    if 'autenticado' not in st.session_state: st.session_state.autenticado = False
     if not st.session_state.autenticado:
         df_para_usuarios = st.session_state.get('df_ventas', pd.DataFrame())
         
@@ -556,10 +508,8 @@ def main():
             return ["GERENTE"] + sorted(grupos_orig)
 
         todos_usuarios = obtener_lista_usuarios(df_para_usuarios)
-        
         usuarios_fijos_orig = {"GERENTE": "1234", "MOSTRADOR PEREIRA": "2345", "MOSTRADOR ARMENIA": "3456", "MOSTRADOR MANIZALES": "4567", "MOSTRADOR LAURELES": "5678"}
-        if "MOSTRADOR OPALO" not in usuarios_fijos_orig: 
-            usuarios_fijos_orig["MOSTRADOR OPALO"] = "opalo123"
+        if "MOSTRADOR OPALO" not in usuarios_fijos_orig: usuarios_fijos_orig["MOSTRADOR OPALO"] = "opalo123"
         
         usuarios = {normalizar_texto(k): v for k, v in usuarios_fijos_orig.items()}
         codigo = 1001
@@ -585,13 +535,10 @@ def main():
         st.image(APP_CONFIG["url_logo"], width=400)
         st.header("Bienvenido")
         st.info("Por favor, utilice el panel de la izquierda para ingresar sus credenciales de acceso.")
-
     else:
         render_dashboard()
         if st.sidebar.button("Salir", key="btn_logout"):
-            keys_to_clear = list(st.session_state.keys())
-            for key in keys_to_clear:
-                del st.session_state[key]
+            for key in list(st.session_state.keys()): del st.session_state[key]
             st.rerun()
 
 if __name__ == '__main__':
