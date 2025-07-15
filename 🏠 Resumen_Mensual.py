@@ -66,9 +66,6 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
             _, res = dbx.files_download(path=ruta_archivo)
             contenido_csv = res.content.decode('latin-1')
             
-            # --- NUEVO: Alerta sobre filas mal formadas (on_bad_lines='skip' es un riesgo) ---
-            # Se leerá el CSV. Si hay filas con un número incorrecto de columnas, 'skip' las ignorará.
-            # Aquí lo detectaremos comparando el número de columnas esperado.
             df = pd.read_csv(io.StringIO(contenido_csv), header=None, sep=',', on_bad_lines='skip', dtype=str)
 
             if df.empty or df.shape[1] == 0:
@@ -80,8 +77,6 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
             
             df.columns = nombres_columnas
             
-            initial_rows = len(df)
-            
             numeric_cols_to_clean = ['valor_venta', 'valor_cobro', 'unidades_vendidas', 'costo_unitario']
             for col in numeric_cols_to_clean:
                 if col in df.columns:
@@ -90,7 +85,6 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
                     s_cleaned = s.str.replace(r'[^\d\.\-]', '', regex=True)
                     numeric_s = pd.to_numeric(s_cleaned, errors='coerce')
                     
-                    # --- NUEVO: Alerta sobre valores no numéricos ---
                     null_count = numeric_s.isnull().sum()
                     if null_count > 0:
                         st.warning(f"⚠️ **Alerta de Limpieza en '{ruta_archivo}'**: {null_count} valores en la columna '{col}' no pudieron ser convertidos a número y serán tratados como cero.")
@@ -102,7 +96,6 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce')
 
-            # --- NUEVO: Alerta sobre filas con fechas nulas ---
             rows_before_dropna = len(df)
             df.dropna(subset=['anio', 'mes'], inplace=True)
             rows_after_dropna = len(df)
@@ -115,7 +108,6 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
             if 'fecha_venta' in df.columns: df['fecha_venta'] = pd.to_datetime(df['fecha_venta'], errors='coerce')
             if 'fecha_cobro' in df.columns: df['fecha_cobro'] = pd.to_datetime(df['fecha_cobro'], errors='coerce')
             
-            # --- INICIO: ASIGNACIÓN DE VENDEDOR POR DEFECTO ---
             if 'nomvendedor' in df.columns:
                 df['nomvendedor'].replace(r'^\s*$', np.nan, regex=True, inplace=True)
                 df['nomvendedor'].fillna('COMERCIAL FERREINOX', inplace=True)
@@ -123,7 +115,6 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
             if 'codigo_vendedor' in df.columns:
                 df['codigo_vendedor'].replace(r'^\s*$', np.nan, regex=True, inplace=True)
                 df['codigo_vendedor'].fillna('CF001', inplace=True)
-            # --- FIN: ASIGNACIÓN DE VENDEDOR POR DEFECTO ---
 
             if 'marca_producto' in df.columns: df['nombre_marca'] = df['marca_producto'].map(DATA_CONFIG["mapeo_marcas"]).fillna('No Especificada')
             
@@ -131,7 +122,6 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
             for col in cols_a_normalizar:
                 if col in df.columns: df[col] = df[col].apply(normalizar_texto)
 
-            # Corrección para asegurar que las Notas de Crédito siempre resten.
             if 'TipoDocumento' in df.columns and 'valor_venta' in df.columns:
                 credit_note_mask = df['TipoDocumento'] == 'NOTA CREDITO'
                 df.loc[credit_note_mask, 'valor_venta'] = -df.loc[credit_note_mask, 'valor_venta'].abs()
@@ -155,13 +145,12 @@ def calcular_marquilla_optimizado(df_periodo):
     return df_final_marquilla.rename(columns={'puntaje_marquilla': 'promedio_marquilla'})
 
 def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel):
-    # --- LÓGICA DE ALBARANES MODIFICADA ---
+    # --- LÓGICA DE ALBARANES ---
     # 1. Identificar globalmente los grupos de transacciones que ya se completaron (Albarán + Factura = 0)
     df_albaranes_historicos_bruto = df_ventas_historicas[df_ventas_historicas['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
     grouping_keys = ['Serie', 'cliente_id', 'codigo_articulo', 'codigo_vendedor']
     
     if not df_albaranes_historicos_bruto.empty and all(col in df_albaranes_historicos_bruto.columns for col in grouping_keys):
-        # Usamos el histórico completo para identificar los ciclos de vida cerrados
         df_neto_historico = df_ventas_historicas.groupby(grouping_keys).agg(valor_neto=('valor_venta', 'sum')).reset_index()
         df_grupos_completados_global = df_neto_historico[df_neto_historico['valor_neto'] == 0]
     else:
@@ -171,27 +160,23 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     df_albaranes_bruto_periodo = df_ventas_periodo[df_ventas_periodo['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
     
     if not df_albaranes_bruto_periodo.empty and not df_grupos_completados_global.empty:
-        # Un albarán del periodo actual está pendiente si NO pertenece a un grupo ya completado
         df_albaranes_pendientes_reales = df_albaranes_bruto_periodo.merge(
             df_grupos_completados_global[grouping_keys], on=grouping_keys, how='left', indicator=True
         ).query('_merge == "left_only"').drop(columns=['_merge'])
     else:
         df_albaranes_pendientes_reales = df_albaranes_bruto_periodo.copy()
 
-    # 3. El DataFrame para los KPIs (df_ventas_kpi) es TODO lo del periodo MENOS los albaranes pendientes identificados
+    # --- INICIO DE LA CORRECCIÓN ---
+    # 3. El DataFrame para los KPIs (df_ventas_kpi) es TODO lo del periodo MENOS los albaranes pendientes identificados.
+    #    Este método es más simple y robusto que el anterior.
     if not df_albaranes_pendientes_reales.empty:
-        # Hacemos un anti-join para excluir los albaranes pendientes
-        # Se necesita una clave única para el merge, así que usamos el índice
-        df_ventas_periodo_idx = df_ventas_periodo.reset_index()
-        df_albaranes_pendientes_idx = df_albaranes_pendientes_reales.reset_index()
-        df_ventas_kpi = df_ventas_periodo_idx.merge(
-            df_albaranes_pendientes_idx[['index']], on='index', how='left', indicator=True
-        ).query('_merge == "left_only"').drop(columns=['_merge', 'index']).set_index(df_ventas_periodo.index.names)
+        # Hacemos un "anti-join" usando el índice para excluir los albaranes pendientes
+        indices_a_excluir = df_albaranes_pendientes_reales.index
+        df_ventas_kpi = df_ventas_periodo.drop(index=indices_a_excluir, errors='ignore')
     else:
         df_ventas_kpi = df_ventas_periodo.copy()
+    # --- FIN DE LA CORRECCIÓN ---
     
-    # --- FIN DE LA LÓGICA MODIFICADA ---
-
     # Todos los cálculos de KPIs se basan ahora en df_ventas_kpi, que contiene solo ventas facturadas.
     if not df_ventas_kpi.empty:
         resumen_ventas = df_ventas_kpi.groupby(['codigo_vendedor', 'nomvendedor']).agg(
@@ -219,7 +204,6 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     else:
         resumen_sub_meta = pd.DataFrame(columns=['codigo_vendedor','nomvendedor', 'ventas_sub_meta'])
 
-    # El cálculo de marquilla debe usar todos los documentos del periodo para ver el comportamiento del vendedor
     resumen_marquilla = calcular_marquilla_optimizado(df_ventas_periodo)
 
     if not df_albaranes_pendientes_reales.empty:
@@ -240,7 +224,6 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     
     registros_agrupados = []
     incremento_mostradores = 1 + APP_CONFIG['presupuesto_mostradores']['incremento_anual_pct']
-    # Para el presupuesto dinámico, se usan las ventas facturadas (KPI) del año anterior
     df_ventas_historicas_kpi = df_ventas_historicas[~df_ventas_historicas['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
 
     for grupo, lista_vendedores in DATA_CONFIG['grupos_vendedores'].items():
@@ -335,7 +318,6 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
         col1, col2 = st.columns(2)
         with col1:
             st.markdown("##### Composición de Ventas por Marca")
-            # Se usa df_ventas_enfocadas que contiene todos los documentos del periodo para dar visión completa
             if not df_ventas_enfocadas.empty and 'nombre_marca' in df_ventas_enfocadas.columns and 'valor_venta' in df_ventas_enfocadas.columns:
                 df_marcas = df_ventas_enfocadas.groupby('nombre_marca')['valor_venta'].sum().reset_index()
                 fig = px.treemap(df_marcas, path=[px.Constant("Todas las Marcas"), 'nombre_marca'], values='valor_venta')
@@ -352,7 +334,6 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
         st.subheader("Ranking de Cumplimiento de Metas")
         df_ranking_con_meta = df_ranking[df_ranking['presupuesto'] > 0].copy()
         if not df_ranking_con_meta.empty:
-            # El avance se calcula sobre ventas_totales que ahora son las ventas netas facturadas
             df_ranking_con_meta['avance_ventas'] = (df_ranking_con_meta['ventas_totales'] / df_ranking_con_meta['presupuesto']) * 100
             df_ranking_con_meta.sort_values('avance_ventas', ascending=True, inplace=True)
             fig = px.bar(df_ranking_con_meta, x='avance_ventas', y='nomvendedor', orientation='h', text_auto='.2f', title="Cumplimiento de Meta de Ventas (%)")
@@ -361,7 +342,6 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
     with tab3:
         st.subheader("Top 10 Clientes del Periodo (por valor facturado)")
         if not df_ventas_enfocadas.empty and 'nombre_cliente' in df_ventas_enfocadas.columns and 'valor_venta' in df_ventas_enfocadas.columns:
-            # Filtramos solo documentos facturados (excluimos albaranes) para el top clientes
             df_ventas_clientes_kpi = df_ventas_enfocadas[~df_ventas_enfocadas['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)]
             top_clientes = df_ventas_clientes_kpi.groupby('nombre_cliente')['valor_venta'].sum().nlargest(10).reset_index()
             st.dataframe(top_clientes, column_config={"nombre_cliente": "Cliente", "valor_venta": st.column_config.NumberColumn("Total Compra", format="$ %d")}, use_container_width=True, hide_index=True)
@@ -462,7 +442,6 @@ def render_dashboard():
                 st.progress(min(avance_cobros / 100, 1.0), text=f"Avance Cartera: {avance_cobros:.1f}%")
             with col3:
                 st.metric("Valor Albaranes Pendientes", f"${total_albaranes:,.0f}", "Mercancía por facturar")
-                # Visualmente mostramos un indicador, no un progreso.
                 st.progress(0, text="Gestión de remisiones")
             with col4:
                 st.metric("Venta Complementarios", f"${comp_total:,.0f}", f"{comp_total - meta_comp:,.0f} vs Meta")
@@ -526,20 +505,8 @@ def main():
                 return ["GERENTE"] + sorted(grupos_orig) + vendedores_solos_orig
             return ["GERENTE"] + sorted(grupos_orig)
         todos_usuarios = obtener_lista_usuarios(df_para_usuarios)
-        
-        # --- FIX START ---
-        # The original dictionary was missing "MOSTRADOR OPALO", causing a potential KeyError.
-        # This corrected dictionary includes all defined groups, making the code more robust.
-        usuarios_fijos_orig = {
-            "GERENTE": "1234", 
-            "MOSTRADOR PEREIRA": "2345", 
-            "MOSTRADOR ARMENIA": "3456", 
-            "MOSTRADOR MANIZALES": "4567", 
-            "MOSTRADOR LAURELES": "5678",
-            "MOSTRADOR OPALO": "opalo123" # Added missing user
-        }
-        # --- FIX END ---
-        
+        usuarios_fijos_orig = {"GERENTE": "1234", "MOSTRADOR PEREIRA": "2345", "MOSTRADOR ARMENIA": "3456", "MOSTRADOR MANIZALES": "4567", "MOSTRADOR LAURELES": "5678"}
+        if "MOSTRADOR OPALO" not in usuarios_fijos_orig: usuarios_fijos_orig["MOSTRADOR OPALO"] = "opalo123"
         usuarios = {normalizar_texto(k): v for k, v in usuarios_fijos_orig.items()}
         codigo = 1001
         for u in todos_usuarios:
