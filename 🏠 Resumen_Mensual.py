@@ -1,9 +1,8 @@
 # ==============================================================================
 # SCRIPT COMPLETO Y DEFINITIVO PARA: 🏠 Resumen Mensual.py
-# VERSIÓN FINAL: 15 de Julio, 2025 (Ventas Brutas Solas)
+# VERSIÓN FINAL: 29 de Junio, 2025
 # DESCRIPCIÓN: Versión final con todas las correcciones de lógica de datos,
 #              errores de frontend y botón de actualización forzada.
-#              AJUSTE: La métrica "Ventas Reales" ahora solo considera facturas positivas.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -123,24 +122,31 @@ def calcular_marquilla_optimizado(df_periodo):
 def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel):
     ### PASO 1: SEPARACIÓN Y CÁLCULOS BÁSICOS ###
     
-    # Consideramos SÓLO las ventas positivas (TipoDocumento 'FACTURA_DIRECTA' normalizado)
-    # y también el TipoDocumento 'FACTURA' original si por alguna razón aún existe en datos antiguos.
+    # Ventas brutas: Solo facturas "positivas" de tu SQL (TipoDocumento 'FACTURA_DIRECTA' normalizado)
     df_ventas_brutas = df_ventas_periodo[
-        df_ventas_periodo['TipoDocumento'].str.contains(
-            f"{normalizar_texto('FACTURA_DIRECTA')}|{normalizar_texto('FACTURA')}",
-            na=False, case=False
-        ) & (df_ventas_periodo['valor_venta'] > 0) # Aseguramos que solo sumamos valores positivos
+        df_ventas_periodo['TipoDocumento'].str.contains(normalizar_texto('FACTURA_DIRECTA'), na=False, case=False)
+    ].copy()
+
+    # Notas crédito: Documentos negativos de tu SQL (TipoDocumento 'NOTA_CREDITO' normalizado)
+    df_notas_credito = df_ventas_periodo[
+        df_ventas_periodo['TipoDocumento'].str.contains(normalizar_texto('NOTA_CREDITO'), na=False, case=False)
     ].copy()
 
     # Calculamos la suma de las ventas brutas
-    resumen_ventas = df_ventas_brutas.groupby(['codigo_vendedor', 'nomvendedor']).agg(
-        ventas_totales=('valor_venta', 'sum'), # Renombrado a ventas_totales para usar en el resto del script
-        impactos=('cliente_id', 'nunique')
+    resumen_ventas_brutas = df_ventas_brutas.groupby(['codigo_vendedor', 'nomvendedor']).agg(
+        ventas_brutas=('valor_venta', 'sum'),
+        impactos=('cliente_id', 'nunique') # Los impactos se cuentan solo sobre ventas brutas para reflejar actividad real
     ).reset_index()
-    
-    # NOTA: Las "notas_credito" (series X e Y) no se están restando aquí de las ventas totales.
-    # Si quisieras incluirlas en el futuro como una resta, necesitarías la lógica anterior.
-    # Por ahora, solo se consideran ventas brutas de FACTURA_DIRECTA.
+
+    # Calculamos la suma de las notas crédito (que ya son valores negativos)
+    resumen_notas_credito = df_notas_credito.groupby(['codigo_vendedor', 'nomvendedor']).agg(
+        total_notas_credito=('valor_venta', 'sum')
+    ).reset_index()
+
+    # Unimos y calculamos las ventas totales (Netas)
+    resumen_ventas = pd.merge(resumen_ventas_brutas, resumen_notas_credito, on=['codigo_vendedor', 'nomvendedor'], how='left')
+    resumen_ventas['total_notas_credito'].fillna(0, inplace=True) # Aseguramos que los NaN sean 0
+    resumen_ventas['ventas_totales'] = resumen_ventas['ventas_brutas'] + resumen_ventas['total_notas_credito'] # Suma efectiva de un valor negativo
     
     # Para complementarios y sub-meta, se calculan sobre las ventas "positivas" (brutas)
     df_ventas_comp = df_ventas_brutas[df_ventas_brutas['super_categoria'] != APP_CONFIG['complementarios']['exclude_super_categoria']]
@@ -157,7 +163,6 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     resumen_cobros = df_cobros_periodo.groupby('codigo_vendedor').agg(cobros_totales=('valor_cobro', 'sum')).reset_index()
 
     ### PASO 2: LÓGICA DE NETEO GLOBAL para ALBARANES ###
-    # Aquí es crucial que el TipoDocumento de los albaranes históricos se mapee a lo que viene del SQL.
     # SQL outputs 'ALBARAN_PENDIENTE'
     df_albaranes_historicos_bruto = df_ventas_historicas[df_ventas_historicas['TipoDocumento'].str.contains(normalizar_texto('ALBARAN_PENDIENTE'), na=False, case=False)].copy()
     grouping_keys = ['Serie', 'cliente_id', 'codigo_articulo', 'codigo_vendedor']
@@ -201,16 +206,24 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
         df_grupo_actual = df_resumen[df_resumen['nomvendedor'].isin(lista_vendedores_norm)]
         if not df_grupo_actual.empty:
             anio_anterior = anio_sel - 1
-            # Para el presupuesto histórico, solo consideramos las ventas brutas (facturas positivas) del año anterior
-            df_grupo_historico_ventas_brutas = df_ventas_historicas[
-                (df_ventas_historicas['TipoDocumento'].str.contains(f"{normalizar_texto('FACTURA_DIRECTA')}|{normalizar_texto('FACTURA')}", na=False, case=False)) &
-                (df_ventas_historicas['valor_venta'] > 0) & # Solo ventas positivas
+            # Para el presupuesto histórico, ahora sumamos facturas positivas y restamos notas crédito del año anterior
+            df_hist_facturas_pos = df_ventas_historicas[
+                (df_ventas_historicas['TipoDocumento'].str.contains(normalizar_texto('FACTURA_DIRECTA'), na=False, case=False)) &
+                (df_ventas_historicas['anio'] == anio_anterior) & 
+                (df_ventas_historicas['mes'] == mes_sel) & 
+                (df_ventas_historicas['nomvendedor'].isin(lista_vendedores_norm))
+            ]
+            df_hist_notas_cred = df_ventas_historicas[
+                (df_ventas_historicas['TipoDocumento'].str.contains(normalizar_texto('NOTA_CREDITO'), na=False, case=False)) &
                 (df_ventas_historicas['anio'] == anio_anterior) & 
                 (df_ventas_historicas['mes'] == mes_sel) & 
                 (df_ventas_historicas['nomvendedor'].isin(lista_vendedores_norm))
             ]
             
-            ventas_anio_anterior = df_grupo_historico_ventas_brutas['valor_venta'].sum() if not df_grupo_historico_ventas_brutas.empty else 0
+            ventas_anio_anterior_brutas = df_hist_facturas_pos['valor_venta'].sum() if not df_hist_facturas_pos.empty else 0
+            notas_credito_anio_anterior = df_hist_notas_cred['valor_venta'].sum() if not df_hist_notas_cred.empty else 0 # Ya son negativas
+            
+            ventas_anio_anterior = ventas_anio_anterior_brutas + notas_credito_anio_anterior # Neto
             
             presupuesto_dinamico = ventas_anio_anterior * incremento_mostradores
             
@@ -283,10 +296,9 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
         col1, col2 = st.columns(2)
         with col1:
             st.markdown("##### Composición de Ventas por Marca")
-            # Para la composición de ventas por marca, usamos SÓLO las ventas brutas
+            # Para la composición de ventas por marca, usamos los tipos de documento que contribuyen a la venta neta.
             df_ventas_para_marcas = df_ventas_enfocadas[
-                df_ventas_enfocadas['TipoDocumento'].str.contains(f"{normalizar_texto('FACTURA_DIRECTA')}|{normalizar_texto('FACTURA')}", na=False, case=False) &
-                (df_ventas_enfocadas['valor_venta'] > 0)
+                df_ventas_enfocadas['TipoDocumento'].str.contains(f"{normalizar_texto('FACTURA_DIRECTA')}|{normalizar_texto('NOTA_CREDITO')}", na=False, case=False)
             ].copy()
             
             if not df_ventas_para_marcas.empty and 'nombre_marca' in df_ventas_para_marcas:
@@ -297,10 +309,9 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
             else: st.info("No hay datos de marcas de productos para mostrar.")
         with col2:
             st.markdown("##### Ventas de Marquillas Clave")
-            # Similar a las marcas, usar SÓLO las ventas brutas para las marquillas.
+            # Similar a las marcas, usar los tipos de documento relevantes para la venta neta.
             df_ventas_para_marquillas = df_ventas_enfocadas[
-                df_ventas_enfocadas['TipoDocumento'].str.contains(f"{normalizar_texto('FACTURA_DIRECTA')}|{normalizar_texto('FACTURA')}", na=False, case=False) &
-                (df_ventas_enfocadas['valor_venta'] > 0)
+                df_ventas_enfocadas['TipoDocumento'].str.contains(f"{normalizar_texto('FACTURA_DIRECTA')}|{normalizar_texto('NOTA_CREDITO')}", na=False, case=False)
             ].copy()
 
             if not df_ventas_para_marquillas.empty and 'nombre_articulo' in df_ventas_para_marquillas:
@@ -322,23 +333,21 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
         else: st.info("No hay datos de presupuesto para generar el ranking.")
     with tab3:
         st.subheader("Top 10 Clientes del Periodo")
-        # El filtro de Top Clientes ahora considera SÓLO las ventas brutas
-        df_facturas_enfocadas = df_ventas_enfocadas[
-            df_ventas_enfocadas['TipoDocumento'].str.contains(f"{normalizar_texto('FACTURA_DIRECTA')}|{normalizar_texto('FACTURA')}", na=False, case=False) &
-            (df_ventas_enfocadas['valor_venta'] > 0)
-        ]
+        # El filtro de Top Clientes ahora considera tanto FACTURA_DIRECTA como NOTA_CREDITO
+        # para mostrar el valor neto transaccionado con el cliente.
+        df_facturas_enfocadas = df_ventas_enfocadas[df_ventas_enfocadas['TipoDocumento'].str.contains(f"{normalizar_texto('FACTURA_DIRECTA')}|{normalizar_texto('NOTA_CREDITO')}", na=False, case=False)]
         
         if not df_facturas_enfocadas.empty:
             top_clientes = df_facturas_enfocadas.groupby('nombre_cliente')['valor_venta'].sum().nlargest(10).reset_index()
-            st.dataframe(top_clientes, column_config={"nombre_cliente": "Cliente", "valor_venta": st.column_config.NumberColumn("Total Compra (Bruta)", format="$ %d")}, use_container_width=True, hide_index=True)
+            st.dataframe(top_clientes, column_config={"nombre_cliente": "Cliente", "valor_venta": st.column_config.NumberColumn("Total Compra (Neta)", format="$ %d")}, use_container_width=True, hide_index=True)
         else: st.info("No hay datos de clientes para este periodo.")
     with tab4:
         st.subheader(f"Desempeño en Categorías Clave para: {enfoque_sel}")
         categorias_objetivo = sorted(list(set(APP_CONFIG['categorias_clave_venta'])))
-        # Aquí, para el desempeño en categorías, usamos SÓLO las ventas brutas (FACTURA_DIRECTA)
+        # Aquí, para el desempeño en categorías, usamos las ventas brutas (FACTURA_DIRECTA) para medir el empuje
+        # de ventas en esas categorías, sin que las notas crédito distorsionen el potencial.
         df_ventas_cat = df_ventas_enfocadas[
-            df_ventas_enfocadas['TipoDocumento'].str.contains(f"{normalizar_texto('FACTURA_DIRECTA')}|{normalizar_texto('FACTURA')}", na=False, case=False) &
-            (df_ventas_enfocadas['valor_venta'] > 0) & # Solo ventas positivas
+            df_ventas_enfocadas['TipoDocumento'].str.contains(normalizar_texto('FACTURA_DIRECTA'), na=False, case=False) &
             df_ventas_enfocadas['categoria_producto'].isin(categorias_objetivo)
         ]
         
@@ -349,9 +358,9 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
             with col1:
                 st.markdown("##### Ventas por Categoría")
                 resumen_cat = df_ventas_cat.groupby('categoria_producto').agg(Ventas=('valor_venta', 'sum')).reset_index()
-                # La participación se calcula sobre las ventas brutas totales de la vista
-                total_ventas_enfocadas_brutas = df_vista['ventas_totales'].sum() # df_vista['ventas_totales'] ahora es bruta
-                if total_ventas_enfocadas_brutas > 0: resumen_cat['Participacion (%)'] = (resumen_cat['Ventas'] / total_ventas_enfocadas_brutas) * 100
+                # La participación sobre la venta total (neta)
+                total_ventas_enfocadas_netas = df_vista['ventas_totales'].sum() # Usamos la métrica de ventas totales netas aquí
+                if total_ventas_enfocadas_netas > 0: resumen_cat['Participacion (%)'] = (resumen_cat['Ventas'] / total_ventas_enfocadas_netas) * 100
                 else: resumen_cat['Participacion (%)'] = 0
                 resumen_cat = resumen_cat.sort_values('Ventas', ascending=False)
                 st.dataframe(resumen_cat, column_config={"categoria_producto": "Categoría", "Ventas": st.column_config.NumberColumn("Total Venta", format="$ %d"),"Participacion (%)": st.column_config.ProgressColumn("Part. sobre Venta Total", format="%.2f%%", min_value=0, max_value=resumen_cat['Participacion (%)'].max())}, use_container_width=True, hide_index=True)
