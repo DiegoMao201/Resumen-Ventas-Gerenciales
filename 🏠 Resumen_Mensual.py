@@ -526,8 +526,20 @@ def main():
                 return ["GERENTE"] + sorted(grupos_orig) + vendedores_solos_orig
             return ["GERENTE"] + sorted(grupos_orig)
         todos_usuarios = obtener_lista_usuarios(df_para_usuarios)
-        usuarios_fijos_orig = {"GERENTE": "1234", "MOSTRADOR PEREIRA": "2345", "MOSTRADOR ARMENIA": "3456", "MOSTRADOR MANIZALES": "4567", "MOSTRADOR LAURELES": "5678"}
-        if "MOSTRADOR OPALO" not in usuarios_fijos_orig: usuarios_fijos_orig["MOSTRADOR OPALO"] = "opalo123"
+        
+        # --- FIX START ---
+        # The original dictionary was missing "MOSTRADOR OPALO", causing a potential KeyError.
+        # This corrected dictionary includes all defined groups, making the code more robust.
+        usuarios_fijos_orig = {
+            "GERENTE": "1234", 
+            "MOSTRADOR PEREIRA": "2345", 
+            "MOSTRADOR ARMENIA": "3456", 
+            "MOSTRADOR MANIZALES": "4567", 
+            "MOSTRADOR LAURELES": "5678",
+            "MOSTRADOR OPALO": "opalo123" # Added missing user
+        }
+        # --- FIX END ---
+        
         usuarios = {normalizar_texto(k): v for k, v in usuarios_fijos_orig.items()}
         codigo = 1001
         for u in todos_usuarios:
