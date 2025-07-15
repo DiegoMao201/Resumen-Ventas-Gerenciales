@@ -73,9 +73,12 @@ APP_CONFIG['categorias_clave_venta'] = [normalizar_texto(cat) for cat in APP_CON
 
 @st.cache_data(ttl=1800)
 def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
-    """Carga un archivo CSV desde Dropbox, lo decodifica, lo lee en un DataFrame de pandas
+    """
+    Carga un archivo CSV desde Dropbox, lo decodifica, lo lee en un DataFrame de pandas
     y realiza una limpieza inicial de datos.
-# Maneja el error "No columns to parse from file" verificando si el DataFrame está vacío inmediatamente después de la lectura."""
+    Maneja el error "No columns to parse from file" verificando si el DataFrame
+    está vacío inmediatamente después de la lectura.
+    """
     try:
         with dropbox.Dropbox(app_key=st.secrets.dropbox.app_key, app_secret=st.secrets.dropbox.app_secret, oauth2_refresh_token=st.secrets.dropbox.refresh_token) as dbx:
             _, res = dbx.files_download(path=ruta_archivo)
@@ -104,12 +107,25 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
             
             df.columns = nombres_columnas # Asigna los nombres de columna definidos
             
-            # Convierte columnas numéricas, usando errors='coerce' para convertir errores a NaN
-            numeric_cols = ['anio', 'mes', 'valor_venta', 'valor_cobro', 'unidades_vendidas', 'costo_unitario', 'marca_producto']
-            for col in numeric_cols:
+            # --- INICIO DE LA CORRECCIÓN PARA CARACTERES NO NUMÉRICOS EN VALORES ---
+            # Columnas que deben ser numéricas y pueden contener caracteres no deseados
+            numeric_cols_to_clean = ['valor_venta', 'valor_cobro', 'unidades_vendidas', 'costo_unitario']
+            
+            for col in numeric_cols_to_clean:
                 if col in df.columns:
+                    # Convierte a string para asegurar que .str.replace() funcione
+                    df[col] = df[col].astype(str) 
+                    # Elimina cualquier carácter que no sea dígito o punto (decimal) o signo menos
+                    df[col] = df[col].str.replace(r'[^\d\.\-]', '', regex=True)
+                    # Convierte a numérico, forzando errores a NaN
                     df[col] = pd.to_numeric(df[col], errors='coerce')
             
+            # Las columnas 'anio' y 'mes' deben ser numéricas y ya se manejan sin caracteres extra
+            for col in ['anio', 'mes', 'marca_producto']:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+            # --- FIN DE LA CORRECCIÓN ---
+
             # Elimina filas donde 'anio' o 'mes' son NaN (esenciales para el filtrado de tiempo)
             df.dropna(subset=['anio', 'mes'], inplace=True) 
             
