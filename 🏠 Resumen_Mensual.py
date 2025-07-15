@@ -5,10 +5,10 @@ import plotly.express as px
 import dropbox
 import io
 import unicodedata
-import time # Importamos la librería time para dar feedback visual al usuario
+import time
 
 # ==============================================================================
-# 1. CONFIGURACIÓN CENTRALIZADA (Con un nuevo parámetro para descuentos)
+# 1. CONFIGURACIÓN CENTRALIZADA (Con parámetro para descuentos)
 # ==============================================================================
 APP_CONFIG = {
     "page_title": "Resumen Mensual | Tablero de Ventas",
@@ -24,7 +24,8 @@ APP_CONFIG = {
     "sub_meta_complementarios": {"nombre_marca_objetivo": "non-AN Third Party", "presupuesto_pct": 0.10},
     "categorias_clave_venta": ['ABRACOL', 'YALE', 'SAINT GOBAIN', 'GOYA', 'ALLEGION', 'SEGUREX'],
     "presupuesto_mostradores": {"incremento_anual_pct": 0.10},
-    "discount_keywords": ["DESCUENTOS COMERCIAL", "DSCTO COMERCIAL", "DCTO COMERCIAL", "DESCUENTO COMERCIAL"] 
+    # Palabras clave para identificar descuentos comerciales por nombre de artículo
+    "discount_keywords": ["DESCUENTO COMERCIAL", "DSCTO COMERCIAL", "DCTO COMERCIAL"] 
 }
 DATA_CONFIG = {
     "presupuestos": {'154033':{'presupuesto':123873239, 'presupuestocartera':97569726}, '154044':{'presupuesto':80000000, 'presupuestocartera':300000000}, '154034':{'presupuesto':82753045, 'presupuestocartera':89446836}, '154014':{'presupuesto':268214737, 'presupuestocartera':324928043}, '154046':{'presupuesto':85469798, 'presupuestocartera':57798651}, '154012':{'presupuesto':246616193, 'presupuestocartera':293099708}, '154043':{'presupuesto':124885413, 'presupuestocartera':142269964}, '154035':{'presupuesto':80000000, 'presupuestocartera':300000000}, '154006':{'presupuesto':81250000, 'presupuestocartera':140820089}, '154049':{'presupuesto':56500000, 'presupuestocartera':56299929}, '154013':{'presupuesto':303422639, 'presupuestocartera':245098321}, '154011':{'presupuesto':447060250, 'presupuestocartera':465472631}, '154029':{'presupuesto':32500000, 'presupuestocartera':15128410}, '154040':{'presupuesto':0, 'presupuestocartera':0},'154053':{'presupuesto':0, 'presupuestocartera':0},'154048':{'presupuesto':0, 'presupuestocartera':0},'154042':{'presupuesto':0, 'presupuestocartera':0},'154031':{'presupuesto':0, 'presupuestocartera':0},'154039':{'presupuesto':0, 'presupuestocartera':0},'154051':{'presupuesto':0, 'presupuestocartera':0},'154008':{'presupuesto':0, 'presupuestocartera':0},'154052':{'presupuesto':0, 'presupuestocartera':0},'154050':{'presupuesto':0, 'presupuestocartera':0}},
@@ -62,14 +63,14 @@ def normalizar_texto(texto):
     if not isinstance(texto, str): return texto
     try:
         texto_sin_tildes = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
-        return texto_sin_tildes.upper().replace('-', ' ').strip().replace('  ', ' ') # Corregido doble espacio a uno simple
+        return texto_sin_tildes.upper().replace('-', ' ').strip().replace('  ', ' ')
     except (TypeError, AttributeError): return texto
 
 # Normaliza textos de la configuración una sola vez al inicio
 APP_CONFIG['complementarios']['exclude_super_categoria'] = normalizar_texto(APP_CONFIG['complementarios']['exclude_super_categoria'])
 APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo'] = normalizar_texto(APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo'])
 APP_CONFIG['categorias_clave_venta'] = [normalizar_texto(cat) for cat in APP_CONFIG['categorias_clave_venta']]
-# ✨ NUEVO: Normalizar las palabras clave de descuentos
+# Normalizar las palabras clave de descuentos
 APP_CONFIG['discount_keywords'] = [normalizar_texto(k) for k in APP_CONFIG['discount_keywords']]
 
 
@@ -114,14 +115,13 @@ def calcular_marquilla_optimizado(df_periodo):
 
 def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel):
     ### PASO 1: SEPARACIÓN DE MOVIMIENTOS Y CÁLCULOS BÁSICOS ###
-    # Filtra los documentos operativos (Facturas y Albaranes)
+    # Base de datos operativa: incluye FACTURAS y ALBARANES, con todos sus valores (positivos y negativos)
     df_ventas_operativas = df_ventas_periodo[
         df_ventas_periodo['TipoDocumento'].str.contains('FACTURA|ALBARAN', na=False, case=False)
     ].copy()
 
-    # ✨ NUEVO: Identificar las filas que son "DESCUENTOS COMERCIALES" por el nombre del artículo
-    # y que tienen un valor negativo.
-    # Usamos .any() para buscar cualquiera de las palabras clave de descuento en nombre_articulo
+    # Identificar las filas que son "DESCUENTOS COMERCIALES" por el nombre del artículo
+    # y que tienen un valor negativo. ESTO ES SOLO PARA MAPEARLOS, NO PARA EXCLUIRLOS DE LA SUMA PRINCIPAL.
     is_commercial_discount_item = df_ventas_operativas['nombre_articulo'].apply(
         lambda x: any(kw in x for kw in APP_CONFIG['discount_keywords']) if isinstance(x, str) else False
     )
@@ -131,38 +131,34 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     ].copy()
 
     # Calcular el total de estos descuentos comerciales identificados (en valor absoluto)
+    # Esta es la métrica de mapeo que necesitas.
     resumen_descuentos = df_descuentos_comerciales_identificados.groupby(['codigo_vendedor', 'nomvendedor']).agg(
         descuentos_comerciales_totales=('valor_venta', lambda x: x.abs().sum())
     ).reset_index()
 
-    # Crear el DataFrame para los cálculos de ventas "reales",
-    # excluyendo explícitamente solo los "DESCUENTOS COMERCIALES" por artículo.
-    # Otros movimientos negativos (devoluciones, anulaciones que NO son "descuentos comerciales")
-    # seguirán afectando las ventas totales, como parece ser el comportamiento deseado.
-    df_ventas_para_sumar = df_ventas_operativas[
-        ~df_ventas_operativas.index.isin(df_descuentos_comerciales_identificados.index)
-    ].copy()
-
-    # Cálculos basados en df_ventas_para_sumar (Ventas brutas - devoluciones/anulaciones normales)
-    resumen_ventas = df_ventas_para_sumar.groupby(['codigo_vendedor', 'nomvendedor']).agg(
+    # CÁLCULOS DE VENTAS PRINCIPALES: Se mantienen TAL CUAL, sumando todos los valores de valor_venta
+    # de las operaciones (FACTURA|ALBARAN), incluyendo los negativos (descuentos, devoluciones, anulaciones).
+    resumen_ventas = df_ventas_operativas.groupby(['codigo_vendedor', 'nomvendedor']).agg(
         ventas_totales=('valor_venta', 'sum'),
         impactos=('cliente_id', 'nunique')
     ).reset_index()
     
     resumen_cobros = df_cobros_periodo.groupby('codigo_vendedor').agg(cobros_totales=('valor_cobro', 'sum')).reset_index()
     
-    df_ventas_comp = df_ventas_para_sumar[df_ventas_para_sumar['super_categoria'] != APP_CONFIG['complementarios']['exclude_super_categoria']]
+    # Ventas Complementarios: También usa la base operativa completa
+    df_ventas_comp = df_ventas_operativas[df_ventas_operativas['super_categoria'] != APP_CONFIG['complementarios']['exclude_super_categoria']]
     resumen_complementarios = df_ventas_comp.groupby(['codigo_vendedor','nomvendedor']).agg(ventas_complementarios=('valor_venta', 'sum')).reset_index()
     
+    # Ventas Sub-Meta: También usa la base operativa completa
     marca_sub_meta = APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo']
-    df_ventas_sub_meta = df_ventas_para_sumar[df_ventas_para_sumar['nombre_marca'] == marca_sub_meta]
+    df_ventas_sub_meta = df_ventas_operativas[df_ventas_operativas['nombre_marca'] == marca_sub_meta]
     resumen_sub_meta = df_ventas_sub_meta.groupby(['codigo_vendedor','nomvendedor']).agg(ventas_sub_meta=('valor_venta', 'sum')).reset_index()
     
-    # Marquilla aún se calcula sobre todo el df_ventas_periodo para incluir todos los artículos vendidos
-    # para el cálculo del promedio por cliente, incluso si luego se descuentan.
+    # Marquilla: Se calcula sobre todo el df_ventas_periodo (original)
     resumen_marquilla = calcular_marquilla_optimizado(df_ventas_periodo)
 
     ### PASO 2: LÓGICA DE NETEO GLOBAL PARA ALBARANES HISTÓRICOS ###
+    # df_albaranes_historicos_bruto sigue incluyendo todos los valores (positivos y negativos)
     df_albaranes_historicos_bruto = df_ventas_historicas[df_ventas_historicas['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
     grouping_keys = ['Serie', 'cliente_id', 'codigo_articulo', 'codigo_vendedor']
     if not df_albaranes_historicos_bruto.empty:
@@ -182,13 +178,13 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
 
     ### PASO 4: CÁLCULOS FINALES Y ENSAMBLAJE ###
     if not df_albaranes_reales_pendientes.empty:
-        # Asegurarse de que solo sumamos albaranes con valor positivo para pendientes
+        # Albaranes pendientes solo considera valores positivos, como antes.
         resumen_albaranes = df_albaranes_reales_pendientes[df_albaranes_reales_pendientes['valor_venta'] > 0].groupby(['codigo_vendedor', 'nomvendedor']).agg(albaranes_pendientes=('valor_venta', 'sum')).reset_index()
     else:
         resumen_albaranes = pd.DataFrame(columns=['codigo_vendedor', 'nomvendedor', 'albaranes_pendientes'])
 
     df_resumen = pd.merge(resumen_ventas, resumen_cobros, on='codigo_vendedor', how='left')
-    df_resumen = pd.merge(df_resumen, resumen_descuentos, on=['codigo_vendedor', 'nomvendedor'], how='left') # ✨ NUEVO: Merge con el resumen de descuentos
+    df_resumen = pd.merge(df_resumen, resumen_descuentos, on=['codigo_vendedor', 'nomvendedor'], how='left') # Merge con el resumen de descuentos (para mostrarlo por separado)
     df_resumen = pd.merge(df_resumen, resumen_marquilla, on=['codigo_vendedor', 'nomvendedor'], how='left')
     df_resumen = pd.merge(df_resumen, resumen_complementarios, on=['codigo_vendedor', 'nomvendedor'], how='left')
     df_resumen = pd.merge(df_resumen, resumen_sub_meta, on=['codigo_vendedor', 'nomvendedor'], how='left')
@@ -207,31 +203,20 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
         if not df_grupo_actual.empty:
             anio_anterior = anio_sel - 1
             
-            # ✨ NUEVO: Al calcular el presupuesto histórico, también excluir los "descuentos comerciales" por artículo
-            df_ventas_historicas_operativas = df_ventas_historicas[
-                df_ventas_historicas['TipoDocumento'].str.contains('FACTURA|ALBARAN', na=False, case=False)
-            ].copy()
-            is_commercial_discount_item_hist = df_ventas_historicas_operativas['nombre_articulo'].apply(
-                lambda x: any(kw in x for kw in APP_CONFIG['discount_keywords']) if isinstance(x, str) else False
-            )
-            df_descuentos_comerciales_articulo_hist = df_ventas_historicas_operativas[
-                is_commercial_discount_item_hist & (df_ventas_historicas_operativas['valor_venta'] < 0)
-            ].copy()
-
-            df_ventas_hist_para_sumar_presupuesto = df_ventas_historicas_operativas[
-                ~df_ventas_historicas_operativas.index.isin(df_descuentos_comerciales_articulo_hist.index)
-            ].copy()
-
-            df_grupo_historico_facturas = df_ventas_hist_para_sumar_presupuesto[
-                (df_ventas_hist_para_sumar_presupuesto['anio'] == anio_anterior) & 
-                (df_ventas_hist_para_sumar_presupuesto['mes'] == mes_sel) & 
-                (df_ventas_hist_para_sumar_presupuesto['nomvendedor'].isin(lista_vendedores_norm))
+            # Presupuesto histórico: se calcula sobre la base operativa completa del año anterior,
+            # sin excluir los descuentos comerciales.
+            df_grupo_historico_facturas = df_ventas_historicas[
+                (df_ventas_historicas['TipoDocumento'].str.contains('FACTURA|ALBARAN', na=False, case=False)) & 
+                (df_ventas_historicas['anio'] == anio_anterior) & 
+                (df_ventas_historicas['mes'] == mes_sel) & 
+                (df_ventas_historicas['nomvendedor'].isin(lista_vendedores_norm))
             ]
             ventas_anio_anterior = df_grupo_historico_facturas['valor_venta'].sum() if not df_grupo_historico_facturas.empty else 0
             presupuesto_dinamico = ventas_anio_anterior * incremento_mostradores
             
-            # Incluye 'descuentos_comerciales_totales' en las columnas a sumar para grupos
-            cols_a_sumar = ['ventas_totales', 'cobros_totales', 'impactos', 'presupuestocartera', 'ventas_complementarios', 'ventas_sub_meta', 'albaranes_pendientes', 'descuentos_comerciales_totales']
+            # Incluye 'descuentos_comerciales_totales' en las columnas a sumar para grupos (solo para pasarlo al resumen final)
+            cols_a_sumar = ['ventas_totales', 'cobros_totales', 'impactos', 'presupuestocartera', 
+                            'ventas_complementarios', 'ventas_sub_meta', 'albaranes_pendientes', 'descuentos_comerciales_totales']
             suma_grupo = df_grupo_actual[cols_a_sumar].sum().to_dict()
             total_impactos = df_grupo_actual['impactos'].sum()
             promedio_marquilla_grupo = np.average(df_grupo_actual['promedio_marquilla'], weights=df_grupo_actual['impactos']) if total_impactos > 0 else 0.0
@@ -280,19 +265,9 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
     opciones_enfoque = ["Visión General"] + sorted(df_vista['nomvendedor'].unique())
     enfoque_sel = st.selectbox("Enfocar análisis en:", opciones_enfoque, index=0, key="sb_enfoque_analisis")
     
-    # Pre-filtrar las ventas operativas para el periodo
+    # DataFrame base para el análisis detallado: incluye todos los valores operativos
     df_ventas_operativas_periodo = df_ventas_periodo[
         df_ventas_periodo['TipoDocumento'].str.contains('FACTURA|ALBARAN', na=False, case=False)
-    ].copy()
-
-    # Identificar y excluir los "DESCUENTOS COMERCIALES" por artículo para el análisis detallado
-    is_commercial_discount_item_analysis = df_ventas_operativas_periodo['nombre_articulo'].apply(
-        lambda x: any(kw in x for kw in APP_CONFIG['discount_keywords']) if isinstance(x, str) else False
-    )
-    df_ventas_filtradas_para_analisis = df_ventas_operativas_periodo[
-        ~df_ventas_operativas_periodo.index.isin(
-            df_ventas_operativas_periodo[is_commercial_discount_item_analysis & (df_ventas_operativas_periodo['valor_venta'] < 0)].index
-        )
     ].copy()
 
     if enfoque_sel == "Visión General":
@@ -303,16 +278,16 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
             lista_vendedores = DATA_CONFIG['grupos_vendedores'].get(nombre_grupo_orig, [vendedor_norm])
             nombres_a_filtrar.extend([normalizar_texto(v) for v in lista_vendedores])
         
-        # Usar el DataFrame ya filtrado para el análisis
-        df_ventas_enfocadas = df_ventas_filtradas_para_analisis[df_ventas_filtradas_para_analisis['nomvendedor'].isin(nombres_a_filtrar)]
+        # Las ventas enfocadas para los gráficos usan la base operativa completa
+        df_ventas_enfocadas = df_ventas_operativas_periodo[df_ventas_operativas_periodo['nomvendedor'].isin(nombres_a_filtrar)].copy()
         df_ranking = df_vista
     else:
         enfoque_sel_norm = normalizar_texto(enfoque_sel)
         nombre_grupo_orig = next((k for k in DATA_CONFIG['grupos_vendedores'] if normalizar_texto(k) == enfoque_sel_norm), enfoque_sel_norm)
         nombres_a_filtrar = [normalizar_texto(n) for n in DATA_CONFIG['grupos_vendedores'].get(nombre_grupo_orig, [enfoque_sel_norm])]
         
-        # Usar el DataFrame ya filtrado para el análisis
-        df_ventas_enfocadas = df_ventas_filtradas_para_analisis[df_ventas_filtradas_para_analisis['nomvendedor'].isin(nombres_a_filtrar)]
+        # Las ventas enfocadas para los gráficos usan la base operativa completa
+        df_ventas_enfocadas = df_ventas_operativas_periodo[df_ventas_operativas_periodo['nomvendedor'].isin(nombres_a_filtrar)].copy()
         df_ranking = df_vista[df_vista['nomvendedor'] == enfoque_sel_norm]
         
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Análisis de Portafolio", "🏆 Ranking de Rendimiento", "⭐ Clientes Clave", "⚙️ Ventas por Categoría"])
@@ -330,8 +305,7 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
         with col2:
             st.markdown("##### Ventas de Marquillas Clave")
             if not df_ventas_enfocadas.empty and 'nombre_articulo' in df_ventas_enfocadas:
-                # La marquilla debe seguir considerando el nombre_articulo para el conteo de impacto,
-                # pero las ventas mostradas aquí deben ser consistentes con df_ventas_enfocadas
+                # Las ventas de marquillas aquí también usan la base operativa completa
                 ventas_marquillas = {p: df_ventas_enfocadas[df_ventas_enfocadas['nombre_articulo'].str.contains(p, case=False, na=False)]['valor_venta'].sum() for p in APP_CONFIG['marquillas_clave']}
                 df_ventas_marquillas = pd.DataFrame(list(ventas_marquillas.items()), columns=['Marquilla', 'Ventas']).sort_values('Ventas', ascending=False)
                 fig = px.pie(df_ventas_marquillas, names='Marquilla', values='Ventas', title="Distribución Venta Marquillas", hole=0.4)
@@ -351,7 +325,7 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
     with tab3:
         st.subheader("Top 10 Clientes del Periodo")
         if not df_ventas_enfocadas.empty:
-            # df_ventas_enfocadas ya está pre-filtrado y excluye descuentos comerciales específicos
+            # Top Clientes también usa la base operativa completa
             top_clientes = df_ventas_enfocadas.groupby('nombre_cliente')['valor_venta'].sum().nlargest(10).reset_index()
             st.dataframe(top_clientes, column_config={"nombre_cliente": "Cliente", "valor_venta": st.column_config.NumberColumn("Total Compra", format="$ %d")}, use_container_width=True, hide_index=True)
         else: st.info("No hay datos de clientes para este periodo.")
@@ -366,8 +340,8 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
             with col1:
                 st.markdown("##### Ventas por Categoría")
                 resumen_cat = df_ventas_cat.groupby('categoria_producto').agg(Ventas=('valor_venta', 'sum')).reset_index()
-                total_ventas_enfocadas_positivas = df_ventas_enfocadas['valor_venta'].sum()
-                if total_ventas_enfocadas_positivas > 0: resumen_cat['Participacion (%)'] = (resumen_cat['Ventas'] / total_ventas_enfocadas_positivas) * 100
+                total_ventas_enfocadas_actual = df_ventas_enfocadas['valor_venta'].sum()
+                if total_ventas_enfocadas_actual > 0: resumen_cat['Participacion (%)'] = (resumen_cat['Ventas'] / total_ventas_enfocadas_actual) * 100
                 else: resumen_cat['Participacion (%)'] = 0
                 resumen_cat = resumen_cat.sort_values('Ventas', ascending=False)
                 st.dataframe(resumen_cat, column_config={"categoria_producto": "Categoría", "Ventas": st.column_config.NumberColumn("Total Venta", format="$ %d"),"Participacion (%)": st.column_config.ProgressColumn("Part. sobre Venta Total", format="%.2f%%", min_value=0, max_value=resumen_cat['Participacion (%)'].max())}, use_container_width=True, hide_index=True)
@@ -450,7 +424,7 @@ def render_dashboard():
             comp_total = df_vista['ventas_complementarios'].sum(); meta_comp = df_vista['presupuesto_complementarios'].sum()
             sub_meta_total = df_vista['ventas_sub_meta'].sum(); meta_sub_meta = df_vista['presupuesto_sub_meta'].sum()
             total_albaranes = df_vista['albaranes_pendientes'].sum()
-            # ✨ NUEVO: Suma de los descuentos comerciales totales
+            # Suma de los descuentos comerciales totales para la métrica separada
             total_descuentos_comerciales = df_vista['descuentos_comerciales_totales'].sum()
             
             avance_ventas = (ventas_total / meta_ventas * 100) if meta_ventas > 0 else 0
@@ -469,7 +443,7 @@ def render_dashboard():
 
             st.subheader("Métricas Clave del Periodo")
             
-            # ✨ NUEVO: Añadida una cuarta columna para Descuentos Comerciales
+            # Añadida una cuarta columna para Descuentos Comerciales
             col1, col2, col3, col_descuentos = st.columns(4) 
             with col1:
                 st.metric("Ventas Reales (Facturadas)", f"${ventas_total:,.0f}", f"{ventas_total - meta_ventas:,.0f} vs Meta")
@@ -498,7 +472,7 @@ def render_dashboard():
 
             st.markdown("---")
             st.subheader("Desglose por Vendedor / Grupo")
-            # ✨ NUEVO: Añadir 'descuentos_comerciales_totales' a la lista de columnas a mostrar
+            # Añadir 'descuentos_comerciales_totales' a la lista de columnas a mostrar
             cols_desglose = ['Estatus', 'nomvendedor', 'ventas_totales', 'presupuesto', 'cobros_totales', 'presupuestocartera', 'descuentos_comerciales_totales', 'albaranes_pendientes', 'impactos', 'promedio_marquilla']
             st.dataframe(df_vista[cols_desglose], column_config={
                 "Estatus": st.column_config.TextColumn("🚦", width="small"), 
