@@ -1,10 +1,3 @@
-# ==============================================================================
-# SCRIPT COMPLETO Y DEFINITIVO PARA: 🏠 Resumen Mensual.py
-# VERSIÓN FINAL: 15 de Julio, 2025
-# DESCRIPCIÓN: Versión final con todas las correcciones de lógica de datos,
-#              errores de frontend y botón de actualización forzada.
-#              Solución para "No columns to parse from file" al cargar CSV.
-# ==============================================================================
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -69,7 +62,7 @@ def normalizar_texto(texto):
         return texto
     try:
         texto_sin_tildes = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
-        return texto_sin_tildes.upper().replace('-', ' ').strip().replace('  ', ' ')
+        return texto_sin_tildes.upper().replace('-', ' ').strip().replace('  ', ' ')
     except (TypeError, AttributeError):
         return texto
 
@@ -184,12 +177,13 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     calculando diversas métricas y consolidándolas por vendedor/grupo.
     """
     ### PASO 1: SEPARACIÓN Y CÁLCULOS BÁSICOS ###
-    # Filtra ventas reales (facturas)
-    df_ventas_reales = df_ventas_periodo[df_ventas_periodo['TipoDocumento'].str.contains('FACTURA', na=False, case=False)].copy()
+    # Define df_ventas_kpi para incluir FACTURAS y NOTAS CREDITO (que restan por tener valor_venta negativo).
+    # Excluimos ALBARANes ya que se manejan por separado para albaranes_pendientes.
+    df_ventas_kpi = df_ventas_periodo[~df_ventas_periodo['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
     
     # Resumen de ventas e impactos (clientes únicos)
-    if not df_ventas_reales.empty:
-        resumen_ventas = df_ventas_reales.groupby(['codigo_vendedor', 'nomvendedor']).agg(
+    if not df_ventas_kpi.empty:
+        resumen_ventas = df_ventas_kpi.groupby(['codigo_vendedor', 'nomvendedor']).agg(
             ventas_totales=('valor_venta', 'sum'), 
             impactos=('cliente_id', 'nunique')
         ).reset_index()
@@ -203,15 +197,17 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
         resumen_cobros = pd.DataFrame(columns=['codigo_vendedor', 'cobros_totales'])
 
     # Ventas de productos complementarios (excluyendo 'Pintuco')
-    df_ventas_comp = df_ventas_reales[df_ventas_reales['super_categoria'] != APP_CONFIG['complementarios']['exclude_super_categoria']].copy()
+    # Usamos df_ventas_kpi para que incluya el efecto de las notas de crédito
+    df_ventas_comp = df_ventas_kpi[df_ventas_kpi['super_categoria'] != APP_CONFIG['complementarios']['exclude_super_categoria']].copy()
     if not df_ventas_comp.empty:
         resumen_complementarios = df_ventas_comp.groupby(['codigo_vendedor','nomvendedor']).agg(ventas_complementarios=('valor_venta', 'sum')).reset_index()
     else:
         resumen_complementarios = pd.DataFrame(columns=['codigo_vendedor','nomvendedor', 'ventas_complementarios'])
 
     # Ventas de la marca de la sub-meta específica
+    # Usamos df_ventas_kpi para que incluya el efecto de las notas de crédito
     marca_sub_meta = APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo']
-    df_ventas_sub_meta = df_ventas_reales[df_ventas_reales['nombre_marca'] == marca_sub_meta].copy()
+    df_ventas_sub_meta = df_ventas_kpi[df_ventas_kpi['nombre_marca'] == marca_sub_meta].copy()
     if not df_ventas_sub_meta.empty:
         resumen_sub_meta = df_ventas_sub_meta.groupby(['codigo_vendedor','nomvendedor']).agg(ventas_sub_meta=('valor_venta', 'sum')).reset_index()
     else:
@@ -275,20 +271,23 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     
     registros_agrupados = []
     incremento_mostradores = 1 + APP_CONFIG['presupuesto_mostradores']['incremento_anual_pct']
+    
+    # Pre-calcula df_ventas_historicas_kpi para eficiencia
+    df_ventas_historicas_kpi = df_ventas_historicas[~df_ventas_historicas['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
+
     for grupo, lista_vendedores in DATA_CONFIG['grupos_vendedores'].items():
         lista_vendedores_norm = [normalizar_texto(v) for v in lista_vendedores]
         df_grupo_actual = df_resumen[df_resumen['nomvendedor'].isin(lista_vendedores_norm)]
         
         if not df_grupo_actual.empty:
             anio_anterior = anio_sel - 1
-            # Obtiene las ventas históricas de facturas para los vendedores del grupo en el mismo mes del año anterior
-            df_grupo_historico_facturas = df_ventas_historicas[
-                (df_ventas_historicas['TipoDocumento'].str.contains('FACTURA', na=False, case=False)) &
-                (df_ventas_historicas['anio'] == anio_anterior) & 
-                (df_ventas_historicas['mes'] == mes_sel) & 
-                (df_ventas_historicas['nomvendedor'].isin(lista_vendedores_norm))
+            # Obtiene las ventas históricas NETAS para los vendedores del grupo en el mismo mes del año anterior
+            df_grupo_historico_kpi = df_ventas_historicas_kpi[
+                (df_ventas_historicas_kpi['anio'] == anio_anterior) & 
+                (df_ventas_historicas_kpi['mes'] == mes_sel) & 
+                (df_ventas_historicas_kpi['nomvendedor'].isin(lista_vendedores_norm))
             ]
-            ventas_anio_anterior = df_grupo_historico_facturas['valor_venta'].sum() if not df_grupo_historico_facturas.empty else 0
+            ventas_anio_anterior = df_grupo_historico_kpi['valor_venta'].sum() if not df_grupo_historico_kpi.empty else 0
             presupuesto_dinamico = ventas_anio_anterior * incremento_mostradores
             
             # Suma las columnas relevantes para el grupo
@@ -429,9 +428,9 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
     with tab3:
         st.subheader("Top 10 Clientes del Periodo")
         if not df_ventas_enfocadas.empty and 'TipoDocumento' in df_ventas_enfocadas.columns and 'nombre_cliente' in df_ventas_enfocadas.columns and 'valor_venta' in df_ventas_enfocadas.columns:
-            # Filtra solo las facturas para el top de clientes
-            df_facturas_enfocadas = df_ventas_enfocadas[df_ventas_enfocadas['TipoDocumento'].str.contains('FACTURA', na=False, case=False)]
-            top_clientes = df_facturas_enfocadas.groupby('nombre_cliente')['valor_venta'].sum().nlargest(10).reset_index()
+            # Incluye facturas y notas de crédito para calcular el valor neto por cliente
+            df_ventas_clientes_kpi = df_ventas_enfocadas[~df_ventas_enfocadas['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)]
+            top_clientes = df_ventas_clientes_kpi.groupby('nombre_cliente')['valor_venta'].sum().nlargest(10).reset_index()
             st.dataframe(top_clientes, column_config={"nombre_cliente": "Cliente", "valor_venta": st.column_config.NumberColumn("Total Compra", format="$ %d")}, use_container_width=True, hide_index=True)
         else:
             st.info("No hay datos de clientes para este periodo.")
