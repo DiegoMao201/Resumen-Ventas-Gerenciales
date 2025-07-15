@@ -34,21 +34,13 @@ DATA_CONFIG = {
 
 st.set_page_config(page_title=APP_CONFIG["page_title"], page_icon="🏠", layout="wide", initial_sidebar_state="expanded")
 
-# Estilos CSS para el botón de actualización.
 st.markdown("""
 <style>
-    /* Estilo para el botón de actualización para hacerlo más grande y visible */
     div[data-testid="stButton"] > button[kind="primary"] {
-        height: 3em;
-        font-size: 1.2em;
-        font-weight: bold;
-        border: 2px solid #FF4B4B;
-        background-color: #FF4B4B;
-        color: white;
+        height: 3em; font-size: 1.2em; font-weight: bold; border: 2px solid #FF4B4B; background-color: #FF4B4B; color: white;
     }
     div[data-testid="stButton"] > button[kind="primary"]:hover {
-        border-color: #FF6B6B;
-        background-color: #FF6B6B;
+        border-color: #FF6B6B; background-color: #FF6B6B;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -62,11 +54,10 @@ def normalizar_texto(texto):
         return texto
     try:
         texto_sin_tildes = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
-        return texto_sin_tildes.upper().replace('-', ' ').strip().replace('  ', ' ') # Asegura que espacios dobles se conviertan en simples
+        return texto_sin_tildes.upper().replace('-', ' ').strip().replace('  ', ' ')
     except (TypeError, AttributeError):
         return texto
 
-# Normaliza textos de la configuración una sola vez al inicio
 APP_CONFIG['complementarios']['exclude_super_categoria'] = normalizar_texto(APP_CONFIG['complementarios']['exclude_super_categoria'])
 APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo'] = normalizar_texto(APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo'])
 APP_CONFIG['categorias_clave_venta'] = [normalizar_texto(cat) for cat in APP_CONFIG['categorias_clave_venta']]
@@ -77,33 +68,46 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
         with dropbox.Dropbox(app_key=st.secrets.dropbox.app_key, app_secret=st.secrets.dropbox.app_secret, oauth2_refresh_token=st.secrets.dropbox.refresh_token) as dbx:
             _, res = dbx.files_download(path=ruta_archivo)
             contenido_csv = res.content.decode('latin-1')
-            
             df = pd.read_csv(io.StringIO(contenido_csv), header=None, sep=',', on_bad_lines='skip', dtype=str)
 
             if df.empty or df.shape[1] == 0:
-                st.warning(f"El archivo '{ruta_archivo}' parece estar vacío o malformado (sin columnas). Se cargará un DataFrame vacío para este archivo.")
+                st.warning(f"El archivo '{ruta_archivo}' parece estar vacío. Se cargará un DataFrame vacío.")
                 return pd.DataFrame(columns=nombres_columnas)
 
             if df.shape[1] != len(nombres_columnas):
-                st.warning(f"Formato en '{ruta_archivo}': Se esperaban {len(nombres_columnas)} columnas pero se encontraron {df.shape[1]}. Ajustando columnas.")
+                st.warning(f"Formato en '{ruta_archivo}': Se esperaban {len(nombres_columnas)} cols pero se encontraron {df.shape[1]}. Ajustando.")
                 df = df.reindex(columns=range(len(nombres_columnas)))
             
             df.columns = nombres_columnas
             
+            # --- INICIO DE LA CORRECCIÓN: LÓGICA DE LIMPIEZA NUMÉRICA MEJORADA ---
             numeric_cols_to_clean = ['valor_venta', 'valor_cobro', 'unidades_vendidas', 'costo_unitario']
             
             for col in numeric_cols_to_clean:
                 if col in df.columns:
-                    df[col] = df[col].astype(str)
-                    df[col] = df[col].str.replace(r'[^\d\.\-]', '', regex=True)
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
+                    s = df[col].astype(str).str.strip()
+                    
+                    # 1. Identificar números en formato contable como (123.45)
+                    is_in_parens = s.str.startswith('(') & s.str.endswith(')')
+                    
+                    # 2. Limpieza general: remover cualquier caracter que NO sea dígito, punto o guion.
+                    s_cleaned = s.str.replace(r'[^\d\.\-]', '', regex=True)
+                    
+                    # 3. Convertir a tipo numérico. Los errores se convierten en NaN.
+                    numeric_s = pd.to_numeric(s_cleaned, errors='coerce')
+                    
+                    # 4. Aplicar el signo negativo a los valores que estaban entre paréntesis.
+                    # Se usa .abs() para asegurar que el resultado sea negativo y evitar dobles negativos.
+                    numeric_s.loc[is_in_parens] = -numeric_s.loc[is_in_parens].abs()
+                    
+                    df[col] = numeric_s
+            # --- FIN DE LA CORRECCIÓN ---
 
             for col in ['anio', 'mes', 'marca_producto']:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce')
 
             df.dropna(subset=['anio', 'mes'], inplace=True)
-            
             df = df.astype({'anio': int, 'mes': int})
             
             if 'codigo_vendedor' in df.columns:
@@ -122,25 +126,6 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
                 if col in df.columns:
                     df[col] = df[col].apply(normalizar_texto)
             
-            # ==================================================================
-            # INICIO DE LA CORRECCIÓN PARA NOTAS DE CRÉDITO
-            # ==================================================================
-            # Esta lógica garantiza que las 'NOTA CREDIT' siempre resten valor,
-            # sin importar cómo se haya ingresado el dato en el archivo original.
-            if 'TipoDocumento' in df.columns and 'valor_venta' in df.columns:
-                # Se crea una máscara para identificar las filas de notas de crédito.
-                # La columna 'TipoDocumento' ya ha sido normalizada por el código anterior.
-                credit_note_mask = df['TipoDocumento'] == 'NOTA CREDIT'
-                
-                # Para estas filas, se toma el valor absoluto de 'valor_venta' y se 
-                # convierte en negativo. Esto soluciona dos problemas:
-                # 1. Notas de crédito que fueron ingresadas como un número positivo.
-                # 2. Evita un doble negativo si el valor ya era negativo.
-                df.loc[credit_note_mask, 'valor_venta'] = -df.loc[credit_note_mask, 'valor_venta'].abs()
-            # ==================================================================
-            # FIN DE LA CORRECCIÓN
-            # ==================================================================
-            
             return df
             
     except Exception as e:
@@ -148,41 +133,24 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
         return pd.DataFrame(columns=nombres_columnas)
 
 def calcular_marquilla_optimizado(df_periodo):
-    """
-    Calcula el promedio de "marquilla" (número de marcas clave vendidas por cliente)
-    para cada vendedor en un período dado.
-    """
     if df_periodo.empty or 'nombre_articulo' not in df_periodo.columns or 'codigo_vendedor' not in df_periodo.columns or 'cliente_id' not in df_periodo.columns:
         return pd.DataFrame(columns=['codigo_vendedor', 'nomvendedor', 'promedio_marquilla'])
     
-    # Crea una copia para evitar SettingWithCopyWarning
     df_temp = df_periodo[['codigo_vendedor', 'nomvendedor', 'cliente_id', 'nombre_articulo']].copy()
     df_temp['nombre_articulo'] = df_temp['nombre_articulo'].astype(str)
     
-    # Crea columnas booleanas para cada palabra clave de marquilla
     for palabra in APP_CONFIG['marquillas_clave']:
         df_temp[palabra] = df_temp['nombre_articulo'].str.contains(palabra, case=False, na=False)
     
-    # Agrupa por vendedor y cliente para contar cuántas marquillas clave compró cada cliente
     df_cliente_marcas = df_temp.groupby(['codigo_vendedor', 'nomvendedor', 'cliente_id'])[APP_CONFIG['marquillas_clave']].any()
     df_cliente_marcas['puntaje_marquilla'] = df_cliente_marcas[APP_CONFIG['marquillas_clave']].sum(axis=1)
     
-    # Calcula el promedio de marquilla por vendedor, ponderado por el número de impactos
     df_final_marquilla = df_cliente_marcas.groupby(['codigo_vendedor', 'nomvendedor'])['puntaje_marquilla'].mean().reset_index()
-    
     return df_final_marquilla.rename(columns={'puntaje_marquilla': 'promedio_marquilla'})
 
 def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel):
-    """
-    Procesa los DataFrames de ventas y cobros para un período específico,
-    calculando diversas métricas y consolidándolas por vendedor/grupo.
-    """
-    ### PASO 1: SEPARACIÓN Y CÁLCULOS BÁSICOS ###
-    # Define df_ventas_kpi para incluir FACTURAS y NOTAS CREDITO (que restan por tener valor_venta negativo).
-    # Excluimos ALBARANes ya que se manejan por separado para albaranes_pendientes.
     df_ventas_kpi = df_ventas_periodo[~df_ventas_periodo['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
     
-    # Resumen de ventas e impactos (clientes únicos)
     if not df_ventas_kpi.empty:
         resumen_ventas = df_ventas_kpi.groupby(['codigo_vendedor', 'nomvendedor']).agg(
             ventas_totales=('valor_venta', 'sum'), 
@@ -191,22 +159,17 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     else:
         resumen_ventas = pd.DataFrame(columns=['codigo_vendedor', 'nomvendedor', 'ventas_totales', 'impactos'])
 
-    # Resumen de cobros
     if not df_cobros_periodo.empty and 'valor_cobro' in df_cobros_periodo.columns:
         resumen_cobros = df_cobros_periodo.groupby('codigo_vendedor').agg(cobros_totales=('valor_cobro', 'sum')).reset_index()
     else:
         resumen_cobros = pd.DataFrame(columns=['codigo_vendedor', 'cobros_totales'])
 
-    # Ventas de productos complementarios (excluyendo 'Pintuco')
-    # Usamos df_ventas_kpi para que incluya el efecto de las notas de crédito
     df_ventas_comp = df_ventas_kpi[df_ventas_kpi['super_categoria'] != APP_CONFIG['complementarios']['exclude_super_categoria']].copy()
     if not df_ventas_comp.empty:
         resumen_complementarios = df_ventas_comp.groupby(['codigo_vendedor','nomvendedor']).agg(ventas_complementarios=('valor_venta', 'sum')).reset_index()
     else:
         resumen_complementarios = pd.DataFrame(columns=['codigo_vendedor','nomvendedor', 'ventas_complementarios'])
 
-    # Ventas de la marca de la sub-meta específica
-    # Usamos df_ventas_kpi para que incluya el efecto de las notas de crédito
     marca_sub_meta = APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo']
     df_ventas_sub_meta = df_ventas_kpi[df_ventas_kpi['nombre_marca'] == marca_sub_meta].copy()
     if not df_ventas_sub_meta.empty:
@@ -214,67 +177,48 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     else:
         resumen_sub_meta = pd.DataFrame(columns=['codigo_vendedor','nomvendedor', 'ventas_sub_meta'])
 
-    # Calcula la marquilla
     resumen_marquilla = calcular_marquilla_optimizado(df_ventas_periodo)
-
-    ### PASO 2: LÓGICA DE NETEO GLOBAL PARA ALBARANES CANCELADOS/FACTURADOS ###
-    # Filtra albaranes históricos para identificar los que han sido neteados a cero (cancelados/facturados)
     df_albaranes_historicos_bruto = df_ventas_historicas[df_ventas_historicas['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
     grouping_keys = ['Serie', 'cliente_id', 'codigo_articulo', 'codigo_vendedor']
     
-    # Asegúrate de que todas las `grouping_keys` existan en el DataFrame histórico antes de agrupar
     if not df_albaranes_historicos_bruto.empty and all(col in df_albaranes_historicos_bruto.columns for col in grouping_keys):
-        # Asegúrate de que valor_venta esté correctamente numérico ANTES de esta suma
         df_neto_historico = df_albaranes_historicos_bruto.groupby(grouping_keys).agg(valor_neto=('valor_venta', 'sum')).reset_index()
         df_grupos_cancelados_global = df_neto_historico[df_neto_historico['valor_neto'] == 0]
     else:
-        df_grupos_cancelados_global = pd.DataFrame(columns=grouping_keys) # DataFrame vacío si no hay albaranes históricos o columnas clave
+        df_grupos_cancelados_global = pd.DataFrame(columns=grouping_keys)
 
-    ### PASO 3: LIMPIEZA DE ALBARANES DEL PERIODO ACTUAL ###
-    # Filtra albaranes brutos del período actual
     df_albaranes_bruto_periodo = df_ventas_periodo[df_ventas_periodo['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
     
     if not df_albaranes_bruto_periodo.empty and not df_grupos_cancelados_global.empty:
-        # Identifica las columnas comunes para la fusión
         common_cols_for_merge = [col for col in grouping_keys if col in df_albaranes_bruto_periodo.columns and col in df_grupos_cancelados_global.columns]
         
         if common_cols_for_merge:
-            # Realiza la fusión para excluir albaranes ya neteados/cancelados
             df_albaranes_reales_pendientes = df_albaranes_bruto_periodo.merge(
-                df_grupos_cancelados_global[common_cols_for_merge], # Solo las columnas clave del DF de cancelados
-                on=common_cols_for_merge,
-                how='left',
-                indicator=True
+                df_grupos_cancelados_global[common_cols_for_merge], on=common_cols_for_merge, how='left', indicator=True
             ).query('_merge == "left_only"').drop(columns=['_merge'])
         else:
-            # Si no hay columnas comunes para la fusión, se asume que no hay neteo y todos son pendientes.
             df_albaranes_reales_pendientes = df_albaranes_bruto_periodo.copy()
     else:
         df_albaranes_reales_pendientes = df_albaranes_bruto_periodo.copy()
 
-    ### PASO 4: CÁLCULOS FINALES Y ENSAMBLAJE ###
     if not df_albaranes_reales_pendientes.empty:
         resumen_albaranes = df_albaranes_reales_pendientes[df_albaranes_reales_pendientes['valor_venta'] > 0].groupby(['codigo_vendedor', 'nomvendedor']).agg(albaranes_pendientes=('valor_venta', 'sum')).reset_index()
     else:
         resumen_albaranes = pd.DataFrame(columns=['codigo_vendedor', 'nomvendedor', 'albaranes_pendientes'])
 
-    # Fusiona todos los resúmenes en un DataFrame final
     df_resumen = pd.merge(resumen_ventas, resumen_cobros, on='codigo_vendedor', how='left')
     df_resumen = pd.merge(df_resumen, resumen_marquilla, on=['codigo_vendedor', 'nomvendedor'], how='left')
     df_resumen = pd.merge(df_resumen, resumen_complementarios, on=['codigo_vendedor', 'nomvendedor'], how='left')
     df_resumen = pd.merge(df_resumen, resumen_sub_meta, on=['codigo_vendedor', 'nomvendedor'], how='left')
     df_resumen = pd.merge(df_resumen, resumen_albaranes, on=['codigo_vendedor', 'nomvendedor'], how='left')
 
-    # Asigna presupuestos fijos y dinámicos (para mostradores)
     presupuestos_fijos = DATA_CONFIG['presupuestos']
     df_resumen['presupuesto'] = df_resumen['codigo_vendedor'].map(lambda x: presupuestos_fijos.get(str(x), {}).get('presupuesto', 0))
     df_resumen['presupuestocartera'] = df_resumen['codigo_vendedor'].map(lambda x: presupuestos_fijos.get(str(x), {}).get('presupuestocartera', 0))
-    df_resumen.fillna(0, inplace=True) # Rellena cualquier NaN restante con 0
+    df_resumen.fillna(0, inplace=True)
     
     registros_agrupados = []
     incremento_mostradores = 1 + APP_CONFIG['presupuesto_mostradores']['incremento_anual_pct']
-    
-    # Pre-calcula df_ventas_historicas_kpi para eficiencia
     df_ventas_historicas_kpi = df_ventas_historicas[~df_ventas_historicas['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
 
     for grupo, lista_vendedores in DATA_CONFIG['grupos_vendedores'].items():
@@ -283,7 +227,6 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
         
         if not df_grupo_actual.empty:
             anio_anterior = anio_sel - 1
-            # Obtiene las ventas históricas NETAS para los vendedores del grupo en el mismo mes del año anterior
             df_grupo_historico_kpi = df_ventas_historicas_kpi[
                 (df_ventas_historicas_kpi['anio'] == anio_anterior) & 
                 (df_ventas_historicas_kpi['mes'] == mes_sel) & 
@@ -292,34 +235,25 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
             ventas_anio_anterior = df_grupo_historico_kpi['valor_venta'].sum() if not df_grupo_historico_kpi.empty else 0
             presupuesto_dinamico = ventas_anio_anterior * incremento_mostradores
             
-            # Suma las columnas relevantes para el grupo
             cols_a_sumar = ['ventas_totales', 'cobros_totales', 'impactos', 'presupuestocartera', 'ventas_complementarios', 'ventas_sub_meta', 'albaranes_pendientes']
             suma_grupo = df_grupo_actual[cols_a_sumar].sum().to_dict()
             
-            # Calcula el promedio de marquilla ponderado por impactos para el grupo
             total_impactos = df_grupo_actual['impactos'].sum()
             promedio_marquilla_grupo = np.average(df_grupo_actual['promedio_marquilla'], weights=df_grupo_actual['impactos']) if total_impactos > 0 else 0.0
             
-            # Crea el registro para el grupo
             registro = {'nomvendedor': normalizar_texto(grupo), 'codigo_vendedor': normalizar_texto(grupo), **suma_grupo, 'promedio_marquilla': promedio_marquilla_grupo}
             
-            # Asigna el presupuesto dinámico si es aplicable
             if presupuesto_dinamico > 0:
                 registro['presupuesto'] = presupuesto_dinamico
-
             registros_agrupados.append(registro)
             
     df_agrupado = pd.DataFrame(registros_agrupados)
-    
-    # Identifica vendedores que no pertenecen a ningún grupo predefinido
     vendedores_en_grupos = [v for lista in DATA_CONFIG['grupos_vendedores'].values() for v in [normalizar_texto(i) for i in lista]]
     df_individuales = df_resumen[~df_resumen['nomvendedor'].isin(vendedores_en_grupos)]
     
-    # Concatena los datos agrupados y los individuales
     df_final = pd.concat([df_agrupado, df_individuales], ignore_index=True)
-    df_final.fillna(0, inplace=True) # Asegura que todos los NaN numéricos sean 0
+    df_final.fillna(0, inplace=True)
     
-    # Calcula los presupuestos de complementarios y sub-meta basados en el presupuesto total
     df_final['presupuesto_complementarios'] = df_final['presupuesto'] * APP_CONFIG['complementarios']['presupuesto_pct']
     df_final['presupuesto_sub_meta'] = df_final['presupuesto_complementarios'] * APP_CONFIG['sub_meta_complementarios']['presupuesto_pct']
     
@@ -329,9 +263,6 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
 # 3. LÓGICA DE LA INTERFAZ DE USUARIO (UI)
 # ==============================================================================
 def generar_comentario_asesor(avance_v, avance_c, marquilla_p, avance_comp, avance_sub_meta):
-    """
-    Genera una lista de comentarios personalizados para el asesor basado en sus métricas de rendimiento.
-    """
     comentarios = []
     if avance_v >= 100: comentarios.append("📈 **Ventas:** ¡Felicitaciones! Has superado la meta de ventas.")
     elif avance_v >= 80: comentarios.append("📈 **Ventas:** ¡Estás muy cerca de la meta! Un último esfuerzo.")
@@ -354,38 +285,28 @@ def generar_comentario_asesor(avance_v, avance_c, marquilla_p, avance_comp, avan
     return comentarios
 
 def render_analisis_detallado(df_vista, df_ventas_periodo):
-    """
-    Renderiza las pestañas de análisis detallado (Portafolio, Ranking, Clientes, Categorías).
-    """
     st.markdown("---")
     st.header("🔬 Análisis Detallado del Periodo")
     
-    # Opciones para el filtro de enfoque (Visión General o Vendedor/Grupo específico)
     opciones_enfoque = ["Visión General"] + sorted(df_vista['nomvendedor'].unique())
     enfoque_sel = st.selectbox("Enfocar análisis en:", opciones_enfoque, index=0, key="sb_enfoque_analisis")
     
-    # Determina qué datos de ventas y ranking se usarán según el enfoque seleccionado
     if enfoque_sel == "Visión General":
         nombres_a_filtrar = []
-        # Para "Visión General", recopila todos los nombres de vendedores/grupos
         for vendedor in df_vista['nomvendedor']:
             vendedor_norm = normalizar_texto(vendedor)
-            # Busca el nombre original del grupo o el vendedor normalizado si no es un grupo
             nombre_grupo_orig = next((k for k in DATA_CONFIG['grupos_vendedores'] if normalizar_texto(k) == vendedor_norm), vendedor_norm)
-            # Obtiene la lista de vendedores individuales asociados al grupo o solo el vendedor si es individual
             lista_vendedores = DATA_CONFIG['grupos_vendedores'].get(nombre_grupo_orig, [vendedor_norm])
             nombres_a_filtrar.extend([normalizar_texto(v) for v in lista_vendedores])
         df_ventas_enfocadas = df_ventas_periodo[df_ventas_periodo['nomvendedor'].isin(nombres_a_filtrar)]
-        df_ranking = df_vista # Para el ranking, se usa la vista completa
+        df_ranking = df_vista
     else:
-        # Si se selecciona un vendedor/grupo específico
         enfoque_sel_norm = normalizar_texto(enfoque_sel)
         nombre_grupo_orig = next((k for k in DATA_CONFIG['grupos_vendedores'] if normalizar_texto(k) == enfoque_sel_norm), enfoque_sel_norm)
         nombres_a_filtrar = [normalizar_texto(n) for n in DATA_CONFIG['grupos_vendedores'].get(nombre_grupo_orig, [enfoque_sel_norm])]
         df_ventas_enfocadas = df_ventas_periodo[df_ventas_periodo['nomvendedor'].isin(nombres_a_filtrar)]
-        df_ranking = df_vista[df_vista['nomvendedor'] == enfoque_sel_norm] # Para el ranking, solo el vendedor/grupo seleccionado
+        df_ranking = df_vista[df_vista['nomvendedor'] == enfoque_sel_norm]
 
-    # Define las pestañas del análisis detallado
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Análisis de Portafolio", "🏆 Ranking de Rendimiento", "⭐ Clientes Clave", "⚙️ Ventas por Categoría"])
     
     with tab1:
@@ -393,7 +314,6 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
         col1, col2 = st.columns(2)
         with col1:
             st.markdown("##### Composición de Ventas por Marca")
-            # Verifica que las columnas necesarias existan y que el DataFrame no esté vacío
             if not df_ventas_enfocadas.empty and 'nombre_marca' in df_ventas_enfocadas.columns and 'valor_venta' in df_ventas_enfocadas.columns:
                 df_marcas = df_ventas_enfocadas.groupby('nombre_marca')['valor_venta'].sum().reset_index()
                 fig = px.treemap(df_marcas, path=[px.Constant("Todas las Marcas"), 'nombre_marca'], values='valor_venta')
@@ -403,9 +323,7 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
                 st.info("No hay datos de marcas de productos para mostrar.")
         with col2:
             st.markdown("##### Ventas de Marquillas Clave")
-            # Verifica que las columnas necesarias existan y que el DataFrame no esté vacío
             if not df_ventas_enfocadas.empty and 'nombre_articulo' in df_ventas_enfocadas.columns and 'valor_venta' in df_ventas_enfocadas.columns:
-                # Calcula las ventas para cada marquilla clave
                 ventas_marquillas = {p: df_ventas_enfocadas[df_ventas_enfocadas['nombre_articulo'].str.contains(p, case=False, na=False)]['valor_venta'].sum() for p in APP_CONFIG['marquillas_clave']}
                 df_ventas_marquillas = pd.DataFrame(list(ventas_marquillas.items()), columns=['Marquilla', 'Ventas']).sort_values('Ventas', ascending=False)
                 fig = px.pie(df_ventas_marquillas, names='Marquilla', values='Ventas', title="Distribución Venta Marquillas", hole=0.4)
@@ -415,7 +333,6 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
     
     with tab2:
         st.subheader("Ranking de Cumplimiento de Metas")
-        # Filtra para incluir solo vendedores con un presupuesto definido
         df_ranking_con_meta = df_ranking[df_ranking['presupuesto'] > 0].copy()
         if not df_ranking_con_meta.empty:
             df_ranking_con_meta['avance_ventas'] = (df_ranking_con_meta['ventas_totales'] / df_ranking_con_meta['presupuesto']) * 100
@@ -430,7 +347,6 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
     with tab3:
         st.subheader("Top 10 Clientes del Periodo")
         if not df_ventas_enfocadas.empty and 'TipoDocumento' in df_ventas_enfocadas.columns and 'nombre_cliente' in df_ventas_enfocadas.columns and 'valor_venta' in df_ventas_enfocadas.columns:
-            # Incluye facturas y notas de crédito para calcular el valor neto por cliente
             df_ventas_clientes_kpi = df_ventas_enfocadas[~df_ventas_enfocadas['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)]
             top_clientes = df_ventas_clientes_kpi.groupby('nombre_cliente')['valor_venta'].sum().nlargest(10).reset_index()
             st.dataframe(top_clientes, column_config={"nombre_cliente": "Cliente", "valor_venta": st.column_config.NumberColumn("Total Compra", format="$ %d")}, use_container_width=True, hide_index=True)
@@ -440,7 +356,6 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
     with tab4:
         st.subheader(f"Desempeño en Categorías Clave para: {enfoque_sel}")
         categorias_objetivo = sorted(list(set(APP_CONFIG['categorias_clave_venta'])))
-        # Filtra ventas por categorías clave
         df_ventas_cat = df_ventas_enfocadas[df_ventas_enfocadas['categoria_producto'].isin(categorias_objetivo)]
         
         if df_ventas_cat.empty:
@@ -464,29 +379,20 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
                 st.plotly_chart(fig, use_container_width=True)
 
 def render_dashboard():
-    """
-    Renderiza el panel principal de la aplicación, incluyendo filtros de período,
-    KPIs y el desglose por vendedor/grupo.
-    """
     st.sidebar.markdown("---")
     st.sidebar.header("Filtros de Periodo")
-
-    # Obtiene los DataFrames de ventas y cobros del estado de la sesión
     df_ventas_historicas = st.session_state.df_ventas
     df_cobros_historicos = st.session_state.df_cobros
     
-    # Valida si hay datos de ventas disponibles
     if 'anio' not in df_ventas_historicas.columns or df_ventas_historicas.empty:
         st.error("No hay datos históricos de ventas para analizar. Por favor, asegúrese de que los archivos se cargan correctamente.")
         return
 
-    # Selección de año y mes
     lista_anios = sorted(df_ventas_historicas['anio'].unique(), reverse=True)
     anio_reciente = int(df_ventas_historicas['anio'].max())
     mes_reciente = int(df_ventas_historicas[df_ventas_historicas['anio'] == anio_reciente]['mes'].max())
     
     anio_sel = st.sidebar.selectbox("Elija el Año", lista_anios, index=0, key="sb_anio")
-    
     lista_meses_num = sorted(df_ventas_historicas[df_ventas_historicas['anio'] == anio_sel]['mes'].unique())
     
     if not lista_meses_num:
@@ -496,18 +402,14 @@ def render_dashboard():
     index_mes_defecto = lista_meses_num.index(mes_reciente) if anio_sel == anio_reciente and mes_reciente in lista_meses_num else 0
     mes_sel_num = st.sidebar.selectbox("Elija el Mes", options=lista_meses_num, format_func=lambda x: DATA_CONFIG['mapeo_meses'].get(x, 'N/A'), index=index_mes_defecto, key="sb_mes")
 
-    # Filtra los datos para el período seleccionado
     df_ventas_periodo = df_ventas_historicas[(df_ventas_historicas['anio'] == anio_sel) & (df_ventas_historicas['mes'] == mes_sel_num)]
     
     if df_ventas_periodo.empty:
         st.warning("No se encontraron datos de ventas para el periodo seleccionado.")
     else:
         df_cobros_periodo = df_cobros_historicos[(df_cobros_historicos['anio'] == anio_sel) & (df_cobros_historicos['mes'] == mes_sel_num)]
-        
-        # Procesa los datos para obtener el resumen final y los albaranes pendientes
         df_resumen_final, df_albaranes_pendientes = procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel_num)
         
-        # Lógica de filtrado por usuario (Gerente vs. Vendedor individual/grupo)
         usuario_actual_norm = normalizar_texto(st.session_state.usuario)
         if usuario_actual_norm == "GERENTE":
             lista_filtro = sorted(df_resumen_final['nomvendedor'].unique())
@@ -517,9 +419,8 @@ def render_dashboard():
             df_vista = df_resumen_final[df_resumen_final['nomvendedor'] == usuario_actual_norm]
         
         if df_vista.empty:
-            st.warning("No hay datos disponibles para la selección de usuario/grupo actual. Intente seleccionar otro filtro o actualizar los datos.")
+            st.warning("No hay datos disponibles para la selección de usuario/grupo actual.")
         else:
-            # Función para asignar el estatus de cumplimiento
             def asignar_estatus(row):
                 if row['presupuesto'] > 0:
                     avance = (row['ventas_totales'] / row['presupuesto']) * 100
@@ -531,23 +432,17 @@ def render_dashboard():
             st.title("🏠 Resumen de Rendimiento")
             st.header(f"{DATA_CONFIG['mapeo_meses'].get(mes_sel_num, '')} {anio_sel}")
 
-            # Botón de ACTUALIZACIÓN FORZADA
-            if st.button("🔄 ¡Actualizar Todos los Datos!", type="primary", use_container_width=True, help="Fuerza la recarga de los archivos desde Dropbox. Útil si los datos se actualizaron recientemente."):
-                st.cache_data.clear() # 1. Limpia toda la caché de datos de la aplicación
-                # 2. Elimina los dataframes de la sesión para forzar su recarga
-                if 'df_ventas' in st.session_state:
-                    del st.session_state.df_ventas
-                if 'df_cobros' in st.session_state:
-                    del st.session_state.df_cobros
-                # 3. Muestra un mensaje al usuario y reinicia el script
+            if st.button("🔄 ¡Actualizar Todos los Datos!", type="primary", use_container_width=True, help="Fuerza la recarga de los archivos desde Dropbox."):
+                st.cache_data.clear()
+                if 'df_ventas' in st.session_state: del st.session_state.df_ventas
+                if 'df_cobros' in st.session_state: del st.session_state.df_cobros
                 st.toast("Limpiando caché y recargando datos... ¡Un momento!", icon="⏳")
-                time.sleep(3) # Pausa para que el usuario lea el mensaje
-                st.rerun() # Reinicia la aplicación
+                time.sleep(3)
+                st.rerun()
 
             vista_para = st.session_state.usuario if len(df_vista['nomvendedor'].unique()) == 1 else 'Múltiples Seleccionados'
             st.markdown(f"**Vista para:** `{vista_para}`")
             
-            # Cálculo de los KPIs principales
             ventas_total = df_vista['ventas_totales'].sum(); meta_ventas = df_vista['presupuesto'].sum()
             cobros_total = df_vista['cobros_totales'].sum(); meta_cobros = df_vista['presupuestocartera'].sum()
             comp_total = df_vista['ventas_complementarios'].sum(); meta_comp = df_vista['presupuesto_complementarios'].sum()
@@ -563,7 +458,6 @@ def render_dashboard():
             marquilla_prom = np.average(df_vista['promedio_marquilla'], weights=df_vista['impactos']) if total_impactos > 0 else 0.0
             meta_marquilla = APP_CONFIG['kpi_goals']['meta_marquilla']
             
-            # Contenedor para el "Asesor Virtual"
             with st.container(border=True):
                 st.subheader(f"👨‍💼 Asesor Virtual para: {st.session_state.usuario}")
                 comentarios = generar_comentario_asesor(avance_ventas, avance_cobros, marquilla_prom, avance_comp, avance_sub_meta)
@@ -571,7 +465,6 @@ def render_dashboard():
 
             st.subheader("Métricas Clave del Periodo")
             
-            # Mostrar métricas en columnas para mejor visualización
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.metric("Ventas Reales (Facturadas)", f"${ventas_total:,.0f}", f"{ventas_total - meta_ventas:,.0f} vs Meta")
@@ -581,7 +474,7 @@ def render_dashboard():
                 st.progress(min(avance_cobros / 100, 1.0), text=f"Avance Cartera: {avance_cobros:.1f}%")
             with col3:
                 st.metric("Valor Albaranes Pendientes", f"${total_albaranes:,.0f}", "Mercancía por facturar")
-                st.progress(0, text="Gestión de remisiones") # Barra de progreso estática para albaranes
+                st.progress(0, text="Gestión de remisiones")
 
             col4, col5, col6 = st.columns(3)
             with col4:
@@ -597,17 +490,12 @@ def render_dashboard():
 
             st.markdown("---")
             st.subheader("Desglose por Vendedor / Grupo")
-            # Columnas a mostrar en la tabla de desglose
             cols_desglose = ['Estatus', 'nomvendedor', 'ventas_totales', 'presupuesto', 'cobros_totales', 'presupuestocartera', 'albaranes_pendientes', 'impactos', 'promedio_marquilla']
             st.dataframe(df_vista[cols_desglose], column_config={
-                "Estatus": st.column_config.TextColumn("🚦", width="small"), 
-                "nomvendedor": "Vendedor/Grupo", 
-                "ventas_totales": st.column_config.NumberColumn("Ventas Reales", format="$ %d"), 
-                "presupuesto": st.column_config.NumberColumn("Meta Ventas", format="$ %d"),
-                "cobros_totales": st.column_config.NumberColumn("Recaudo", format="$ %d"),
-                "presupuestocartera": st.column_config.NumberColumn("Meta Recaudo", format="$ %d"),
-                "albaranes_pendientes": st.column_config.NumberColumn("Valor Albaranes", format="$ %d"),
-                "impactos": st.column_config.NumberColumn("Clientes Únicos", format="%d"),
+                "Estatus": st.column_config.TextColumn("🚦", width="small"), "nomvendedor": "Vendedor/Grupo", 
+                "ventas_totales": st.column_config.NumberColumn("Ventas Reales", format="$ %d"), "presupuesto": st.column_config.NumberColumn("Meta Ventas", format="$ %d"),
+                "cobros_totales": st.column_config.NumberColumn("Recaudo", format="$ %d"),"presupuestocartera": st.column_config.NumberColumn("Meta Recaudo", format="$ %d"),
+                "albaranes_pendientes": st.column_config.NumberColumn("Valor Albaranes", format="$ %d"),"impactos": st.column_config.NumberColumn("Clientes Únicos", format="%d"),
                 "promedio_marquilla": st.column_config.ProgressColumn("Prom. Marquilla", format="%.2f", min_value=0, max_value=len(APP_CONFIG['marquillas_clave']))
             }, use_container_width=True, hide_index=True)
 
@@ -615,7 +503,6 @@ def render_dashboard():
 
             st.markdown("---")
             st.header("📄 Detalle de Albaranes Pendientes por Facturar (Neto)")
-            # Filtra los albaranes pendientes para la vista actual (usuario/grupo seleccionado)
             vendedores_vista_actual = df_vista['nomvendedor'].unique()
             nombres_a_filtrar_albaranes = []
             for vendedor in vendedores_vista_actual:
@@ -625,31 +512,21 @@ def render_dashboard():
                 nombres_a_filtrar_albaranes.extend([normalizar_texto(v) for v in lista_vendedores])
             
             df_albaranes_vista = df_albaranes_pendientes[df_albaranes_pendientes['nomvendedor'].isin(nombres_a_filtrar_albaranes)]
-            df_albaranes_a_mostrar = df_albaranes_vista[df_albaranes_vista['valor_venta'] > 0] # Solo albaranes con valor positivo
+            df_albaranes_a_mostrar = df_albaranes_vista[df_albaranes_vista['valor_venta'] > 0]
 
             if df_albaranes_a_mostrar.empty:
                 st.info("No hay albaranes pendientes de facturación para la selección actual en este periodo.")
             else:
                 st.dataframe(df_albaranes_a_mostrar[['Serie', 'fecha_venta', 'nombre_cliente', 'valor_venta', 'nomvendedor']], 
                     column_config={
-                        "Serie": "Documento",
-                        "fecha_venta": "Fecha",
-                        "nombre_cliente": "Cliente",
-                        "valor_venta": st.column_config.NumberColumn("Valor Pendiente", format="$ %d"),
-                        "nomvendedor": "Vendedor"
-                    }, use_container_width=True, hide_index=True
-                )
+                        "Serie": "Documento", "fecha_venta": "Fecha", "nombre_cliente": "Cliente",
+                        "valor_venta": st.column_config.NumberColumn("Valor Pendiente", format="$ %d"), "nomvendedor": "Vendedor"
+                    }, use_container_width=True, hide_index=True)
 
 # ==============================================================================
-# 4. LÓGICA DE AUTENTICACIÓN Y EJECUCIÓN PRINCIPAL (VERSIÓN FINAL Y ROBUSTA)
+# 4. LÓGICA DE AUTENTICACIÓN Y EJECUCIÓN PRINCIPAL
 # ==============================================================================
 def main():
-    """
-    Función principal de la aplicación Streamlit. Maneja la autenticación y
-    la renderización del dashboard.
-    """
-    # --- PASO 1: Cargar los datos una sola vez por sesión ---
-    # Se asegura de que los datos maestros existan en el estado de la sesión.
     if 'df_ventas' not in st.session_state:
         with st.spinner('Cargando datos maestros, por favor espere...'):
             st.session_state.df_ventas = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["ventas"], APP_CONFIG["column_names"]["ventas"])
@@ -660,42 +537,32 @@ def main():
     st.sidebar.image(APP_CONFIG["url_logo"], use_container_width=True)
     st.sidebar.header("Control de Acceso")
     
-    # Inicializa el estado de autenticación
     if 'autenticado' not in st.session_state:
         st.session_state.autenticado = False
 
-    # --- PASO 2: Lógica de autenticación ---
     if not st.session_state.autenticado:
-        # Pasa una copia vacía si df_ventas aún no se ha cargado con éxito
         df_para_usuarios = st.session_state.get('df_ventas', pd.DataFrame())
         
         @st.cache_data
         def obtener_lista_usuarios(df_ventas_cache):
-            """
-            Obtiene la lista de usuarios únicos (vendedores y grupos predefinidos)
-            a partir de los datos de ventas.
-            """
             grupos_orig = list(DATA_CONFIG['grupos_vendedores'].keys())
             if not df_ventas_cache.empty and 'nomvendedor' in df_ventas_cache.columns:
                 vendedores_en_grupos_norm = [normalizar_texto(v) for lista in DATA_CONFIG['grupos_vendedores'].values() for v in lista]
                 vendedores_unicos_df = df_ventas_cache['nomvendedor'].dropna().unique()
                 mapa_norm_a_orig = {normalizar_texto(v): v for v in vendedores_unicos_df}
-                # Filtra vendedores individuales que no están en ningún grupo
                 vendedores_solos_norm = [v_norm for v_norm in [normalizar_texto(v) for v in vendedores_unicos_df] if v_norm not in vendedores_en_grupos_norm]
                 vendedores_solos_orig = sorted([mapa_norm_a_orig.get(v_norm) for v_norm in vendedores_solos_norm if mapa_norm_a_orig.get(v_norm)])
                 return ["GERENTE"] + sorted(grupos_orig) + vendedores_solos_orig
-            return ["GERENTE"] + sorted(grupos_orig) # Si no hay datos, solo muestra gerente y grupos fijos
+            return ["GERENTE"] + sorted(grupos_orig)
 
         todos_usuarios = obtener_lista_usuarios(df_para_usuarios)
         
-        # Define contraseñas para usuarios fijos y genera para el resto
         usuarios_fijos_orig = {"GERENTE": "1234", "MOSTRADOR PEREIRA": "2345", "MOSTRADOR ARMENIA": "3456", "MOSTRADOR MANIZALES": "4567", "MOSTRADOR LAURELES": "5678"}
-        # Asegura que "MOSTRADOR OPALO" tenga una contraseña si no está ya definida
         if "MOSTRADOR OPALO" not in usuarios_fijos_orig: 
             usuarios_fijos_orig["MOSTRADOR OPALO"] = "opalo123"
         
         usuarios = {normalizar_texto(k): v for k, v in usuarios_fijos_orig.items()}
-        codigo = 1001 # Código inicial para nuevos usuarios dinámicos
+        codigo = 1001
         for u in todos_usuarios:
             u_norm = normalizar_texto(u)
             if u_norm not in usuarios:
@@ -710,26 +577,22 @@ def main():
             if usuario_sel_norm in usuarios and clave == usuarios[usuario_sel_norm]:
                 st.session_state.autenticado = True
                 st.session_state.usuario = usuario_seleccionado
-                st.rerun() # Recarga la app para mostrar el dashboard
+                st.rerun()
             else:
                 st.sidebar.error("Usuario o contraseña incorrectos")
         
-        # Contenido de la página de inicio de sesión
         st.title("Plataforma de Inteligencia de Negocios")
         st.image(APP_CONFIG["url_logo"], width=400)
         st.header("Bienvenido")
         st.info("Por favor, utilice el panel de la izquierda para ingresar sus credenciales de acceso.")
 
-    # --- PASO 3: Si ya está autenticado, renderiza el dashboard ---
     else:
         render_dashboard()
-        # Botón de Salir en la barra lateral
         if st.sidebar.button("Salir", key="btn_logout"):
-            # Limpia TODA la sesión para un logout seguro y completo
             keys_to_clear = list(st.session_state.keys())
             for key in keys_to_clear:
                 del st.session_state[key]
-            st.rerun() # Recarga la app para volver a la pantalla de login
+            st.rerun()
 
 if __name__ == '__main__':
     main()
