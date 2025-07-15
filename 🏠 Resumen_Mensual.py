@@ -62,7 +62,7 @@ def normalizar_texto(texto):
         return texto
     try:
         texto_sin_tildes = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
-        return texto_sin_tildes.upper().replace('-', ' ').strip().replace('  ', ' ')
+        return texto_sin_tildes.upper().replace('-', ' ').strip().replace(' ', ' ') # Asegura que espacios dobles se conviertan en simples
     except (TypeError, AttributeError):
         return texto
 
@@ -73,6 +73,12 @@ APP_CONFIG['categorias_clave_venta'] = [normalizar_texto(cat) for cat in APP_CON
 
 @st.cache_data(ttl=1800)
 def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
+    """
+    Carga un archivo CSV desde Dropbox, lo decodifica, lo lee en un DataFrame de pandas
+    y realiza una limpieza inicial de datos.
+    Maneja el error "No columns to parse from file" verificando si el DataFrame
+    está vacío inmediatamente después de la lectura.
+    """
     try:
         with dropbox.Dropbox(app_key=st.secrets.dropbox.app_key, app_secret=st.secrets.dropbox.app_secret, oauth2_refresh_token=st.secrets.dropbox.refresh_token) as dbx:
             _, res = dbx.files_download(path=ruta_archivo)
@@ -101,24 +107,27 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
             
             df.columns = nombres_columnas # Asigna los nombres de columna definidos
             
-            # --- INICIO DE LA CORRECCIÓN PARA CARACTERES NO NUMÉRICOS EN VALORES ---
+            # --- INICIO DE LA CORRECCIÓN MEJORADA PARA CARACTERES NO NUMÉRICOS EN VALORES ---
             # Columnas que deben ser numéricas y pueden contener caracteres no deseados
-            numeric_cols_to_clean = ['valor_venta', 'valor_cobro', 'unidades_vendidas', 'costo_unitario']
+            numeric_cols_to_clean = ['valor_venta', 'valor_cobro', 'unidades_vendidas', 'costo_unitario', 'marca_producto']
             
             for col in numeric_cols_to_clean:
                 if col in df.columns:
                     # Convierte a string para asegurar que .str.replace() funcione
                     df[col] = df[col].astype(str) 
-                    # Elimina cualquier carácter que no sea dígito o punto (decimal) o signo menos
+                    # Elimina cualquier carácter que no sea dígito, punto (decimal), o signo menos
+                    # Consideramos el signo menos al inicio y el punto decimal
+                    # Esto eliminará #, $, comas de miles, etc.
                     df[col] = df[col].str.replace(r'[^\d\.\-]', '', regex=True)
                     # Convierte a numérico, forzando errores a NaN
                     df[col] = pd.to_numeric(df[col], errors='coerce')
             
-            # Las columnas 'anio' y 'mes' deben ser numéricas y ya se manejan sin caracteres extra
-            for col in ['anio', 'mes', 'marca_producto']:
+            # Las columnas 'anio' y 'mes' ya deberían ser limpias, pero las convertimos a numérico
+            # para asegurar que sean del tipo correcto y luego a int.
+            for col in ['anio', 'mes']:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce')
-            # --- FIN DE LA CORRECCIÓN ---
+            # --- FIN DE LA CORRECCIÓN MEJORADA ---
 
             # Elimina filas donde 'anio' o 'mes' son NaN (esenciales para el filtrado de tiempo)
             df.dropna(subset=['anio', 'mes'], inplace=True) 
@@ -137,6 +146,7 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
                 df['fecha_cobro'] = pd.to_datetime(df['fecha_cobro'], errors='coerce')
             
             # Mapea y normaliza la columna 'marca_producto' a 'nombre_marca'
+            # Es importante que 'marca_producto' ya sea numérica o NaN antes de este mapeo
             if 'marca_producto' in df.columns:
                 df['nombre_marca'] = df['marca_producto'].map(DATA_CONFIG["mapeo_marcas"]).fillna('No Especificada')
             
@@ -230,6 +240,7 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     
     # Asegúrate de que todas las `grouping_keys` existan en el DataFrame histórico antes de agrupar
     if not df_albaranes_historicos_bruto.empty and all(col in df_albaranes_historicos_bruto.columns for col in grouping_keys):
+        # Asegúrate de que valor_venta esté correctamente numérico ANTES de esta suma
         df_neto_historico = df_albaranes_historicos_bruto.groupby(grouping_keys).agg(valor_neto=('valor_venta', 'sum')).reset_index()
         df_grupos_cancelados_global = df_neto_historico[df_neto_historico['valor_neto'] == 0]
     else:
@@ -328,7 +339,7 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     df_final['presupuesto_complementarios'] = df_final['presupuesto'] * APP_CONFIG['complementarios']['presupuesto_pct']
     df_final['presupuesto_sub_meta'] = df_final['presupuesto_complementarios'] * APP_CONFIG['sub_meta_complementarios']['presupuesto_pct']
     
-    return df_final, df_albaranes_reales_pendientes
+    return df_final, df_albaranes_pendientes
 
 # ==============================================================================
 # 3. LÓGICA DE LA INTERFAZ DE USUARIO (UI)
