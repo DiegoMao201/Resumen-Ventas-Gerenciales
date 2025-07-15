@@ -95,21 +95,28 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
             if 'codigo_vendedor' in df.columns: df['codigo_vendedor'] = df['codigo_vendedor'].astype(str)
             if 'fecha_venta' in df.columns: df['fecha_venta'] = pd.to_datetime(df['fecha_venta'], errors='coerce')
             if 'fecha_cobro' in df.columns: df['fecha_cobro'] = pd.to_datetime(df['fecha_cobro'], errors='coerce')
+            
+            # --- INICIO: ASIGNACIÓN DE VENDEDOR POR DEFECTO ---
+            # Se asigna un vendedor genérico a las ventas sin vendedor para no perderlas.
+            if 'nomvendedor' in df.columns:
+                df['nomvendedor'].replace(r'^\s*$', np.nan, regex=True, inplace=True)
+                df['nomvendedor'].fillna('COMERCIAL FERREINOX', inplace=True)
+
+            if 'codigo_vendedor' in df.columns:
+                df['codigo_vendedor'].replace(r'^\s*$', np.nan, regex=True, inplace=True)
+                df['codigo_vendedor'].fillna('CF001', inplace=True) # Código genérico para el comercial
+            # --- FIN: ASIGNACIÓN DE VENDEDOR POR DEFECTO ---
+
             if 'marca_producto' in df.columns: df['nombre_marca'] = df['marca_producto'].map(DATA_CONFIG["mapeo_marcas"]).fillna('No Especificada')
             
             cols_a_normalizar = ['super_categoria', 'categoria_producto', 'nombre_marca', 'nomvendedor', 'TipoDocumento']
             for col in cols_a_normalizar:
                 if col in df.columns: df[col] = df[col].apply(normalizar_texto)
 
-            # --- INICIO DE LA CORRECCIÓN DEFINITIVA ---
+            # Corrección para asegurar que las Notas de Crédito siempre resten.
             if 'TipoDocumento' in df.columns and 'valor_venta' in df.columns:
-                # Se busca el identificador exacto 'NOTA CREDITO' (después de normalizar 'NOTA_CREDITO').
                 credit_note_mask = df['TipoDocumento'] == 'NOTA CREDITO'
-                
-                # Para estas filas, se toma el valor absoluto y se convierte en negativo.
-                # Esto garantiza que siempre resten, sin importar cómo se ingresó el dato.
                 df.loc[credit_note_mask, 'valor_venta'] = -df.loc[credit_note_mask, 'valor_venta'].abs()
-            # --- FIN DE LA CORRECCIÓN ---
 
             return df
             
