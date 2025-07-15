@@ -67,7 +67,8 @@ def normalizar_texto(texto):
     if not isinstance(texto, str): return texto
     try:
         texto_sin_tildes = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
-        return texto_sin_tildes.upper().replace('-', ' ').strip().replace('  ', ' ')
+        # Reemplazamos guiones con espacios, eliminamos espacios extra y convertimos a mayúsculas
+        return texto_sin_tildes.upper().replace('-', ' ').strip().replace('  ', ' ')
     except (TypeError, AttributeError): return texto
 
 # Normaliza textos de la configuración una sola vez al inicio
@@ -95,6 +96,8 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
             if 'codigo_vendedor' in df.columns: df['codigo_vendedor'] = df['codigo_vendedor'].astype(str)
             if 'fecha_venta' in df.columns: df['fecha_venta'] = pd.to_datetime(df['fecha_venta'], errors='coerce')
             if 'marca_producto' in df.columns: df['nombre_marca'] = df['marca_producto'].map(DATA_CONFIG["mapeo_marcas"]).fillna('No Especificada')
+            
+            # Normalizar TipoDocumento, super_categoria, etc. aquí, después de la carga
             cols_a_normalizar = ['super_categoria', 'categoria_producto', 'nombre_marca', 'nomvendedor', 'TipoDocumento']
             for col in cols_a_normalizar:
                 if col in df.columns: df[col] = df[col].apply(normalizar_texto)
@@ -109,7 +112,8 @@ def calcular_marquilla_optimizado(df_periodo):
     df_temp = df_periodo[['codigo_vendedor', 'nomvendedor', 'cliente_id', 'nombre_articulo']].copy()
     df_temp['nombre_articulo'] = df_temp['nombre_articulo'].astype(str)
     for palabra in APP_CONFIG['marquillas_clave']:
-        df_temp[palabra] = df_temp['nombre_articulo'].str.contains(palabra, case=False, na=False)
+        # Asegurarse de que las palabras clave también se busquen en formato normalizado si nombre_articulo está normalizado
+        df_temp[palabra] = df_temp['nombre_articulo'].str.contains(normalizar_texto(palabra), case=False, na=False)
     df_cliente_marcas = df_temp.groupby(['codigo_vendedor', 'nomvendedor', 'cliente_id'])[APP_CONFIG['marquillas_clave']].any()
     df_cliente_marcas['puntaje_marquilla'] = df_cliente_marcas[APP_CONFIG['marquillas_clave']].sum(axis=1)
     df_final_marquilla = df_cliente_marcas.groupby(['codigo_vendedor', 'nomvendedor'])['puntaje_marquilla'].mean().reset_index()
@@ -118,23 +122,20 @@ def calcular_marquilla_optimizado(df_periodo):
 def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel):
     ### PASO 1: SEPARACIÓN Y CÁLCULOS BÁSICOS ###
     
-    # Separamos las ventas positivas (FACTURA_DIRECTA) de las notas crédito (NOTA_CREDITO)
-    # según la nueva clasificación de tu SQL.
-    
-    # Ventas brutas: Solo facturas "positivas" de tu SQL
+    # Ventas brutas: Solo facturas "positivas" de tu SQL (TipoDocumento 'FACTURA_DIRECTA' normalizado)
     df_ventas_brutas = df_ventas_periodo[
-        df_ventas_periodo['TipoDocumento'].str.contains('FACTURA_DIRECTA', na=False, case=False)
+        df_ventas_periodo['TipoDocumento'].str.contains(normalizar_texto('FACTURA_DIRECTA'), na=False, case=False)
     ].copy()
 
-    # Notas crédito: Documentos negativos de tu SQL
+    # Notas crédito: Documentos negativos de tu SQL (TipoDocumento 'NOTA_CREDITO' normalizado)
     df_notas_credito = df_ventas_periodo[
-        df_ventas_periodo['TipoDocumento'].str.contains('NOTA_CREDITO', na=False, case=False)
+        df_ventas_periodo['TipoDocumento'].str.contains(normalizar_texto('NOTA_CREDITO'), na=False, case=False)
     ].copy()
 
     # Calculamos la suma de las ventas brutas
     resumen_ventas_brutas = df_ventas_brutas.groupby(['codigo_vendedor', 'nomvendedor']).agg(
         ventas_brutas=('valor_venta', 'sum'),
-        impactos=('cliente_id', 'nunique')
+        impactos=('cliente_id', 'nunique') # Los impactos se cuentan solo sobre ventas brutas para reflejar actividad real
     ).reset_index()
 
     # Calculamos la suma de las notas crédito (que ya son valores negativos)
@@ -147,10 +148,7 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     resumen_ventas['total_notas_credito'].fillna(0, inplace=True) # Aseguramos que los NaN sean 0
     resumen_ventas['ventas_totales'] = resumen_ventas['ventas_brutas'] + resumen_ventas['total_notas_credito'] # Suma efectiva de un valor negativo
     
-    # El resto de los cálculos que dependen de "ventas_reales" ahora usarán df_ventas_brutas
-    # o la combinación apropiada según la lógica de negocio para ese KPI.
-    # Para complementarios y sub-meta, generalmente se calculan sobre las ventas "positivas"
-    # para medir el impulso de esos productos, no sobre las devoluciones.
+    # Para complementarios y sub-meta, se calculan sobre las ventas "positivas" (brutas)
     df_ventas_comp = df_ventas_brutas[df_ventas_brutas['super_categoria'] != APP_CONFIG['complementarios']['exclude_super_categoria']]
     resumen_complementarios = df_ventas_comp.groupby(['codigo_vendedor','nomvendedor']).agg(ventas_complementarios=('valor_venta', 'sum')).reset_index()
     
@@ -158,15 +156,15 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     df_ventas_sub_meta = df_ventas_brutas[df_ventas_brutas['nombre_marca'] == marca_sub_meta]
     resumen_sub_meta = df_ventas_sub_meta.groupby(['codigo_vendedor','nomvendedor']).agg(ventas_sub_meta=('valor_venta', 'sum')).reset_index()
     
-    # Para la marquilla, es mejor usar todas las ventas del periodo para ver el impacto general
-    # incluso si hay devoluciones de esos productos.
+    # Para la marquilla, usamos TODO el df_ventas_periodo para que el promedio refleje la actividad completa
+    # (ya que las devoluciones también son "interacciones" con productos, aunque negativas).
     resumen_marquilla = calcular_marquilla_optimizado(df_ventas_periodo)
 
     resumen_cobros = df_cobros_periodo.groupby('codigo_vendedor').agg(cobros_totales=('valor_cobro', 'sum')).reset_index()
 
-    ### PASO 2: LÓGICA DE NETEO GLOBAL ###
-    # Esta parte se mantiene igual, ya que maneja los ALBARANES.
-    df_albaranes_historicos_bruto = df_ventas_historicas[df_ventas_historicas['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
+    ### PASO 2: LÓGICA DE NETEO GLOBAL para ALBARANES ###
+    # SQL outputs 'ALBARAN_PENDIENTE'
+    df_albaranes_historicos_bruto = df_ventas_historicas[df_ventas_historicas['TipoDocumento'].str.contains(normalizar_texto('ALBARAN_PENDIENTE'), na=False, case=False)].copy()
     grouping_keys = ['Serie', 'cliente_id', 'codigo_articulo', 'codigo_vendedor']
     if not df_albaranes_historicos_bruto.empty:
         df_neto_historico = df_albaranes_historicos_bruto.groupby(grouping_keys).agg(valor_neto=('valor_venta', 'sum')).reset_index()
@@ -175,8 +173,8 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
         df_grupos_cancelados_global = pd.DataFrame(columns=grouping_keys)
 
     ### PASO 3: LIMPIEZA DE ALBARANES DEL PERIODO ACTUAL ###
-    # Esta parte se mantiene igual.
-    df_albaranes_bruto_periodo = df_ventas_periodo[df_ventas_periodo['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
+    # SQL outputs 'ALBARAN_PENDIENTE'
+    df_albaranes_bruto_periodo = df_ventas_periodo[df_ventas_periodo['TipoDocumento'].str.contains(normalizar_texto('ALBARAN_PENDIENTE'), na=False, case=False)].copy()
     if not df_albaranes_bruto_periodo.empty and not df_grupos_cancelados_global.empty:
         df_albaranes_reales_pendientes = df_albaranes_bruto_periodo.merge(
             df_grupos_cancelados_global[grouping_keys], on=grouping_keys, how='left', indicator=True
@@ -185,7 +183,6 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
         df_albaranes_reales_pendientes = df_albaranes_bruto_periodo.copy()
 
     ### PASO 4: CÁLCULOS FINALES Y ENSAMBLAJE ###
-    # Esta parte se mantiene igual, solo usa las nuevas 'ventas_totales' calculadas.
     if not df_albaranes_reales_pendientes.empty:
         resumen_albaranes = df_albaranes_reales_pendientes[df_albaranes_reales_pendientes['valor_venta'] > 0].groupby(['codigo_vendedor', 'nomvendedor']).agg(albaranes_pendientes=('valor_venta', 'sum')).reset_index()
     else:
@@ -211,13 +208,13 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
             anio_anterior = anio_sel - 1
             # Para el presupuesto histórico, ahora sumamos facturas positivas y restamos notas crédito del año anterior
             df_hist_facturas_pos = df_ventas_historicas[
-                (df_ventas_historicas['TipoDocumento'].str.contains('FACTURA_DIRECTA', na=False, case=False)) &
+                (df_ventas_historicas['TipoDocumento'].str.contains(normalizar_texto('FACTURA_DIRECTA'), na=False, case=False)) &
                 (df_ventas_historicas['anio'] == anio_anterior) & 
                 (df_ventas_historicas['mes'] == mes_sel) & 
                 (df_ventas_historicas['nomvendedor'].isin(lista_vendedores_norm))
             ]
             df_hist_notas_cred = df_ventas_historicas[
-                (df_ventas_historicas['TipoDocumento'].str.contains('NOTA_CREDITO', na=False, case=False)) &
+                (df_ventas_historicas['TipoDocumento'].str.contains(normalizar_texto('NOTA_CREDITO'), na=False, case=False)) &
                 (df_ventas_historicas['anio'] == anio_anterior) & 
                 (df_ventas_historicas['mes'] == mes_sel) & 
                 (df_ventas_historicas['nomvendedor'].isin(lista_vendedores_norm))
@@ -299,11 +296,9 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
         col1, col2 = st.columns(2)
         with col1:
             st.markdown("##### Composición de Ventas por Marca")
-            # Para la composición de ventas por marca, podemos usar df_ventas_periodo para incluir todo
-            # pero filtrar por TipoDocumento si solo queremos ver lo que contribuye a la venta neta.
-            # Aquí, para reflejar el impacto real en la venta, es mejor usar los tipos de documento que contribuyen a la venta neta.
-            df_ventas_para_marcas = df_ventas_periodo[
-                df_ventas_periodo['TipoDocumento'].str.contains('FACTURA_DIRECTA|NOTA_CREDITO', na=False, case=False)
+            # Para la composición de ventas por marca, usamos los tipos de documento que contribuyen a la venta neta.
+            df_ventas_para_marcas = df_ventas_enfocadas[
+                df_ventas_enfocadas['TipoDocumento'].str.contains(f"{normalizar_texto('FACTURA_DIRECTA')}|{normalizar_texto('NOTA_CREDITO')}", na=False, case=False)
             ].copy()
             
             if not df_ventas_para_marcas.empty and 'nombre_marca' in df_ventas_para_marcas:
@@ -314,13 +309,13 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
             else: st.info("No hay datos de marcas de productos para mostrar.")
         with col2:
             st.markdown("##### Ventas de Marquillas Clave")
-            # Similar a las marcas, usar df_ventas_periodo o filtrar por los tipos de documento relevantes para la venta neta.
-            df_ventas_para_marquillas = df_ventas_periodo[
-                df_ventas_periodo['TipoDocumento'].str.contains('FACTURA_DIRECTA|NOTA_CREDITO', na=False, case=False)
+            # Similar a las marcas, usar los tipos de documento relevantes para la venta neta.
+            df_ventas_para_marquillas = df_ventas_enfocadas[
+                df_ventas_enfocadas['TipoDocumento'].str.contains(f"{normalizar_texto('FACTURA_DIRECTA')}|{normalizar_texto('NOTA_CREDITO')}", na=False, case=False)
             ].copy()
 
             if not df_ventas_para_marquillas.empty and 'nombre_articulo' in df_ventas_para_marquillas:
-                ventas_marquillas = {p: df_ventas_para_marquillas[df_ventas_para_marquillas['nombre_articulo'].str.contains(p, case=False, na=False)]['valor_venta'].sum() for p in APP_CONFIG['marquillas_clave']}
+                ventas_marquillas = {p: df_ventas_para_marquillas[df_ventas_para_marquillas['nombre_articulo'].str.contains(normalizar_texto(p), case=False, na=False)]['valor_venta'].sum() for p in APP_CONFIG['marquillas_clave']}
                 df_ventas_marquillas = pd.DataFrame(list(ventas_marquillas.items()), columns=['Marquilla', 'Ventas']).sort_values('Ventas', ascending=False)
                 fig = px.pie(df_ventas_marquillas, names='Marquilla', values='Ventas', title="Distribución Venta Marquillas", hole=0.4)
                 st.plotly_chart(fig, use_container_width=True)
@@ -340,7 +335,7 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
         st.subheader("Top 10 Clientes del Periodo")
         # El filtro de Top Clientes ahora considera tanto FACTURA_DIRECTA como NOTA_CREDITO
         # para mostrar el valor neto transaccionado con el cliente.
-        df_facturas_enfocadas = df_ventas_enfocadas[df_ventas_enfocadas['TipoDocumento'].str.contains('FACTURA_DIRECTA|NOTA_CREDITO', na=False, case=False)]
+        df_facturas_enfocadas = df_ventas_enfocadas[df_ventas_enfocadas['TipoDocumento'].str.contains(f"{normalizar_texto('FACTURA_DIRECTA')}|{normalizar_texto('NOTA_CREDITO')}", na=False, case=False)]
         
         if not df_facturas_enfocadas.empty:
             top_clientes = df_facturas_enfocadas.groupby('nombre_cliente')['valor_venta'].sum().nlargest(10).reset_index()
@@ -349,10 +344,10 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
     with tab4:
         st.subheader(f"Desempeño en Categorías Clave para: {enfoque_sel}")
         categorias_objetivo = sorted(list(set(APP_CONFIG['categorias_clave_venta'])))
-        # Aquí, para el desempeño en categorías, usamos las ventas brutas para medir el empuje
+        # Aquí, para el desempeño en categorías, usamos las ventas brutas (FACTURA_DIRECTA) para medir el empuje
         # de ventas en esas categorías, sin que las notas crédito distorsionen el potencial.
         df_ventas_cat = df_ventas_enfocadas[
-            df_ventas_enfocadas['TipoDocumento'].str.contains('FACTURA_DIRECTA', na=False, case=False) &
+            df_ventas_enfocadas['TipoDocumento'].str.contains(normalizar_texto('FACTURA_DIRECTA'), na=False, case=False) &
             df_ventas_enfocadas['categoria_producto'].isin(categorias_objetivo)
         ]
         
@@ -518,7 +513,11 @@ def render_dashboard():
                 nombre_grupo_orig = next((k for k in DATA_CONFIG['grupos_vendedores'] if normalizar_texto(k) == vendedor_norm), vendedor_norm)
                 lista_vendedores = DATA_CONFIG['grupos_vendedores'].get(nombre_grupo_orig, [vendedor_norm])
                 nombres_a_filtrar.extend([normalizar_texto(v) for v in lista_vendedores])
-            df_albaranes_vista = df_albaranes_pendientes[df_albaranes_pendientes['nomvendedor'].isin(nombres_a_filtrar)]
+            # Aquí, para albaranes pendientes, solo nos interesan los ALBARAN_PENDIENTE
+            df_albaranes_vista = df_albaranes_pendientes[
+                df_albaranes_pendientes['nomvendedor'].isin(nombres_a_filtrar) & 
+                df_albaranes_pendientes['TipoDocumento'].str.contains(normalizar_texto('ALBARAN_PENDIENTE'), na=False, case=False)
+            ]
             df_albaranes_a_mostrar = df_albaranes_vista[df_albaranes_vista['valor_venta'] > 0]
 
             if df_albaranes_a_mostrar.empty:
