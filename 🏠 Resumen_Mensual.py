@@ -145,39 +145,48 @@ def calcular_marquilla_optimizado(df_periodo):
     return df_final_marquilla.rename(columns={'puntaje_marquilla': 'promedio_marquilla'})
 
 def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel):
-    # --- LÓGICA DE ALBARANES ---
-    # 1. Identificar globalmente los grupos de transacciones que ya se completaron (Albarán + Factura = 0)
-    df_albaranes_historicos_bruto = df_ventas_historicas[df_ventas_historicas['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
-    grouping_keys = ['Serie', 'cliente_id', 'codigo_articulo', 'codigo_vendedor']
+    # --- INICIO: LÓGICA DE CÁLCULO MODIFICADA ---
     
-    if not df_albaranes_historicos_bruto.empty and all(col in df_albaranes_historicos_bruto.columns for col in grouping_keys):
+    # 1. Determinar el contexto: ¿El período seleccionado es pasado o actual?
+    hoy = pd.Timestamp.now()
+    anio_actual = hoy.year
+    mes_actual = hoy.month
+    es_mes_pasado = (anio_sel < anio_actual) or (anio_sel == anio_actual and mes_sel < mes_actual)
+
+    # 2. Identificar globalmente los grupos de transacciones completados (Albarán + Factura = 0)
+    # Esta lógica es universal y se basa en todo el historial.
+    grouping_keys = ['Serie', 'cliente_id', 'codigo_articulo', 'codigo_vendedor']
+    df_grupos_completados_global = pd.DataFrame(columns=grouping_keys)
+    if all(col in df_ventas_historicas.columns for col in grouping_keys):
         df_neto_historico = df_ventas_historicas.groupby(grouping_keys).agg(valor_neto=('valor_venta', 'sum')).reset_index()
         df_grupos_completados_global = df_neto_historico[df_neto_historico['valor_neto'] == 0]
-    else:
-        df_grupos_completados_global = pd.DataFrame(columns=grouping_keys)
 
-    # 2. Identificar los albaranes del periodo actual que aún están pendientes
+    # 3. Identificar los albaranes creados en el período seleccionado que AÚN están pendientes a día de hoy
     df_albaranes_bruto_periodo = df_ventas_periodo[df_ventas_periodo['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
-    
     if not df_albaranes_bruto_periodo.empty and not df_grupos_completados_global.empty:
+        # Un albarán está pendiente si NO pertenece a un grupo ya completado globalmente.
         df_albaranes_pendientes_reales = df_albaranes_bruto_periodo.merge(
             df_grupos_completados_global[grouping_keys], on=grouping_keys, how='left', indicator=True
         ).query('_merge == "left_only"').drop(columns=['_merge'])
     else:
         df_albaranes_pendientes_reales = df_albaranes_bruto_periodo.copy()
 
-    # --- INICIO DE LA CORRECCIÓN ---
-    # 3. El DataFrame para los KPIs (df_ventas_kpi) es TODO lo del periodo MENOS los albaranes pendientes identificados.
-    #    Este método es más simple y robusto que el anterior.
-    if not df_albaranes_pendientes_reales.empty:
-        # Hacemos un "anti-join" usando el índice para excluir los albaranes pendientes
-        indices_a_excluir = df_albaranes_pendientes_reales.index
-        df_ventas_kpi = df_ventas_periodo.drop(index=indices_a_excluir, errors='ignore')
+    # 4. Calcular 'Ventas Reales' (df_ventas_kpi) basado en el contexto (pasado vs. actual)
+    if es_mes_pasado:
+        # LÓGICA PARA MESES PASADOS: Muestra la "verdad final" del mes.
+        # Las ventas reales incluyen toda la facturación Y los albaranes de ese mes que ya se facturaron.
+        # Esto se logra tomando todas las transacciones del período y excluyendo únicamente
+        # los albaranes que, a día de hoy, nunca se facturaron.
+        indices_pendientes_reales = df_albaranes_pendientes_reales.index
+        df_ventas_kpi = df_ventas_periodo.drop(indices_pendientes_reales, errors='ignore')
     else:
-        df_ventas_kpi = df_ventas_periodo.copy()
-    # --- FIN DE LA CORRECCIÓN ---
-    
-    # Todos los cálculos de KPIs se basan ahora en df_ventas_kpi, que contiene solo ventas facturadas.
+        # LÓGICA PARA MES ACTUAL: Muestra solo la facturación neta del mes en curso.
+        # Se excluyen TODOS los albaranes del cálculo de ventas reales.
+        df_ventas_kpi = df_ventas_periodo[~df_ventas_periodo['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
+
+    # --- FIN: LÓGICA DE CÁLCULO MODIFICADA ---
+
+    # El resto de la función sigue igual, usando los DataFrames 'df_ventas_kpi' y 'df_albaranes_pendientes_reales'
     if not df_ventas_kpi.empty:
         resumen_ventas = df_ventas_kpi.groupby(['codigo_vendedor', 'nomvendedor']).agg(
             ventas_totales=('valor_venta', 'sum'), 
@@ -505,8 +514,14 @@ def main():
                 return ["GERENTE"] + sorted(grupos_orig) + vendedores_solos_orig
             return ["GERENTE"] + sorted(grupos_orig)
         todos_usuarios = obtener_lista_usuarios(df_para_usuarios)
-        usuarios_fijos_orig = {"GERENTE": "1234", "MOSTRADOR PEREIRA": "2345", "MOSTRADOR ARMENIA": "3456", "MOSTRADOR MANIZALES": "4567", "MOSTRADOR LAURELES": "5678"}
-        if "MOSTRADOR OPALO" not in usuarios_fijos_orig: usuarios_fijos_orig["MOSTRADOR OPALO"] = "opalo123"
+        usuarios_fijos_orig = {
+            "GERENTE": "1234", 
+            "MOSTRADOR PEREIRA": "2345", 
+            "MOSTRADOR ARMENIA": "3456", 
+            "MOSTRADOR MANIZALES": "4567", 
+            "MOSTRADOR LAURELES": "5678",
+            "MOSTRADOR OPALO": "opalo123"
+        }
         usuarios = {normalizar_texto(k): v for k, v in usuarios_fijos_orig.items()}
         codigo = 1001
         for u in todos_usuarios:
