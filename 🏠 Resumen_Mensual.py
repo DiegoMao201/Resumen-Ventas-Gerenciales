@@ -24,7 +24,7 @@ APP_CONFIG = {
     "sub_meta_complementarios": {"nombre_marca_objetivo": "non-AN Third Party", "presupuesto_pct": 0.10},
     "categorias_clave_venta": ['ABRACOL', 'YALE', 'SAINT GOBAIN', 'GOYA', 'ALLEGION', 'SEGUREX'],
     "presupuesto_mostradores": {"incremento_anual_pct": 0.10},
-    # ✨ NUEVO: Palabras clave para identificar descuentos comerciales por nombre de artículo
+    "discount_keywords": ["DESCUENTOS COMERCIAL", "DSCTO COMERCIAL", "DCTO COMERCIAL", "DESCUENTO COMERCIAL"]
     "discount_keywords": ["DESCUENTO COMERCIAL", "DSCTO COMERCIAL", "DCTO COMERCIAL"] 
 }
 DATA_CONFIG = {
