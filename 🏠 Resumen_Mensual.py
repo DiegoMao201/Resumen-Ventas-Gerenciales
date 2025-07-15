@@ -75,7 +75,7 @@ APP_CONFIG['categorias_clave_venta'] = [normalizar_texto(cat) for cat in APP_CON
 def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
     """
     Carga un archivo CSV desde Dropbox, lo decodifica, lo lee en un DataFrame de pandas
-    y realiza una limpieza inicial de datos.
+# y realiza una limpieza inicial de datos.
 # Maneja el error "No columns to parse from file" verificando si el DataFrame está vacío inmediatamente después de la lectura.
     """
     try:
