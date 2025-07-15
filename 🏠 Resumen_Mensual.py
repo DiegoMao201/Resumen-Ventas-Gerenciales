@@ -76,7 +76,7 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
     """
     Carga un archivo CSV desde Dropbox, lo decodifica, lo lee en un DataFrame de pandas
     y realiza una limpieza inicial de datos.
-    # Maneja el error "No columns to parse from file" verificando si el DataFrame está vacío inmediatamente después de la lectura.
+# Maneja el error "No columns to parse from file" verificando si el DataFrame está vacío inmediatamente después de la lectura.
     """
     try:
         with dropbox.Dropbox(app_key=st.secrets.dropbox.app_key, app_secret=st.secrets.dropbox.app_secret, oauth2_refresh_token=st.secrets.dropbox.refresh_token) as dbx:
