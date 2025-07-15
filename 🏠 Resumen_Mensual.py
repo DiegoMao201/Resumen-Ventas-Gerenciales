@@ -144,19 +144,19 @@ def calcular_marquilla_optimizado(df_periodo):
     df_final_marquilla = df_cliente_marcas.groupby(['codigo_vendedor', 'nomvendedor'])['puntaje_marquilla'].mean().reset_index()
     return df_final_marquilla.rename(columns={'puntaje_marquilla': 'promedio_marquilla'})
 
-def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel):
-    hoy = pd.Timestamp.now()
-    anio_actual = hoy.year
-    mes_actual = hoy.month
-    es_mes_pasado = (anio_sel < anio_actual) or (anio_sel == anio_actual and mes_sel < mes_actual)
-
+def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel, anio_reciente, mes_reciente):
+    # --- LÓGICA DE ALBARANES (se mantiene igual para identificar grupos) ---
+    df_albaranes_historicos_bruto = df_ventas_historicas[df_ventas_historicas['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
     grouping_keys = ['Serie', 'cliente_id', 'codigo_articulo', 'codigo_vendedor']
-    df_grupos_completados_global = pd.DataFrame(columns=grouping_keys)
-    if all(col in df_ventas_historicas.columns for col in grouping_keys):
+    
+    if not df_albaranes_historicos_bruto.empty and all(col in df_albaranes_historicos_bruto.columns for col in grouping_keys):
         df_neto_historico = df_ventas_historicas.groupby(grouping_keys).agg(valor_neto=('valor_venta', 'sum')).reset_index()
         df_grupos_completados_global = df_neto_historico[df_neto_historico['valor_neto'] == 0]
+    else:
+        df_grupos_completados_global = pd.DataFrame(columns=grouping_keys)
 
     df_albaranes_bruto_periodo = df_ventas_periodo[df_ventas_periodo['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
+    
     if not df_albaranes_bruto_periodo.empty and not df_grupos_completados_global.empty:
         df_albaranes_pendientes_reales = df_albaranes_bruto_periodo.merge(
             df_grupos_completados_global[grouping_keys], on=grouping_keys, how='left', indicator=True
@@ -164,12 +164,28 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     else:
         df_albaranes_pendientes_reales = df_albaranes_bruto_periodo.copy()
 
-    if es_mes_pasado:
-        indices_pendientes_reales = df_albaranes_pendientes_reales.index
-        df_ventas_kpi = df_ventas_periodo.drop(indices_pendientes_reales, errors='ignore')
-    else:
-        df_ventas_kpi = df_ventas_periodo[~df_ventas_periodo['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
+    # --- INICIO DE LA NUEVA LÓGICA CONDICIONAL ---
+    # Se determina si el período que se está viendo es el más reciente o uno pasado.
+    es_periodo_actual = (anio_sel == anio_reciente and mes_sel == mes_reciente)
 
+    if es_periodo_actual:
+        # ✅ LÓGICA PARA EL MES EN CURSO: Se excluyen los albaranes pendientes del KPI de ventas.
+        # Este es el comportamiento que ya tenías y que es correcto para el tiempo real.
+        st.info("Visualizando el período actual: Las ventas reflejan únicamente lo facturado.", icon="ℹ️")
+        if not df_albaranes_pendientes_reales.empty:
+            indices_a_excluir = df_albaranes_pendientes_reales.index
+            df_ventas_kpi = df_ventas_periodo.drop(index=indices_a_excluir, errors='ignore')
+        else:
+            df_ventas_kpi = df_ventas_periodo.copy()
+    else:
+        # ✅ LÓGICA PARA MESES HISTÓRICOS: Se incluyen todas las transacciones.
+        # El neto (albarán vs factura) se cancela solo, resultando en el valor final facturado.
+        # Esto corrige las cifras de meses pasados para que coincidan con el ERP.
+        st.info(f"Visualizando un período histórico: Las ventas incluyen el total de transacciones para reflejar la facturación final del mes.", icon="🗓️")
+        df_ventas_kpi = df_ventas_periodo.copy()
+    # --- FIN DE LA NUEVA LÓGICA CONDICIONAL ---
+    
+    # Todos los cálculos de KPIs se basan ahora en df_ventas_kpi, que contiene solo ventas facturadas.
     if not df_ventas_kpi.empty:
         resumen_ventas = df_ventas_kpi.groupby(['codigo_vendedor', 'nomvendedor']).agg(
             ventas_totales=('valor_venta', 'sum'), 
@@ -280,35 +296,28 @@ def generar_comentario_asesor(avance_v, avance_c, marquilla_p, avance_comp, avan
     
     return comentarios
 
-# --- FIX START ---
-# Se modificó la función para recibir la lista de vendedores seleccionados directamente
-# y se simplificó la lógica de filtrado para asegurar consistencia.
-def render_analisis_detallado(df_vista, df_ventas_periodo, vendedores_seleccionados):
+def render_analisis_detallado(df_vista, df_ventas_periodo):
     st.markdown("---")
     st.header("🔬 Análisis Detallado del Periodo")
     
     opciones_enfoque = ["Visión General"] + sorted(df_vista['nomvendedor'].unique())
     enfoque_sel = st.selectbox("Enfocar análisis en:", opciones_enfoque, index=0, key="sb_enfoque_analisis")
     
-    df_ranking = df_vista
-    nombres_a_filtrar = []
-
     if enfoque_sel == "Visión General":
-        # Para la visión general, usamos la lista completa de vendedores/grupos del filtro principal
-        for vendedor_o_grupo in vendedores_seleccionados:
-            vendedor_norm = normalizar_texto(vendedor_o_grupo)
+        nombres_a_filtrar = []
+        for vendedor in df_vista['nomvendedor']:
+            vendedor_norm = normalizar_texto(vendedor)
             nombre_grupo_orig = next((k for k in DATA_CONFIG['grupos_vendedores'] if normalizar_texto(k) == vendedor_norm), vendedor_norm)
-            lista_vendedores = DATA_CONFIG['grupos_vendedores'].get(nombre_grupo_orig, [vendedor_o_grupo])
+            lista_vendedores = DATA_CONFIG['grupos_vendedores'].get(nombre_grupo_orig, [vendedor_norm])
             nombres_a_filtrar.extend([normalizar_texto(v) for v in lista_vendedores])
+        df_ventas_enfocadas = df_ventas_periodo[df_ventas_periodo['nomvendedor'].isin(nombres_a_filtrar)]
+        df_ranking = df_vista
     else:
-        # Para la visión específica, filtramos solo por el grupo/vendedor seleccionado en este 'selectbox'
         enfoque_sel_norm = normalizar_texto(enfoque_sel)
         nombre_grupo_orig = next((k for k in DATA_CONFIG['grupos_vendedores'] if normalizar_texto(k) == enfoque_sel_norm), enfoque_sel_norm)
         nombres_a_filtrar = [normalizar_texto(n) for n in DATA_CONFIG['grupos_vendedores'].get(nombre_grupo_orig, [enfoque_sel_norm])]
-        df_ranking = df_vista[df_vista['nomvendedor'] == enfoque_sel]
-
-    df_ventas_enfocadas = df_ventas_periodo[df_ventas_periodo['nomvendedor'].isin(nombres_a_filtrar)]
-    # --- FIX END ---
+        df_ventas_enfocadas = df_ventas_periodo[df_ventas_periodo['nomvendedor'].isin(nombres_a_filtrar)]
+        df_ranking = df_vista[df_vista['nomvendedor'] == enfoque_sel_norm]
 
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Análisis de Portafolio", "🏆 Ranking de Rendimiento", "⭐ Clientes Clave", "⚙️ Ventas por Categoría"])
     
@@ -371,33 +380,48 @@ def render_dashboard():
     if 'anio' not in df_ventas_historicas.columns or df_ventas_historicas.empty:
         st.error("No hay datos históricos de ventas para analizar.")
         return
+        
+    # Determinar el año y mes más recientes disponibles en TODO el dataset
     lista_anios = sorted(df_ventas_historicas['anio'].unique(), reverse=True)
     anio_reciente = int(df_ventas_historicas['anio'].max())
     mes_reciente = int(df_ventas_historicas[df_ventas_historicas['anio'] == anio_reciente]['mes'].max())
+
     anio_sel = st.sidebar.selectbox("Elija el Año", lista_anios, index=0, key="sb_anio")
     lista_meses_num = sorted(df_ventas_historicas[df_ventas_historicas['anio'] == anio_sel]['mes'].unique())
     if not lista_meses_num:
         st.warning(f"No hay datos de ventas para el año {anio_sel}.")
         return
-    index_mes_defecto = lista_meses_num.index(mes_reciente) if anio_sel == anio_reciente and mes_reciente in lista_meses_num else 0
+        
+    # Se ajusta el mes por defecto para que sea el más reciente si se selecciona el año más reciente
+    index_mes_defecto = lista_meses_num.index(mes_reciente) if anio_sel == anio_reciente and mes_reciente in lista_meses_num else len(lista_meses_num) - 1
     mes_sel_num = st.sidebar.selectbox("Elija el Mes", options=lista_meses_num, format_func=lambda x: DATA_CONFIG['mapeo_meses'].get(x, 'N/A'), index=index_mes_defecto, key="sb_mes")
+    
     df_ventas_periodo = df_ventas_historicas[(df_ventas_historicas['anio'] == anio_sel) & (df_ventas_historicas['mes'] == mes_sel_num)]
+    
     if df_ventas_periodo.empty:
         st.warning("No se encontraron datos de ventas para el periodo seleccionado.")
     else:
         df_cobros_periodo = df_cobros_historicos[(df_cobros_historicos['anio'] == anio_sel) & (df_cobros_historicos['mes'] == mes_sel_num)]
-        df_resumen_final, df_albaranes_pendientes = procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel_num)
+        
+        # Se pasan los nuevos parámetros a la función de procesamiento
+        df_resumen_final, df_albaranes_pendientes = procesar_datos_periodo(
+            df_ventas_periodo, 
+            df_cobros_periodo, 
+            df_ventas_historicas, 
+            anio_sel, 
+            mes_sel_num,
+            anio_reciente, 
+            mes_reciente
+        )
         
         usuario_actual_norm = normalizar_texto(st.session_state.usuario)
-        vendedores_sel = [] # --- FIX: Inicializar lista de vendedores
         if usuario_actual_norm == "GERENTE":
             lista_filtro = sorted(df_resumen_final['nomvendedor'].unique())
             vendedores_sel = st.sidebar.multiselect("Filtrar Vendedores/Grupos", options=lista_filtro, default=lista_filtro, key="ms_vendedores")
             df_vista = df_resumen_final[df_resumen_final['nomvendedor'].isin(vendedores_sel)]
         else:
-            vendedores_sel = [st.session_state.usuario] # El vendedor individual es la selección
             df_vista = df_resumen_final[df_resumen_final['nomvendedor'] == usuario_actual_norm]
-
+            
         if df_vista.empty:
             st.warning("No hay datos disponibles para la selección de usuario/grupo actual.")
         else:
@@ -408,8 +432,10 @@ def render_dashboard():
                     if avance >= 70: return "🟡 Cerca del Objetivo"
                 return "🔴 Necesita Atención"
             df_vista['Estatus'] = df_vista.apply(asignar_estatus, axis=1)
+            
             st.title("🏠 Resumen de Rendimiento")
             st.header(f"{DATA_CONFIG['mapeo_meses'].get(mes_sel_num, '')} {anio_sel}")
+            
             if st.button("🔄 ¡Actualizar Todos los Datos!", type="primary", use_container_width=True, help="Fuerza la recarga de los archivos desde Dropbox."):
                 st.cache_data.clear()
                 if 'df_ventas' in st.session_state: del st.session_state.df_ventas
@@ -417,24 +443,30 @@ def render_dashboard():
                 st.toast("Limpiando caché y recargando datos... ¡Un momento!", icon="⏳")
                 time.sleep(3)
                 st.rerun()
+
             vista_para = st.session_state.usuario if len(df_vista['nomvendedor'].unique()) == 1 else 'Múltiples Seleccionados'
             st.markdown(f"**Vista para:** `{vista_para}`")
+            
             ventas_total = df_vista['ventas_totales'].sum(); meta_ventas = df_vista['presupuesto'].sum()
             cobros_total = df_vista['cobros_totales'].sum(); meta_cobros = df_vista['presupuestocartera'].sum()
             comp_total = df_vista['ventas_complementarios'].sum(); meta_comp = df_vista['presupuesto_complementarios'].sum()
             sub_meta_total = df_vista['ventas_sub_meta'].sum(); meta_sub_meta = df_vista['presupuesto_sub_meta'].sum()
             total_albaranes = df_vista['albaranes_pendientes'].sum()
+            
             avance_ventas = (ventas_total / meta_ventas * 100) if meta_ventas > 0 else 0
             avance_cobros = (cobros_total / meta_cobros * 100) if meta_cobros > 0 else 0
             avance_comp = (comp_total / meta_comp * 100) if meta_comp > 0 else 0
             avance_sub_meta = (sub_meta_total / meta_sub_meta * 100) if meta_sub_meta > 0 else 0
+            
             total_impactos = df_vista['impactos'].sum()
             marquilla_prom = np.average(df_vista['promedio_marquilla'], weights=df_vista['impactos']) if total_impactos > 0 else 0.0
             meta_marquilla = APP_CONFIG['kpi_goals']['meta_marquilla']
+            
             with st.container(border=True):
                 st.subheader(f"👨‍💼 Asesor Virtual para: {st.session_state.usuario}")
                 comentarios = generar_comentario_asesor(avance_ventas, avance_cobros, marquilla_prom, avance_comp, avance_sub_meta)
                 for comentario in comentarios: st.markdown(f"- {comentario}")
+
             st.subheader("Métricas Clave del Periodo")
             col1, col2, col3 = st.columns(3); col4, col5, col6 = st.columns(3)
             with col1:
@@ -456,6 +488,7 @@ def render_dashboard():
             with col6:
                 st.metric("Promedio Marquilla", f"{marquilla_prom:.2f}", f"{marquilla_prom - meta_marquilla:.2f} vs Meta")
                 st.progress(min((marquilla_prom / meta_marquilla), 1.0) if meta_marquilla > 0 else 0, text=f"Meta: {meta_marquilla:.2f}")
+
             st.markdown("---")
             st.subheader("Desglose por Vendedor / Grupo")
             cols_desglose = ['Estatus', 'nomvendedor', 'ventas_totales', 'presupuesto', 'cobros_totales', 'presupuestocartera', 'albaranes_pendientes', 'impactos', 'promedio_marquilla']
@@ -467,11 +500,11 @@ def render_dashboard():
                 "promedio_marquilla": st.column_config.ProgressColumn("Prom. Marquilla", format="%.2f", min_value=0, max_value=len(APP_CONFIG['marquillas_clave']))
             })
             
-            # --- FIX --- Se pasa la lista de vendedores seleccionados a la función de detalle
-            render_analisis_detallado(df_vista, df_ventas_periodo, vendedores_sel)
+            render_analisis_detallado(df_vista, df_ventas_periodo)
             
             st.markdown("---")
             st.header("📄 Detalle de Albaranes Pendientes por Facturar (Neto)")
+            
             vendedores_vista_actual = df_vista['nomvendedor'].unique()
             nombres_a_filtrar_albaranes = []
             for vendedor in vendedores_vista_actual:
@@ -479,24 +512,35 @@ def render_dashboard():
                 nombre_grupo_orig = next((k for k in DATA_CONFIG['grupos_vendedores'] if normalizar_texto(k) == vendedor_norm), vendedor_norm)
                 lista_vendedores = DATA_CONFIG['grupos_vendedores'].get(nombre_grupo_orig, [vendedor_norm])
                 nombres_a_filtrar_albaranes.extend([normalizar_texto(v) for v in lista_vendedores])
+            
             df_albaranes_vista = df_albaranes_pendientes[df_albaranes_pendientes['nomvendedor'].isin(nombres_a_filtrar_albaranes)]
             df_albaranes_a_mostrar = df_albaranes_vista[df_albaranes_vista['valor_venta'] > 0]
+            
             if not df_albaranes_a_mostrar.empty:
                 st.dataframe(df_albaranes_a_mostrar[['Serie', 'fecha_venta', 'nombre_cliente', 'valor_venta', 'nomvendedor']], 
                     use_container_width=True, hide_index=True, column_config={
                         "Serie": "Documento", "fecha_venta": "Fecha", "nombre_cliente": "Cliente",
                         "valor_venta": st.column_config.NumberColumn("Valor Pendiente", format="$ %d"), "nomvendedor": "Vendedor"
                     })
+            else:
+                st.success("¡Excelente! No hay albaranes pendientes de facturar para la selección actual en este periodo.", icon="✅")
+
 def main():
     if 'df_ventas' not in st.session_state:
         with st.spinner('Cargando datos maestros, por favor espere...'):
             st.session_state.df_ventas = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["ventas"], APP_CONFIG["column_names"]["ventas"])
             st.session_state.df_cobros = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["cobros"], APP_CONFIG["column_names"]["cobros"])
+            st.session_state['APP_CONFIG'] = APP_CONFIG
+            st.session_state['DATA_CONFIG'] = DATA_CONFIG
+            
     st.sidebar.image(APP_CONFIG["url_logo"], use_container_width=True)
     st.sidebar.header("Control de Acceso")
+    
     if 'autenticado' not in st.session_state: st.session_state.autenticado = False
+        
     if not st.session_state.autenticado:
         df_para_usuarios = st.session_state.get('df_ventas', pd.DataFrame())
+        
         @st.cache_data
         def obtener_lista_usuarios(df_ventas_cache):
             grupos_orig = list(DATA_CONFIG['grupos_vendedores'].keys())
@@ -508,15 +552,11 @@ def main():
                 vendedores_solos_orig = sorted([mapa_norm_a_orig.get(v_norm) for v_norm in vendedores_solos_norm if mapa_norm_a_orig.get(v_norm)])
                 return ["GERENTE"] + sorted(grupos_orig) + vendedores_solos_orig
             return ["GERENTE"] + sorted(grupos_orig)
+            
         todos_usuarios = obtener_lista_usuarios(df_para_usuarios)
-        usuarios_fijos_orig = {
-            "GERENTE": "1234", 
-            "MOSTRADOR PEREIRA": "2345", 
-            "MOSTRADOR ARMENIA": "3456", 
-            "MOSTRADOR MANIZALES": "4567", 
-            "MOSTRADOR LAURELES": "5678",
-            "MOSTRADOR OPALO": "opalo123"
-        }
+        usuarios_fijos_orig = {"GERENTE": "1234", "MOSTRADOR PEREIRA": "2345", "MOSTRADOR ARMENIA": "3456", "MOSTRADOR MANIZALES": "4567", "MOSTRADOR LAURELES": "5678"}
+        if "MOSTRADOR OPALO" not in usuarios_fijos_orig: usuarios_fijos_orig["MOSTRADOR OPALO"] = "opalo123"
+        
         usuarios = {normalizar_texto(k): v for k, v in usuarios_fijos_orig.items()}
         codigo = 1001
         for u in todos_usuarios:
@@ -524,8 +564,10 @@ def main():
             if u_norm not in usuarios:
                 usuarios[u_norm] = str(codigo)
                 codigo += 1
+                
         usuario_seleccionado = st.sidebar.selectbox("Seleccione su usuario", options=todos_usuarios, key="sb_login_user")
         clave = st.sidebar.text_input("Contraseña", type="password", key="txt_login_pass")
+        
         if st.sidebar.button("Ingresar", key="btn_login"):
             usuario_sel_norm = normalizar_texto(usuario_seleccionado)
             if usuario_sel_norm in usuarios and clave == usuarios[usuario_sel_norm]:
@@ -534,6 +576,7 @@ def main():
                 st.rerun()
             else:
                 st.sidebar.error("Usuario o contraseña incorrectos")
+                
         st.title("Plataforma de Inteligencia de Negocios")
         st.image(APP_CONFIG["url_logo"], width=400)
         st.header("Bienvenido")
