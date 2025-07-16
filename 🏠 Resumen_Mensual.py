@@ -1,9 +1,9 @@
 # ==============================================================================
 # SCRIPT COMPLETO Y DEFINITIVO PARA: 🏠 Resumen Mensual.py
 # VERSIÓN FINAL: 15 de Julio, 2025
-# DESCRIPCIÓN: Versión final con todas las correcciones de lógica de datos,
-#              errores de frontend, botón de actualización forzada y la
-#              inclusión de NOTA_CREDITO para el cálculo de ventas reales netas.
+# DESCRIPCIÓN: Versión final con lógica de ventas netas garantizada, incluyendo
+#              correctamente las NOTA_CREDITO con su valor negativo para que
+#              resten del total de ventas en todos los cálculos.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -12,7 +12,7 @@ import plotly.express as px
 import dropbox
 import io
 import unicodedata
-import time # ✨ NUEVO: Importamos la librería time para dar feedback visual al usuario
+import time
 
 # ==============================================================================
 # 1. CONFIGURACIÓN CENTRALIZADA (Sin cambios)
@@ -41,10 +41,8 @@ DATA_CONFIG = {
 
 st.set_page_config(page_title=APP_CONFIG["page_title"], page_icon="🏠", layout="wide", initial_sidebar_state="expanded")
 
-# ✨ NUEVO: Estilos CSS para el botón de actualización.
 st.markdown("""
 <style>
-    /* Estilo para el botón de actualización para hacerlo más grande y visible */
     div[data-testid="stButton"] > button[kind="primary"] {
         height: 3em;
         font-size: 1.2em;
@@ -68,10 +66,9 @@ def normalizar_texto(texto):
     if not isinstance(texto, str): return texto
     try:
         texto_sin_tildes = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
-        return texto_sin_tildes.upper().replace('-', ' ').strip().replace('  ', ' ')
+        return texto_sin_tildes.upper().replace('-', ' ').replace('_', ' ').strip().replace('  ', ' ')
     except (TypeError, AttributeError): return texto
 
-# Normaliza textos de la configuración una sola vez al inicio
 APP_CONFIG['complementarios']['exclude_super_categoria'] = normalizar_texto(APP_CONFIG['complementarios']['exclude_super_categoria'])
 APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo'] = normalizar_texto(APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo'])
 APP_CONFIG['categorias_clave_venta'] = [normalizar_texto(cat) for cat in APP_CONFIG['categorias_clave_venta']]
@@ -85,13 +82,15 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
             df = pd.read_csv(io.StringIO(contenido_csv), header=None, sep=',', on_bad_lines='skip', dtype=str)
             if df.shape[1] != len(nombres_columnas):
                 st.warning(f"Formato en {ruta_archivo}: Se esperaban {len(nombres_columnas)} columnas pero se encontraron {df.shape[1]}. Algunas columnas podrían faltar.")
-                # Se ajusta para rellenar columnas faltantes con None para evitar errores posteriores
                 df = df.reindex(columns=range(len(nombres_columnas)))
             df.columns = nombres_columnas
+            # GARANTÍA: Asegurar que las columnas de valor se traten como números, aceptando negativos.
+            # Esta sección es crucial para que los valores negativos de las notas de crédito se procesen correctamente.
             numeric_cols = ['anio', 'mes', 'valor_venta', 'valor_cobro', 'unidades_vendidas', 'costo_unitario', 'marca_producto']
             for col in numeric_cols:
-                if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce')
-            df.dropna(subset=['anio', 'mes'], inplace=True) # Se quita 'codigo_vendedor' de aquí para no eliminar filas si es nulo
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+            df.dropna(subset=['anio', 'mes'], inplace=True)
             df = df.astype({'anio': int, 'mes': int})
             if 'codigo_vendedor' in df.columns: df['codigo_vendedor'] = df['codigo_vendedor'].astype(str)
             if 'fecha_venta' in df.columns: df['fecha_venta'] = pd.to_datetime(df['fecha_venta'], errors='coerce')
@@ -118,9 +117,12 @@ def calcular_marquilla_optimizado(df_periodo):
 
 def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel):
     ### PASO 1: SEPARACIÓN Y CÁLCULOS BÁSICOS ###
-    # --- MODIFICACIÓN DE LÓGICA: Ahora se consideran 'FACTURA' y 'NOTA CREDITO' para calcular la venta real neta.
-    df_ventas_reales = df_ventas_periodo[df_ventas_periodo['TipoDocumento'].str.contains('FACTURA|NOTA CREDITO', na=False, case=False)].copy()
+    # --- LÓGICA GARANTIZADA: Se usa una expresión regular para capturar FACTURA y todas las variantes de NOTA CREDITO.
+    # 'NOTA.*CREDITO' captura 'NOTA CREDITO', 'NOTA_CREDITO', 'NOTACREDITO', etc.
+    filtro_ventas_netas = 'FACTURA|NOTA.*CREDITO'
+    df_ventas_reales = df_ventas_periodo[df_ventas_periodo['TipoDocumento'].str.contains(filtro_ventas_netas, na=False, case=False, regex=True)].copy()
     
+    # La función .sum() sumará los valores positivos (facturas) y los negativos (notas de crédito), resultando en la venta neta.
     resumen_ventas = df_ventas_reales.groupby(['codigo_vendedor', 'nomvendedor']).agg(ventas_totales=('valor_venta', 'sum'), impactos=('cliente_id', 'nunique')).reset_index()
     resumen_cobros = df_cobros_periodo.groupby('codigo_vendedor').agg(cobros_totales=('valor_cobro', 'sum')).reset_index()
     df_ventas_comp = df_ventas_reales[df_ventas_reales['super_categoria'] != APP_CONFIG['complementarios']['exclude_super_categoria']]
@@ -172,9 +174,9 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
         df_grupo_actual = df_resumen[df_resumen['nomvendedor'].isin(lista_vendedores_norm)]
         if not df_grupo_actual.empty:
             anio_anterior = anio_sel - 1
-            # --- MODIFICACIÓN DE LÓGICA: El presupuesto histórico ahora también busca ventas netas (Factura - Nota Crédito).
+            # --- LÓGICA GARANTIZADA: El presupuesto histórico también se calcula sobre ventas netas.
             df_grupo_historico_facturas = df_ventas_historicas[
-                (df_ventas_historicas['TipoDocumento'].str.contains('FACTURA|NOTA CREDITO', na=False, case=False)) &
+                (df_ventas_historicas['TipoDocumento'].str.contains(filtro_ventas_netas, na=False, case=False, regex=True)) &
                 (df_ventas_historicas['anio'] == anio_anterior) & 
                 (df_ventas_historicas['mes'] == mes_sel) & 
                 (df_ventas_historicas['nomvendedor'].isin(lista_vendedores_norm))
@@ -279,8 +281,9 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
     with tab3:
         st.subheader("Top 10 Clientes del Periodo (Por Venta Neta)")
         if not df_ventas_enfocadas.empty:
-            # --- MODIFICACIÓN DE LÓGICA: El Top Clientes ahora considera ventas netas (Facturas - Notas Crédito).
-            df_facturas_enfocadas = df_ventas_enfocadas[df_ventas_enfocadas['TipoDocumento'].str.contains('FACTURA|NOTA CREDITO', na=False, case=False)]
+            # --- LÓGICA GARANTIZADA: El Top Clientes ahora se calcula sobre ventas netas.
+            filtro_ventas_netas = 'FACTURA|NOTA.*CREDITO'
+            df_facturas_enfocadas = df_ventas_enfocadas[df_ventas_enfocadas['TipoDocumento'].str.contains(filtro_ventas_netas, na=False, case=False, regex=True)]
             top_clientes = df_facturas_enfocadas.groupby('nombre_cliente')['valor_venta'].sum().nlargest(10).reset_index()
             st.dataframe(top_clientes, column_config={"nombre_cliente": "Cliente", "valor_venta": st.column_config.NumberColumn("Total Compra (Neta)", format="$ %d")}, use_container_width=True, hide_index=True)
         else: st.info("No hay datos de clientes para este periodo.")
@@ -360,18 +363,14 @@ def render_dashboard():
             st.title("🏠 Resumen de Rendimiento")
             st.header(f"{DATA_CONFIG['mapeo_meses'].get(mes_sel_num, '')} {anio_sel}")
 
-            # ✨ NUEVO: BOTÓN DE ACTUALIZACIÓN FORZADA
             if st.button("🔄 ¡Actualizar Todos los Datos!", type="primary", use_container_width=True, help="Fuerza la recarga de los archivos desde Dropbox. Útil si los datos se actualizaron recientemente."):
-                # 1. Limpia toda la caché de datos de la aplicación
                 st.cache_data.clear()
-                # 2. Elimina los dataframes de la sesión para forzar su recarga
                 if 'df_ventas' in st.session_state:
                     del st.session_state.df_ventas
                 if 'df_cobros' in st.session_state:
                     del st.session_state.df_cobros
-                # 3. Muestra un mensaje al usuario y reinicia el script
                 st.toast("Limpiando caché y recargando datos... ¡Un momento!", icon="⏳")
-                time.sleep(3) # Pausa para que el usuario lea el mensaje
+                time.sleep(3)
                 st.rerun()
 
             vista_para = st.session_state.usuario if len(df_vista['nomvendedor'].unique()) == 1 else 'Múltiples Seleccionados'
@@ -468,8 +467,6 @@ def render_dashboard():
 # 4. LÓGICA DE AUTENTICACIÓN Y EJECUCIÓN PRINCIPAL (VERSIÓN FINAL Y ROBUSTA)
 # ==============================================================================
 def main():
-    # --- PASO 1: Cargar los datos una sola vez por sesión ---
-    # Se asegura de que los datos maestros existan en el estado de la sesión.
     if 'df_ventas' not in st.session_state:
         with st.spinner('Cargando datos maestros, por favor espere...'):
             st.session_state.df_ventas = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["ventas"], APP_CONFIG["column_names"]["ventas"])
@@ -483,7 +480,6 @@ def main():
     if 'autenticado' not in st.session_state:
         st.session_state.autenticado = False
 
-    # --- PASO 2: Lógica de autenticación ---
     if not st.session_state.autenticado:
         df_para_usuarios = st.session_state.get('df_ventas', pd.DataFrame())
         
@@ -526,11 +522,9 @@ def main():
         st.header("Bienvenido")
         st.info("Por favor, utilice el panel de la izquierda para ingresar sus credenciales de acceso.")
 
-    # --- PASO 3: Si ya está autenticado, renderiza el dashboard ---
     else:
         render_dashboard()
         if st.sidebar.button("Salir", key="btn_logout"):
-            # Limpia TODA la sesión para un logout seguro y completo
             keys_to_clear = list(st.session_state.keys())
             for key in keys_to_clear:
                 del st.session_state[key]
