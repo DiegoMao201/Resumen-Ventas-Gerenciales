@@ -258,4 +258,3 @@ def render_pagina_acciones():
             df_filtrada = df_matriz_productos[df_matriz_productos['Segmento'].isin(segmentos_seleccionados)]
             if not df_filtrada.empty:
                 max_rentabilidad = df_filtrada['Rentabilidad'].max()
-                # Aquí puedes seguir mostrando el resultado o usarlo en la UI
