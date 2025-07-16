@@ -1,9 +1,10 @@
 # ==============================================================================
 # SCRIPT CORREGIDO Y FINAL PARA: pages/1_Acciones_y_Recomendaciones.py
 # VERSIÓN: 16 de Julio, 2025
-# CORRECCIÓN: Se implementa la lógica de identificación de descuentos usando el
-#             código de artículo específico (4790512) proporcionado por el
-#             usuario para garantizar la máxima precisión en los cálculos.
+# CORRECCIÓN: Se simplifica y fortalece el filtro de Tipo de Documento para
+#             asegurar que todos los tipos de factura (ej. FACTURA_DIRECTA)
+#             sean capturados correctamente, resolviendo el problema de
+#             descuentos no encontrados.
 # ==============================================================================
 
 import streamlit as st
@@ -66,19 +67,15 @@ def preparar_datos_y_margen(df):
     """
     df_copy = df.copy()
 
-    # ✨ SOLUCIÓN DEFINITIVA: Se usa el código de artículo exacto proporcionado.
     codigos_de_descuento = ['4790512']
 
-    # Aseguramos que la columna de códigos sea de tipo texto para una comparación segura
     df_copy['codigo_articulo'] = df_copy['codigo_articulo'].astype(str)
     
-    # El filtro ahora busca por el código exacto, eliminando cualquier ambigüedad.
     filtro_descuento = df_copy['codigo_articulo'].isin(codigos_de_descuento)
 
     df_descuentos = df_copy[filtro_descuento]
     df_productos = df_copy[~filtro_descuento].copy()
 
-    # El resto del cálculo de margen no cambia
     if not df_productos.empty:
         df_productos['costo_unitario'] = pd.to_numeric(df_productos['costo_unitario'], errors='coerce').fillna(0)
         df_productos['unidades_vendidas'] = pd.to_numeric(df_productos['unidades_vendidas'], errors='coerce').fillna(0)
@@ -93,27 +90,15 @@ def preparar_datos_y_margen(df):
 def analizar_rentabilidad(df_productos, df_descuentos):
     """
     Analiza la rentabilidad reconstruyendo la Venta Bruta a partir de la Venta Neta
-    y los descuentos con valor positivo.
+    y los descuentos con valor positivo. Corregido para manejar periodos sin descuentos.
     """
-    # 1. La suma de 'valor_venta' de los productos es en realidad la VENTA NETA de productos.
     venta_neta_productos = df_productos['valor_venta'].sum()
-
-    # 2. El total de descuentos es la suma del 'valor_venta' (positivo) de los artículos de descuento.
     total_descuentos = abs(df_descuentos['valor_venta'].sum())
-
-    # 3. Se reconstruye la VENTA BRUTA REAL.
     venta_bruta_reconstruida = venta_neta_productos + total_descuentos
-
-    # 4. El margen bruto de los productos se calcula sobre la venta neta.
     margen_bruto_productos = df_productos['margen_bruto'].sum() if 'margen_bruto' in df_productos.columns else 0
-    
-    # 5. El margen operativo es el margen de los productos menos el valor de los descuentos.
     margen_operativo = margen_bruto_productos - total_descuentos
-    
-    # 6. CÁLCULO DE PORCENTAJE CORREGIDO: Se usa la Venta Bruta Reconstruida como base.
     porcentaje_descuento = (total_descuentos / venta_bruta_reconstruida * 100) if venta_bruta_reconstruida > 0 else 0
 
-    # --- Lógica para el gráfico de evolución ---
     df_productos_copy = df_productos.copy()
     df_descuentos_copy = df_descuentos.copy()
 
@@ -126,10 +111,18 @@ def analizar_rentabilidad(df_productos, df_descuentos):
     descuentos_mensual = abs(df_descuentos_copy.groupby('mes_anio')['valor_venta'].sum()) if not df_descuentos_copy.empty else pd.Series(dtype=float)
 
     df_evolucion = pd.DataFrame(margen_bruto_mensual).reset_index()
-    df_evolucion = pd.merge(df_evolucion, pd.DataFrame(descuentos_mensual).reset_index(), on='mes_anio', how='outer').fillna(0)
-    df_evolucion.rename(columns={'valor_venta': 'descuentos_mes'}, inplace=True)
+
+    if not descuentos_mensual.empty:
+        df_descuentos_mensual = pd.DataFrame(descuentos_mensual).reset_index()
+        df_evolucion = pd.merge(df_evolucion, df_descuentos_mensual, on='mes_anio', how='outer')
+        df_evolucion.rename(columns={'valor_venta': 'descuentos_mes'}, inplace=True)
+    else:
+        df_evolucion['descuentos_mes'] = 0
+
+    df_evolucion.fillna(0, inplace=True)
     df_evolucion['margen_operativo'] = df_evolucion['margen_bruto'] - df_evolucion['descuentos_mes']
     df_evolucion['mes_anio'] = df_evolucion['mes_anio'].dt.to_timestamp()
+    
     top_clientes_descuento = abs(df_descuentos.groupby('nombre_cliente')['valor_venta'].sum()).nlargest(5).reset_index()
 
     return {
@@ -249,8 +242,12 @@ def render_pagina_acciones():
     fecha_inicio, fecha_fin = periodo_inicio.start_time, periodo_fin.end_time
     df_vendedor_periodo_bruto = df_vendedor_base[(df_vendedor_base['fecha_venta'] >= fecha_inicio) & (df_vendedor_base['fecha_venta'] <= fecha_fin)]
 
-    filtro_ventas_netas = 'FACTURA|NOTA.*CREDITO'
-    df_vendedor_periodo = df_vendedor_periodo_bruto[df_vendedor_periodo_bruto['TipoDocumento'].str.contains(filtro_ventas_netas, na=False, case=False, regex=True)].copy()
+    # ✨ CORRECCIÓN DEFINITIVA DEL FILTRO DE DOCUMENTOS ✨
+    # La columna 'TipoDocumento' fue normalizada en la página principal (ej. 'FACTURA_DIRECTA' -> 'FACTURA DIRECTA')
+    # Este filtro simplificado y robusto captura cualquier tipo de factura.
+    filtro_facturas = df_vendedor_periodo_bruto['TipoDocumento'].str.startswith('FACTURA', na=False)
+    filtro_notas = df_vendedor_periodo_bruto['TipoDocumento'].str.contains('NOTA.*CREDITO', na=False, regex=True)
+    df_vendedor_periodo = df_vendedor_periodo_bruto[filtro_facturas | filtro_notas].copy()
 
     if df_vendedor_periodo.empty:
         st.warning(f"No se encontraron datos de ventas netas (facturas, notas de crédito) para '{seleccion}' en el rango de meses seleccionado.")
