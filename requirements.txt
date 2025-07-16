@@ -7,3 +7,4 @@ dropbox
 plotly
 openpyxl
 xlsxwriter
+mlxtend
