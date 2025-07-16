@@ -257,4 +257,5 @@ def render_pagina_acciones():
             segmentos_seleccionados = st.multiselect("Filtrar por segmento:", options=sorted(df_matriz_productos['Segmento'].unique()), default=sorted(df_matriz_productos['Segmento'].unique()))
             df_filtrada = df_matriz_productos[df_matriz_productos['Segmento'].isin(segmentos_seleccionados)]
             if not df_filtrada.empty:
-                max_rentabilidad = df_filtrada['Rentabilidad'].
+    max_rentabilidad = df_filtrada['Rentabilidad'].max()
+    # Aquí puedes seguir mostrando el resultado o usarlo en la UI
