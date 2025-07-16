@@ -1,183 +1,335 @@
 # ==============================================================================
-# SCRIPT COMPLETO Y FUNCIONAL PARA: 🎯 Acciones y Recomendaciones.py
-# VERSIÓN: 2.0 (COMPLETA)
-# DESCRIPCIÓN: Página completa para el análisis de portafolio de productos.
-#              Incluye Matriz BCG, análisis de rendimiento, oportunidades y un
-#              plan de acción dinámico, todo controlado por filtros interactivos.
+# SCRIPT DE INTELIGENCIA COMERCIAL PARA: 🎯 Acciones y Recomendaciones.py
+# VERSIÓN: 3.0 (Expansión Estratégica)
+#
+# DESCRIPCIÓN:
+# Esta versión transforma la página en una herramienta de inteligencia activa para el vendedor.
+# Las mejoras clave incluyen:
+#
+# 1.  CUADRANTES DE RENDIMIENTO: Se reemplaza la Matriz BCG por un análisis más intuitivo de
+#     "Rentabilidad vs. Popularidad" (Nº de Clientes), creando cuadrantes accionables:
+#     Líderes, Potenciales, De Nicho y Problemáticos.
+#
+# 2.  ANÁLISIS DE CESTA DE MERCADO (CROSS-SELLING): Se integra un motor de reglas de
+#     asociación para identificar qué productos se compran juntos frecuentemente. Esto genera
+#     oportunidades de venta cruzada directas y basadas en datos.
+#
+# 3.  ANÁLISIS DE PENETRACIÓN DE PORTAFOLIO: Se cruzan los productos más importantes con
+#     los clientes clave para visualizar "espacios en blanco", es decir, oportunidades
+#     de venta de productos estrella a clientes que aún no los compran.
+#
+# 4.  DIAGNÓSTICO PROFUNDO DE PRODUCTO: Una nueva pestaña que permite al vendedor
+#     seleccionar cualquier producto y obtener un análisis 360° de su rendimiento individual,
+#     incluyendo tendencias, márgenes y sus principales compradores.
+#
+# 5.  PLAN DE ACCIÓN MEJORADO: El plan de acción ahora es dinámico y se nutre de
+#     todos los análisis anteriores, ofreciendo recomendaciones específicas y contextuales
+#     en lugar de consejos genéricos.
 # ==============================================================================
 
 import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import plotly.graph_objects as go
 import unicodedata
+from mlxtend.frequent_patterns import apriori, association_rules
+from mlxtend.preprocessing import TransactionEncoder
 
 # --- Configuración de la Página ---
 st.set_page_config(
-    page_title="Acciones y Recomendaciones",
-    page_icon="🎯",
+    page_title="Inteligencia de Portafolio",
+    page_icon="💡",
     layout="wide"
 )
 
 # ==============================================================================
-# FUNCIONES AUXILIARES Y DE CÁLCULO
+# SECCIÓN 1: LÓGICA DE ANÁLISIS AVANZADO
 # ==============================================================================
 
 def normalizar_texto(texto):
     """Normaliza texto a mayúsculas, sin tildes ni caracteres especiales."""
-    if not isinstance(texto, str):
-        return texto
+    if not isinstance(texto, str): return texto
     try:
-        texto_sin_tildes = ''.join(c for c in unicodedata.normalize('NFD', texto)
-                                  if unicodedata.category(c) != 'Mn')
-        return texto_sin_tildes.upper().strip()
-    except (TypeError, AttributeError):
-        return texto
+        return ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn').upper().strip()
+    except (TypeError, AttributeError): return texto
 
-@st.cache_data(ttl=1800)
-def calcular_metricas_productos(_df):
-    """
-    Calcula un completo set de métricas por producto para análisis detallado.
-    Devuelve un DataFrame robusto con Volumen de Venta, Costos, Márgenes y Rentabilidad.
-    """
-    if _df.empty:
-        return pd.DataFrame()
+@st.cache_data(ttl=3600)
+def calcular_metricas_portafolio(_df):
+    """Calcula un set completo de métricas por producto: Ventas, Márgenes, Popularidad."""
+    if _df.empty: return pd.DataFrame()
 
-    # 1. Filtrar solo ventas reales (positivas) para análisis de rendimiento.
-    df_positivas = _df[_df['valor_venta'] > 0].copy()
+    df_ventas = _df[_df['valor_venta'] > 0].copy()
+    numeric_cols = ['valor_venta', 'costo_unitario', 'unidades_vendidas']
+    for col in numeric_cols:
+        df_ventas[col] = pd.to_numeric(df_ventas[col], errors='coerce')
+    df_ventas.dropna(subset=numeric_cols, inplace=True)
+    df_ventas['costo_total_linea'] = df_ventas['costo_unitario'] * df_ventas['unidades_vendidas']
 
-    # 2. Asegurar que las columnas para el cálculo son numéricas.
-    cols_numericas = ['valor_venta', 'costo_unitario', 'unidades_vendidas']
-    for col in cols_numericas:
-        df_positivas[col] = pd.to_numeric(df_positivas[col], errors='coerce')
-
-    # 3. Eliminar filas donde los datos esenciales son nulos.
-    df_positivas.dropna(subset=cols_numericas, inplace=True)
-    
-    # 4. Calcular el costo total por línea.
-    df_positivas['costo_total_linea'] = df_positivas['costo_unitario'] * df_positivas['unidades_vendidas']
-    
-    # 5. Agrupar por producto para consolidar las métricas.
-    df_productos = df_positivas.groupby(['codigo_articulo', 'nombre_articulo']).agg(
+    df_productos = df_ventas.groupby(['codigo_articulo', 'nombre_articulo']).agg(
         Volumen_Venta=('valor_venta', 'sum'),
         Costo_Total=('costo_total_linea', 'sum'),
-        Unidades_Vendidas=('unidades_vendidas', 'sum')
+        Unidades_Vendidas=('unidades_vendidas', 'sum'),
+        Popularidad=('cliente_id', 'nunique') # Nº de clientes únicos que compraron el producto
     ).reset_index()
 
-    # 6. Calcular métricas de rentabilidad.
     df_productos['Margen_Absoluto'] = df_productos['Volumen_Venta'] - df_productos['Costo_Total']
-    
-    # Manejo seguro de división por cero para Rentabilidad.
-    num = df_productos['Margen_Absoluto']
-    den = df_productos['Volumen_Venta']
-    df_productos['Rentabilidad_Pct'] = np.divide(num, den, out=np.zeros_like(num, dtype=float), where=den!=0) * 100
-
-    # 7. Limpieza final y retorno.
+    df_productos['Rentabilidad_Pct'] = np.where(df_productos['Volumen_Venta'] > 0, (df_productos['Margen_Absoluto'] / df_productos['Volumen_Venta']) * 100, 0)
     df_productos = df_productos[df_productos['Volumen_Venta'] > 0].sort_values(by="Volumen_Venta", ascending=False)
     
     return df_productos
 
-@st.cache_data(ttl=1800)
-def asignar_segmento_bcg(_df_productos):
-    """Asigna el segmento BCG a un DataFrame de productos ya calculado."""
-    if _df_productos.empty:
-        return _df_productos
+@st.cache_data(ttl=3600)
+def asignar_cuadrantes_rendimiento(_df_productos):
+    """Asigna productos a cuadrantes de rendimiento basados en Rentabilidad y Popularidad."""
+    if _df_productos.empty: return _df_productos
 
-    df_result = _df_productos.copy()
+    df = _df_productos.copy()
+    rentabilidad_media = df['Rentabilidad_Pct'].mean()
+    popularidad_media = df['Popularidad'].mean()
+
+    def get_cuadrante(row):
+        alta_rentabilidad = row['Rentabilidad_Pct'] >= rentabilidad_media
+        alta_popularidad = row['Popularidad'] >= popularidad_media
+        if alta_rentabilidad and alta_popularidad: return '⭐ Líderes'
+        if not alta_rentabilidad and alta_popularidad: return '🤔 Potenciales (Bajo Margen)'
+        if alta_rentabilidad and not alta_popularidad: return '💎 De Nicho (Gemas Ocultas)'
+        return '📉 Problemáticos'
+
+    df['Cuadrante'] = df.apply(get_cuadrante, axis=1)
+    return df
+
+@st.cache_data(ttl=3600)
+def analisis_cesta_mercado(_df):
+    """Realiza un Market Basket Analysis para encontrar oportunidades de cross-selling."""
+    if _df.empty or 'cliente_id' not in _df.columns: return pd.DataFrame()
     
-    mediana_volumen = df_result['Volumen_Venta'].median()
-    mediana_rentabilidad = df_result['Rentabilidad_Pct'].median()
-
-    def get_segmento(row):
-        es_alto_volumen = row['Volumen_Venta'] >= mediana_volumen
-        es_alta_rentabilidad = row['Rentabilidad_Pct'] >= mediana_rentabilidad
-
-        if es_alto_volumen and es_alta_rentabilidad: return '⭐ Estrella'
-        if es_alto_volumen and not es_alta_rentabilidad: return '🐄 Vaca Lechera'
-        if not es_alto_volumen and es_alta_rentabilidad: return '❓ Interrogante'
-        return '🐕 Perro'
-
-    df_result['Segmento_BCG'] = df_result.apply(get_segmento, axis=1)
-    return df_result
-
-def generar_plan_accion(df_analisis):
-    """Genera una lista de recomendaciones textuales basadas en el análisis."""
-    recomendaciones = []
+    # Agrupar por "transacción" (cliente + fecha)
+    transactions = _df.groupby(['cliente_id', 'fecha_venta'])['nombre_articulo'].apply(list).values.tolist()
     
-    # Recomendaciones para productos con margen negativo
-    df_negativos = df_analisis[df_analisis['Margen_Absoluto'] < 0].sort_values(by='Margen_Absoluto').head(5)
-    if not df_negativos.empty:
-        recomendaciones.append("### 🔴 **Acciones Críticas: Margen Negativo**")
-        for _, row in df_negativos.iterrows():
-            recomendaciones.append(f"- **Revisar Costos/Precios:** El producto **{row['nombre_articulo']}** generó una pérdida de **${-row['Margen_Absoluto']:,.0f}**. Es urgente analizar su estructura de costos o estrategia de precios.")
-
-    # Recomendaciones para productos "Estrella"
-    df_estrellas = df_analisis[df_analisis['Segmento_BCG'] == '⭐ Estrella'].sort_values(by='Volumen_Venta', ascending=False).head(3)
-    if not df_estrellas.empty:
-        recomendaciones.append("### ⭐ **Potenciar Estrellas**")
-        for _, row in df_estrellas.iterrows():
-            recomendaciones.append(f"- **Invertir y Proteger:** **{row['nombre_articulo']}** es un producto líder en ventas y rentabilidad. Asegura su disponibilidad, visibilidad y considera campañas para mantener su liderazgo.")
-
-    # Recomendaciones para productos "Interrogante"
-    df_interrogantes = df_analisis[df_analisis['Segmento_BCG'] == '❓ Interrogante'].sort_values(by='Rentabilidad_Pct', ascending=False).head(3)
-    if not df_interrogantes.empty:
-        recomendaciones.append("### ❓ **Desarrollar Interrogantes**")
-        for _, row in df_interrogantes.iterrows():
-            recomendaciones.append(f"- **Impulsar Ventas:** **{row['nombre_articulo']}** es muy rentable pero con bajo volumen. Analiza si una promoción o mayor exposición podría convertirlo en una estrella.")
-
-    # Recomendaciones para productos "Perro"
-    df_perros = df_analisis[df_analisis['Segmento_BCG'] == '🐕 Perro'].sort_values(by='Margen_Absoluto').head(3)
-    if not df_perros.empty:
-        recomendaciones.append("### 🐕 **Gestionar Perros**")
-        for _, row in df_perros.iterrows():
-            recomendaciones.append(f"- **Evaluar Continuidad:** El producto **{row['nombre_articulo']}** tiene bajo volumen y baja rentabilidad. Considera desinvertir, reemplazarlo o reducir su inventario al mínimo.")
-            
-    return recomendaciones if recomendaciones else ["¡Excelente! No se han identificado acciones críticas inmediatas en el portafolio."]
-
+    te = TransactionEncoder()
+    te_ary = te.fit(transactions).transform(transactions)
+    df_onehot = pd.DataFrame(te_ary, columns=te.columns_)
+    
+    # Apriori para encontrar itemsets frecuentes
+    frequent_itemsets = apriori(df_onehot, min_support=0.01, use_colnames=True)
+    if frequent_itemsets.empty: return pd.DataFrame()
+    
+    # Generar reglas de asociación
+    rules = association_rules(frequent_itemsets, metric="lift", min_threshold=1)
+    rules = rules.sort_values(['lift', 'confidence'], ascending=[False, False])
+    rules = rules[['antecedents', 'consequents', 'confidence', 'lift']]
+    rules['antecedents'] = rules['antecedents'].apply(lambda x: ', '.join(list(x)))
+    rules['consequents'] = rules['consequents'].apply(lambda x: ', '.join(list(x)))
+    rules.rename(columns={'antecedents': 'Si el cliente compra...', 'consequents': 'Recomendar también...', 'confidence': 'Confianza', 'lift': 'Potencial'}, inplace=True)
+    return rules
 
 # ==============================================================================
-# RENDERIZADO DE LA PÁGINA
+# SECCIÓN 2: COMPONENTES DE LA INTERFAZ DE USUARIO (UI)
+# ==============================================================================
+
+def render_tab_fotografia(df_analisis, enfoque, periodo):
+    """Renderiza la pestaña principal con los cuadrantes de rendimiento."""
+    st.header("📸 Fotografía del Portafolio")
+    st.markdown(f"Análisis para: **{enfoque}** | Periodo: **{periodo}**")
+
+    if df_analisis.empty:
+        st.warning("No hay datos suficientes para generar la matriz de portafolio.")
+        return
+
+    df_plot = df_analisis.copy()
+    df_plot['Tamaño_Grafico'] = df_plot['Volumen_Venta']
+    
+    fig = px.scatter(
+        df_plot,
+        x="Popularidad", y="Rentabilidad_Pct",
+        size="Tamaño_Grafico", color="Cuadrante",
+        hover_name="nombre_articulo",
+        hover_data={'Popularidad': True, 'Rentabilidad_Pct': ':.2f', 'Volumen_Venta': ':,.0f'},
+        size_max=70, title="Matriz de Rendimiento (Rentabilidad vs. Popularidad)",
+        labels={"Popularidad": "Popularidad (Nº de Clientes que lo Compran)", "Rentabilidad_Pct": "Rentabilidad (%)"},
+        color_discrete_map={
+            '⭐ Líderes': 'green', 
+            '💎 De Nicho (Gemas Ocultas)': 'gold', 
+            '🤔 Potenciales (Bajo Margen)': 'dodgerblue', 
+            '📉 Problemáticos': 'tomato'
+        }
+    )
+    fig.add_vline(x=df_plot['Popularidad'].mean(), line_dash="dash", line_color="gray", annotation_text="Popularidad Media")
+    fig.add_hline(y=df_plot['Rentabilidad_Pct'].mean(), line_dash="dash", line_color="gray", annotation_text="Rentabilidad Media")
+    st.plotly_chart(fig, use_container_width=True)
+
+    with st.expander("Ver detalle de productos por cuadrante", expanded=False):
+        st.dataframe(df_analisis[['nombre_articulo', 'Cuadrante', 'Volumen_Venta', 'Rentabilidad_Pct', 'Popularidad', 'Margen_Absoluto']], use_container_width=True, hide_index=True)
+
+def render_tab_cross_selling(df_reglas):
+    """Renderiza las oportunidades de venta cruzada."""
+    st.header("💡 Oportunidades de Venta Cruzada (Cross-Selling)")
+    st.info("""
+        **¿Cómo leer esta tabla?** Si un cliente compra el producto de la primera columna, existe una alta probabilidad de que también esté interesado en el producto de la segunda.
+        - **Confianza:** Porcentaje de veces que la recomendación fue acertada en el pasado.
+        - **Potencial (Lift):** Cuántas veces más probable es que se compren juntos que por separado. Un valor > 1 indica una buena asociación.
+    """)
+    if df_reglas.empty:
+        st.warning("No se encontraron suficientes patrones de compra conjunta para generar recomendaciones de venta cruzada en este periodo.")
+        return
+    
+    conf_min = st.slider("Filtrar por Confianza mínima:", 0.0, 1.0, 0.2, 0.05)
+    df_filtrada = df_reglas[df_reglas['Confianza'] >= conf_min]
+    
+    st.dataframe(df_filtrada, use_container_width=True, hide_index=True,
+                 column_config={"Confianza": st.column_config.ProgressColumn(format="%.2f", min_value=0, max_value=1),
+                                "Potencial": st.column_config.NumberColumn(format="%.2f x")})
+
+def render_tab_penetracion(df_ventas, df_analisis_productos):
+    """Renderiza el análisis de penetración de productos en clientes clave."""
+    st.header("🎯 Penetración en Clientes Clave")
+    st.info("Esta sección muestra qué productos estrella **aún no han sido comprados** por tus clientes más importantes, revelando oportunidades directas.")
+
+    if df_analisis_productos.empty:
+        st.warning("No hay datos de productos para analizar la penetración.")
+        return
+
+    top_n_clientes = st.slider("Seleccionar el Top N de clientes a analizar:", 5, 20, 10)
+    top_n_productos = st.slider("Seleccionar el Top N de productos a analizar:", 5, 20, 10)
+
+    clientes_top = df_ventas.groupby('nombre_cliente')['valor_venta'].sum().nlargest(top_n_clientes).index
+    productos_top = df_analisis_productos.nlargest(top_n_productos, 'Volumen_Venta')['nombre_articulo'].unique()
+
+    df_cruce = df_ventas[df_ventas['nombre_cliente'].isin(clientes_top) & df_ventas['nombre_articulo'].isin(productos_top)]
+    matriz_penetracion = pd.crosstab(df_cruce['nombre_cliente'], df_cruce['nombre_articulo'], values=df_cruce['valor_venta'], aggfunc='sum').fillna(0)
+    
+    # Reindexar para asegurar que todos los clientes y productos top estén presentes
+    matriz_penetracion = matriz_penetracion.reindex(index=clientes_top, columns=productos_top, fill_value=0)
+
+    fig = go.Figure(data=go.Heatmap(
+        z=matriz_penetracion.values,
+        x=matriz_penetracion.columns,
+        y=matriz_penetracion.index,
+        colorscale='Greens',
+        hovertemplate='Cliente: %{y}<br>Producto: %{x}<br>Ventas: $%{z:,.0f}<extra></extra>'
+    ))
+    fig.update_layout(title=f'Mapa de Calor: Ventas de Top {top_n_productos} Productos a Top {top_n_clientes} Clientes',
+                      xaxis_title="Productos Clave", yaxis_title="Clientes Clave")
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Identificar oportunidades (celdas en cero)
+    oportunidades = matriz_penetracion[matriz_penetracion == 0].stack().reset_index()
+    oportunidades.columns = ['Cliente', 'Producto', '_']
+    if not oportunidades.empty:
+        with st.expander("Ver lista de oportunidades directas (espacios en blanco)", expanded=True):
+            st.dataframe(oportunidades[['Cliente', 'Producto']], use_container_width=True, hide_index=True)
+
+def render_tab_diagnostico(_df_ventas, df_analisis_productos):
+    """Renderiza la pestaña para un análisis profundo de un producto individual."""
+    st.header("🔬 Diagnóstico Profundo de Producto")
+    if df_analisis_productos.empty:
+        st.warning("No hay productos para analizar.")
+        return
+
+    lista_productos = df_analisis_productos['nombre_articulo'].tolist()
+    producto_sel = st.selectbox("Seleccione un producto para su diagnóstico:", [""] + lista_productos, key="sel_prod_diag")
+
+    if not producto_sel:
+        st.info("Seleccione un producto de la lista para ver su análisis detallado.")
+        return
+
+    # Filtrar datos para el producto seleccionado
+    info_producto = df_analisis_productos[df_analisis_productos['nombre_articulo'] == producto_sel].iloc[0]
+    df_producto_ventas = _df_ventas[_df_ventas['nombre_articulo'] == producto_sel]
+
+    st.subheader(f"Informe Médico para: {producto_sel}")
+    
+    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+    kpi1.metric("Ventas Totales", f"${info_producto['Volumen_Venta']:,.0f}")
+    kpi2.metric("Margen Bruto", f"${info_producto['Margen_Absoluto']:,.0f}")
+    kpi3.metric("Rentabilidad Media", f"{info_producto['Rentabilidad_Pct']:.2f}%")
+    kpi4.metric("Nº Clientes", f"{info_producto['Popularidad']}")
+
+    # Análisis de compradores
+    compradores = df_producto_ventas.groupby('nombre_cliente')['valor_venta'].sum().nlargest(10).reset_index()
+    fig_compradores = px.bar(compradores, x='valor_venta', y='nombre_cliente', orientation='h',
+                             title=f"Top 10 Compradores de {producto_sel}",
+                             labels={'valor_venta': 'Ventas ($)', 'nombre_cliente': 'Cliente'})
+    fig_compradores.update_layout(yaxis={'categoryorder':'total ascending'})
+    st.plotly_chart(fig_compradores, use_container_width=True)
+
+
+def render_tab_plan_accion(df_analisis, df_reglas, df_ventas):
+    """Genera y renderiza el plan de acción dinámico y mejorado."""
+    st.header("✍️ Plan de Acción Personalizado")
+    st.info("Estas son recomendaciones automáticas generadas a partir de tus datos. Úsalas como punto de partida para tu estrategia comercial.")
+    
+    recomendaciones = []
+
+    # 1. Acción sobre productos problemáticos
+    df_problematicos = df_analisis[df_analisis['Cuadrante'] == '📉 Problemáticos'].sort_values(by='Margen_Absoluto').head(3)
+    if not df_problematicos.empty:
+        recomendaciones.append("### 📉 **Gestionar Productos Problemáticos**")
+        for _, row in df_problematicos.iterrows():
+            recomendaciones.append(f"- **Acción Crítica:** El producto **{row['nombre_articulo']}** tiene baja rentabilidad y pocos compradores. Aporta un margen de solo **${row['Margen_Absoluto']:,.0f}**. Considera descontinuarlo o no ofrecerlo activamente.")
+
+    # 2. Acción sobre gemas ocultas
+    df_gemas = df_analisis[df_analisis['Cuadrante'] == '💎 De Nicho (Gemas Ocultas)'].sort_values(by='Rentabilidad_Pct', ascending=False).head(3)
+    if not df_gemas.empty:
+        recomendaciones.append("### 💎 **Explotar Gemas Ocultas**")
+        for _, row in df_gemas.iterrows():
+            compradores_gema = df_ventas[df_ventas['nombre_articulo'] == row['nombre_articulo']]['cliente_id'].nunique()
+            recomendaciones.append(f"- **Oportunidad de Nicho:** **{row['nombre_articulo']}** es altamente rentable ({row['Rentabilidad_Pct']:.1f}%) pero solo lo compran {compradores_gema} clientes. Identifica el perfil de estos compradores y busca clientes similares para ofrecérselo.")
+
+    # 3. Acción sobre venta cruzada
+    if not df_reglas.empty:
+        recomendaciones.append("### 🔗 **Impulsar Venta Cruzada (Cross-Selling)**")
+        top_regla = df_reglas.iloc[0]
+        recomendaciones.append(f"- **Recomendación Directa:** Tu oportunidad de cross-selling más fuerte es: cuando un cliente compre **{top_regla['Si el cliente compra...']}**, ofrécele **{top_regla['Recomendar también...']}**. Esta combinación tiene una confianza del **{top_regla['Confianza']:.0%}**.")
+
+    # 4. Acción sobre penetración
+    clientes_top = df_ventas.groupby('nombre_cliente')['valor_venta'].sum().nlargest(10).index
+    productos_top = df_analisis[df_analisis['Cuadrante'] == '⭐ Líderes']['nombre_articulo'].unique()
+    if len(productos_top) > 0:
+        df_cruce = df_ventas[df_ventas['nombre_cliente'].isin(clientes_top) & df_ventas['nombre_articulo'].isin(productos_top)]
+        matriz_penetracion = pd.crosstab(df_cruce['nombre_cliente'], df_cruce['nombre_articulo']).reindex(index=clientes_top, columns=productos_top, fill_value=0)
+        oportunidades = matriz_penetracion[matriz_penetracion == 0].stack().reset_index()
+        if not oportunidades.empty:
+            recomendaciones.append("### 🎯 **Cerrar Brechas en Clientes Clave**")
+            oportunidad_top = oportunidades.iloc[0]
+            recomendaciones.append(f"- **Oportunidad Directa:** Tu cliente clave **{oportunidad_top['nombre_cliente']}** aún no ha comprado tu producto líder **{oportunidad_top['nombre_articulo']}**. Prepara una oferta específica para tu próxima visita.")
+            
+    if not recomendaciones:
+        st.success("¡Excelente rendimiento! No se han identificado acciones críticas inmediatas. Revisa las pestañas para encontrar oportunidades de optimización.")
+    else:
+        for punto in recomendaciones:
+            st.markdown(punto)
+
+# ==============================================================================
+# SECCIÓN 3: ORQUESTADOR PRINCIPAL DE LA PÁGINA
 # ==============================================================================
 
 def render_pagina():
     """Orquesta la renderización de toda la página, incluyendo filtros y contenido en pestañas."""
-    st.markdown("<style> .stTabs [data-baseweb='tab-list'] { gap: 2px; } </style>", unsafe_allow_html=True)
-    st.title("🎯 Acciones y Recomendaciones de Portafolio")
+    st.title("💡 Inteligencia de Portafolio y Acciones Comerciales")
     st.markdown("---")
 
-    # --- Carga de datos y configuración desde la sesión ---
     if 'df_ventas' not in st.session_state or st.session_state.df_ventas.empty:
         st.error("No se han cargado los datos de ventas. Por favor, ve a la página principal y carga los datos primero.")
         st.stop()
         
     df_ventas_historicas = st.session_state.df_ventas
-    # Cargar configuraciones (si no existen, crear placeholders para evitar errores)
-    DATA_CONFIG = st.session_state.get('DATA_CONFIG', {'grupos_vendedores': {}, 'mapeo_meses': {1:"Enero", 2:"Febrero", 3:"Marzo", 4:"Abril", 5:"Mayo", 6:"Junio", 7:"Julio", 8:"Agosto", 9:"Septiembre", 10:"Octubre", 11:"Noviembre", 12:"Diciembre"}})
-    mapeo_meses = DATA_CONFIG.get('mapeo_meses', {})
+    mapeo_meses = st.session_state.get('DATA_CONFIG', {}).get('mapeo_meses', {})
 
-    # --- Barra Lateral de Filtros ---
-    st.sidebar.header("🗓️ Filtros de Periodo y Enfoque")
+    st.sidebar.header("🗓️ Filtros de Análisis")
     lista_anios = sorted(df_ventas_historicas['anio'].unique(), reverse=True)
-    anio_sel = st.sidebar.selectbox("Selecciona el Año", lista_anios, index=0, key="sel_anio_acciones")
-
+    anio_sel = st.sidebar.selectbox("Año", lista_anios, key="sel_anio_acc")
     meses_disponibles = sorted(df_ventas_historicas[df_ventas_historicas['anio'] == anio_sel]['mes'].unique())
     if not meses_disponibles:
-        st.warning(f"No hay datos disponibles para el año {anio_sel}.")
+        st.warning(f"No hay datos para el año {anio_sel}.")
         st.stop()
-        
-    mes_sel = st.sidebar.selectbox("Selecciona el Mes", meses_disponibles, format_func=lambda x: mapeo_meses.get(x, "N/A"), key="sel_mes_acciones")
+    mes_sel = st.sidebar.selectbox("Mes", meses_disponibles, format_func=lambda x: mapeo_meses.get(x, "N/A"), key="sel_mes_acc")
     
-    # Filtro de Enfoque (General, Vendedor, Grupo)
-    vendedores_unicos = sorted(df_ventas_historicas['nomvendedor'].dropna().unique())
-    opciones_enfoque = ["Visión General"] + vendedores_unicos
-    enfoque_sel = st.sidebar.selectbox("Enfocar análisis en:", opciones_enfoque, index=0, key="sel_enfoque_acciones")
+    vendedores_unicos = ["Visión General"] + sorted(df_ventas_historicas['nomvendedor'].dropna().unique())
+    enfoque_sel = st.sidebar.selectbox("Enfoque", vendedores_unicos, key="sel_enfoque_acc")
 
-    # --- Filtrado de Datos según Selección ---
-    df_filtrado = df_ventas_historicas[
-        (df_ventas_historicas['anio'] == anio_sel) &
-        (df_ventas_historicas['mes'] == mes_sel)
-    ]
-
+    df_filtrado = df_ventas_historicas[(df_ventas_historicas['anio'] == anio_sel) & (df_ventas_historicas['mes'] == mes_sel)]
     if enfoque_sel != "Visión General":
         df_filtrado = df_filtrado[df_filtrado['nomvendedor'] == enfoque_sel]
 
@@ -185,110 +337,33 @@ def render_pagina():
         st.info(f"No se encontraron datos para la selección: {enfoque_sel} en {mapeo_meses.get(mes_sel)} {anio_sel}.")
         st.stop()
     
-    # --- Cálculo principal ---
-    df_analisis_productos = calcular_metricas_productos(df_filtrado)
-    df_analisis_productos = asignar_segmento_bcg(df_analisis_productos)
+    with st.spinner("Ejecutando análisis avanzados..."):
+        df_analisis_productos = calcular_metricas_portafolio(df_filtrado)
+        df_analisis_productos = asignar_cuadrantes_rendimiento(df_analisis_productos)
+        df_reglas_asociacion = analisis_cesta_mercado(df_filtrado)
 
-    # --- Contenido en Pestañas ---
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "📊 Matriz de Portafolio (BCG)", 
-        "📉 Productos de Bajo Rendimiento", 
-        "🚀 Oportunidades de Crecimiento",
-        "✍️ Plan de Acción Sugerido"
+    periodo_str = f"{mapeo_meses.get(mes_sel)} {anio_sel}"
+    
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📸 **Fotografía del Portafolio**",
+        "🔗 **Venta Cruzada (Cross-Sell)**",
+        "🎯 **Penetración de Clientes**",
+        "🔬 **Diagnóstico por Producto**",
+        "✍️ **Plan de Acción**"
     ])
 
     with tab1:
-        st.header(f"Análisis de Portafolio de Productos (BCG)")
-        st.markdown(f"Análisis para: **{enfoque_sel}** | Periodo: **{mapeo_meses.get(mes_sel)} {anio_sel}**")
-
-        if df_analisis_productos.empty:
-            st.warning("No hay datos suficientes para generar la matriz de portafolio.")
-        else:
-            # Lógica de graficación robusta
-            df_plot = df_analisis_productos[df_analisis_productos['Volumen_Venta'] > 0].copy()
-            df_plot['Tamaño_Grafico'] = df_plot['Margen_Absoluto'].abs()
-
-            if not df_plot.empty:
-                fig_bcg = px.scatter(
-                    df_plot,
-                    x="Volumen_Venta", y="Rentabilidad_Pct",
-                    size="Tamaño_Grafico", color="Segmento_BCG",
-                    hover_name="nombre_articulo",
-                    hover_data={'Volumen_Venta': ':,.0f', 'Rentabilidad_Pct': ':.2f', 'Margen_Absoluto': ':,.0f'},
-                    log_x=True, size_max=60, title="Matriz de Rendimiento de Productos",
-                    labels={"Volumen_Venta": "Volumen de Venta ($)", "Rentabilidad_Pct": "Rentabilidad (%)"},
-                    color_discrete_map={'⭐ Estrella': 'gold', '🐄 Vaca Lechera': 'dodgerblue', '❓ Interrogante': 'limegreen', '🐕 Perro': 'tomato'}
-                )
-                st.plotly_chart(fig_bcg, use_container_width=True)
-            
-            # Detalle por cuadrante
-            for segmento, emoji in [("⭐ Estrella", "⭐"), ("🐄 Vaca Lechera", "🐄"), ("❓ Interrogante", "❓"), ("🐕 Perro", "🐕")]:
-                with st.expander(f"{emoji} Productos en el cuadrante: {segmento}", expanded=False):
-                    df_segmento = df_analisis_productos[df_analisis_productos['Segmento_BCG'] == segmento]
-                    if not df_segmento.empty:
-                        st.dataframe(df_segmento[['nombre_articulo', 'Volumen_Venta', 'Rentabilidad_Pct', 'Margen_Absoluto']], use_container_width=True, hide_index=True)
-                    else:
-                        st.info(f"No hay productos en el cuadrante '{segmento}' para la selección actual.")
-    
+        render_tab_fotografia(df_analisis_productos, enfoque_sel, periodo_str)
     with tab2:
-        st.header("Análisis de Productos de Bajo Rendimiento")
-        st.markdown(f"Análisis para: **{enfoque_sel}** | Periodo: **{mapeo_meses.get(mes_sel)} {anio_sel}**")
-
-        st.subheader("Productos con Margen de Contribución Negativo")
-        df_margen_negativo = df_analisis_productos[df_analisis_productos['Margen_Absoluto'] < 0].sort_values(by="Margen_Absoluto")
-        if not df_margen_negativo.empty:
-            st.warning("Estos productos generaron pérdidas. Es crítico revisar su costo o precio de venta.")
-            st.dataframe(df_margen_negativo, use_container_width=True, hide_index=True,
-                         column_config={"Volumen_Venta": st.column_config.NumberColumn(format="$ {:,.0f}"),
-                                        "Margen_Absoluto": st.column_config.NumberColumn(format="$ {:,.0f}"),
-                                        "Rentabilidad_Pct": st.column_config.ProgressColumn(format="%.2f%%", min_value=float(df_margen_negativo['Rentabilidad_Pct'].min()), max_value=0)})
-        else:
-            st.success("¡Buenas noticias! No se encontraron productos con margen negativo.")
-            
-        st.subheader("Productos 'Perro' (Bajo Volumen y Baja Rentabilidad)")
-        df_perros = df_analisis_productos[df_analisis_productos['Segmento_BCG'] == '🐕 Perro'].sort_values(by='Volumen_Venta')
-        if not df_perros.empty:
-            st.info("Estos productos tienen baja rotación y baja rentabilidad. Considere reducir inventario o descontinuarlos.")
-            st.dataframe(df_perros[['nombre_articulo', 'Volumen_Venta', 'Rentabilidad_Pct']], use_container_width=True, hide_index=True)
-        else:
-            st.success("No se encontraron productos en la categoría 'Perro'.")
-
-
+        render_tab_cross_selling(df_reglas_asociacion)
     with tab3:
-        st.header("Identificación de Oportunidades de Crecimiento")
-        st.markdown(f"Análisis para: **{enfoque_sel}** | Periodo: **{mapeo_meses.get(mes_sel)} {anio_sel}**")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader("🏆 Top 10 Productos por Venta")
-            st.dataframe(df_analisis_productos.nlargest(10, 'Volumen_Venta'), use_container_width=True, hide_index=True)
-
-        with col2:
-            st.subheader("💰 Top 10 Productos por Margen Absoluto")
-            st.dataframe(df_analisis_productos.nlargest(10, 'Margen_Absoluto'), use_container_width=True, hide_index=True)
-            
-        st.subheader("🚀 Productos 'Estrella' e 'Interrogante' con Mayor Potencial")
-        df_oportunidades = df_analisis_productos[df_analisis_productos['Segmento_BCG'].isin(['⭐ Estrella', '❓ Interrogante'])]
-        if not df_oportunidades.empty:
-            st.info("Enfoque sus esfuerzos de venta y marketing en estos productos para maximizar el retorno.")
-            st.dataframe(df_oportunidades[['nombre_articulo', 'Segmento_BCG', 'Volumen_Venta', 'Rentabilidad_Pct']], use_container_width=True, hide_index=True)
-        else:
-            st.info("No se encontraron productos en las categorías de alto potencial ('Estrella' o 'Interrogante').")
-
+        render_tab_penetracion(df_filtrado, df_analisis_productos)
     with tab4:
-        st.header("Plan de Acción Sugerido y Personalizado")
-        st.markdown(f"Análisis para: **{enfoque_sel}** | Periodo: **{mapeo_meses.get(mes_sel)} {anio_sel}**")
-        
-        if df_analisis_productos.empty:
-            st.info("No hay datos suficientes para generar un plan de acción.")
-        else:
-            with st.container(border=True):
-                st.subheader("Resumen de Acciones Clave")
-                plan_de_accion = generar_plan_accion(df_analisis_productos)
-                for punto in plan_de_accion:
-                    st.markdown(punto)
+        render_tab_diagnostico(df_filtrado, df_analisis_productos)
+    with tab5:
+        render_tab_plan_accion(df_analisis_productos, df_reglas_asociacion, df_filtrado)
 
-# ==============================================================================
-# EJECUCIÓN DEL SCRIPT
-# ==============================================================================
-render_pagina()
+
+# --- Punto de Entrada del Script ---
+if __name__ == "__main__":
+    render_pagina()
