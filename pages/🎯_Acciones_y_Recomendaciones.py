@@ -72,7 +72,7 @@ def preparar_datos_y_margen(df):
     # Se usa una expresión regular para buscar 'DESCUENTO' O 'NOTA CREDITO'.
     # Esto captura correctamente todos los tipos de reducciones.
     # ==========================================================================
-    filtro_regex = 'DESCUENTO|NOTA CREDITO'
+    filtro_regex = 'DESCUENTO|DESCUENTOS COMERCIALES'
     filtro_descuento = df_copy['nombre_articulo_norm'].str.contains(filtro_regex, na=False)
 
     df_descuentos = df_copy[filtro_descuento]
