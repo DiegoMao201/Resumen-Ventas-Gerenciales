@@ -1,10 +1,9 @@
 # ==============================================================================
 # SCRIPT CORREGIDO Y FINAL PARA: pages/1_Acciones_y_Recomendaciones.py
 # VERSIÓN: 16 de Julio, 2025
-# CORRECCIÓN: Se ajusta la lógica de cálculo para interpretar correctamente
-#             los descuentos con valor positivo, reconstruyendo la Venta Bruta
-#             para un cálculo de porcentaje preciso. Se asegura que el análisis
-#             se base únicamente en ventas netas (facturas/notas de crédito).
+# CORRECCIÓN: Se implementa la lógica de identificación de descuentos usando el
+#             código de artículo específico (4790512) proporcionado por el
+#             usuario para garantizar la máxima precisión en los cálculos.
 # ==============================================================================
 
 import streamlit as st
@@ -62,19 +61,24 @@ if df_ventas_historico is None or df_ventas_historico.empty or not APP_CONFIG or
 @st.cache_data
 def preparar_datos_y_margen(df):
     """
-    Separa el dataframe en productos y descuentos de forma robusta.
-    Los descuentos se identifican por contener 'DESCUENTO' o 'DTO' en el nombre.
+    Separa el dataframe en productos y descuentos de la forma más precisa:
+    usando el código de artículo específico para los descuentos.
     """
     df_copy = df.copy()
-    df_copy['nombre_articulo_norm'] = df_copy['nombre_articulo'].astype(str).str.upper()
 
-    # Se mantiene el filtro flexible para asegurar que capture todas las variantes de descuentos.
-    filtro_descuento = df_copy['nombre_articulo_norm'].str.contains('DESCUENTO|DTO', na=False, regex=True)
+    # ✨ SOLUCIÓN DEFINITIVA: Se usa el código de artículo exacto proporcionado.
+    codigos_de_descuento = ['4790512']
+
+    # Aseguramos que la columna de códigos sea de tipo texto para una comparación segura
+    df_copy['codigo_articulo'] = df_copy['codigo_articulo'].astype(str)
+    
+    # El filtro ahora busca por el código exacto, eliminando cualquier ambigüedad.
+    filtro_descuento = df_copy['codigo_articulo'].isin(codigos_de_descuento)
 
     df_descuentos = df_copy[filtro_descuento]
     df_productos = df_copy[~filtro_descuento].copy()
 
-    # Calcular margen solo sobre el dataframe de productos
+    # El resto del cálculo de margen no cambia
     if not df_productos.empty:
         df_productos['costo_unitario'] = pd.to_numeric(df_productos['costo_unitario'], errors='coerce').fillna(0)
         df_productos['unidades_vendidas'] = pd.to_numeric(df_productos['unidades_vendidas'], errors='coerce').fillna(0)
@@ -97,20 +101,19 @@ def analizar_rentabilidad(df_productos, df_descuentos):
     # 2. El total de descuentos es la suma del 'valor_venta' (positivo) de los artículos de descuento.
     total_descuentos = abs(df_descuentos['valor_venta'].sum())
 
-    # 3. ✨ LÓGICA CLAVE CORREGIDA: Se reconstruye la VENTA BRUTA REAL.
-    #    Venta Bruta = Venta Neta de Productos + Total Descuentos
+    # 3. Se reconstruye la VENTA BRUTA REAL.
     venta_bruta_reconstruida = venta_neta_productos + total_descuentos
 
-    # 4. El margen bruto de los productos se calcula sobre la venta neta (lo cual es correcto).
+    # 4. El margen bruto de los productos se calcula sobre la venta neta.
     margen_bruto_productos = df_productos['margen_bruto'].sum() if 'margen_bruto' in df_productos.columns else 0
     
     # 5. El margen operativo es el margen de los productos menos el valor de los descuentos.
     margen_operativo = margen_bruto_productos - total_descuentos
     
-    # 6. ✨ CÁLCULO DE PORCENTAJE CORREGIDO: Se usa la Venta Bruta Reconstruida como base.
+    # 6. CÁLCULO DE PORCENTAJE CORREGIDO: Se usa la Venta Bruta Reconstruida como base.
     porcentaje_descuento = (total_descuentos / venta_bruta_reconstruida * 100) if venta_bruta_reconstruida > 0 else 0
 
-    # --- Lógica para el gráfico de evolución (no requiere cambios) ---
+    # --- Lógica para el gráfico de evolución ---
     df_productos_copy = df_productos.copy()
     df_descuentos_copy = df_descuentos.copy()
 
@@ -130,7 +133,7 @@ def analizar_rentabilidad(df_productos, df_descuentos):
     top_clientes_descuento = abs(df_descuentos.groupby('nombre_cliente')['valor_venta'].sum()).nlargest(5).reset_index()
 
     return {
-        "venta_bruta": venta_bruta_reconstruida, # Retornamos la venta bruta real.
+        "venta_bruta": venta_bruta_reconstruida,
         "margen_bruto_productos": margen_bruto_productos,
         "total_descuentos": total_descuentos,
         "margen_operativo": margen_operativo,
@@ -266,7 +269,7 @@ def render_pagina_acciones():
     st.info("Este análisis se basa únicamente en **ventas netas facturadas** (Facturas y Notas de Crédito).")
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Margen Bruto de Productos", f"${analisis_rentabilidad['margen_bruto_productos']:,.0f}")
-    col2.metric("Total Descuentos Otorgados", f"-${analisis_rentabilidad['total_descuentos']:,.0f}", help="Suma de artículos que contienen 'DESCUENTO' o 'DTO'.")
+    col2.metric("Total Descuentos Otorgados", f"-${analisis_rentabilidad['total_descuentos']:,.0f}", help="Suma de artículos con el código de descuento específico.")
     col3.metric("Margen Operativo Real", f"${analisis_rentabilidad['margen_operativo']:,.0f}", delta_color="off")
     col4.metric("% Descuento sobre Venta Bruta", f"{analisis_rentabilidad['porcentaje_descuento']:.1f}%", help="(Total Descuentos / (Venta Neta Productos + Total Descuentos)) * 100")
 
