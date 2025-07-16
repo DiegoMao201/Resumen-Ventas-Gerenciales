@@ -1,8 +1,8 @@
 # ==============================================================================
 # SCRIPT COMPLETO Y DEFINITIVO PARA: 🏠 Resumen Mensual.py
-# VERSIÓN FINAL: 15 de Julio, 2025 (VERSIÓN DE DEPURACIÓN)
-# DESCRIPCIÓN: Versión para detectar errores de carga en el CSV. Se modificó
-#              on_bad_lines='warn' para encontrar filas que se estén omitiendo.
+# VERSIÓN FINAL: 15 de Julio, 2025 (VERSIÓN ROBUSTA CON SEPARADOR '|')
+# DESCRIPCIÓN: Versión final que utiliza el separador '|' para máxima
+#              fiabilidad en la carga de datos.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -80,12 +80,10 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
             contenido_csv = res.content.decode('latin-1')
             
             # ==================================================================
-            # MODIFICACIÓN CLAVE PARA DEPURACIÓN
-            # Cambiamos on_bad_lines='skip' por on_bad_lines='warn' para que nos
-            # avise en la consola si está omitiendo alguna fila durante la carga.
+            # MODIFICACIÓN CLAVE: Se cambia el separador a '|' para máxima fiabilidad.
             # ==================================================================
-            df = pd.read_csv(io.StringIO(contenido_csv), header=None, sep=',', on_bad_lines='warn', dtype=str)
-            
+            df = pd.read_csv(io.StringIO(contenido_csv), header=None, sep='|', engine='python', quoting=3) # quoting=3 para ignorar comillas
+
             if df.shape[1] != len(nombres_columnas):
                 st.warning(f"Formato en {ruta_archivo}: Se esperaban {len(nombres_columnas)} columnas pero se encontraron {df.shape[1]}. Algunas columnas podrían faltar.")
                 df = df.reindex(columns=range(len(nombres_columnas)))
@@ -95,6 +93,7 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
             for col in numeric_cols:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce')
+
             df.dropna(subset=['anio', 'mes'], inplace=True)
             df = df.astype({'anio': int, 'mes': int})
             if 'codigo_vendedor' in df.columns: df['codigo_vendedor'] = df['codigo_vendedor'].astype(str)
@@ -209,8 +208,11 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     return df_final, df_albaranes_reales_pendientes
 
 # ==============================================================================
-# 3. LÓGICA DE LA INTERFAZ DE USUARIO (UI)
+# 4. LÓGICA DE LA INTERFAZ DE USUARIO Y EJECUCIÓN
+# El resto del script (UI y main) no necesita cambios.
+# Puedes copiarlo desde la versión anterior.
 # ==============================================================================
+# (El código de la UI y la función main() va aquí, sin cambios)
 def generar_comentario_asesor(avance_v, avance_c, marquilla_p, avance_comp, avance_sub_meta):
     comentarios = []
     if avance_v >= 100: comentarios.append("📈 **Ventas:** ¡Felicitaciones! Has superado la meta de ventas netas.")
@@ -227,7 +229,6 @@ def generar_comentario_asesor(avance_v, avance_c, marquilla_p, avance_comp, avan
     elif marquilla_p > 0: comentarios.append(f"🎨 **Marquilla:** Tu promedio es {marquilla_p:.2f}. Hay oportunidad de crecimiento.")
     else: comentarios.append("🎨 **Marquilla:** Aún no registras ventas en las marcas clave.")
     return comentarios
-
 def render_analisis_detallado(df_vista, df_ventas_periodo):
     st.markdown("---")
     st.header("🔬 Análisis Detallado del Periodo")
@@ -308,7 +309,6 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
                 fig = px.pie(resumen_cat, names='categoria_producto', values='Ventas', title="Distribución entre Categorías Clave (Venta Neta)", hole=0.4)
                 fig.update_traces(textinfo='percent+label', textposition='inside')
                 st.plotly_chart(fig, use_container_width=True)
-
 def render_dashboard():
     st.sidebar.markdown("---")
     st.sidebar.header("Filtros de Periodo")
@@ -462,10 +462,6 @@ def render_dashboard():
                         "nomvendedor": "Vendedor"
                     }, use_container_width=True, hide_index=True
                 )
-
-# ==============================================================================
-# 4. LÓGICA DE AUTENTICACIÓN Y EJECUCIÓN PRINCIPAL (VERSIÓN FINAL Y ROBUSTA)
-# ==============================================================================
 def main():
     if 'df_ventas' not in st.session_state:
         with st.spinner('Cargando datos maestros, por favor espere...'):
@@ -529,6 +525,5 @@ def main():
             for key in keys_to_clear:
                 del st.session_state[key]
             st.rerun()
-
 if __name__ == '__main__':
     main()
