@@ -70,9 +70,9 @@ def preparar_datos_y_margen(df):
     # ==========================================================================
     # ✨ CORRECCIÓN CLAVE APLICADA AQUÍ ✨
     # Se usa una expresión regular para buscar 'DESCUENTO' O 'NOTA CREDITO'.
-    # Esto captura correctamente todos los tipos de reducciones.
+    # Este filtro ahora es flexible y captura ambos tipos de reducciones.
     # ==========================================================================
-    filtro_regex = 'DESCUENTO|DESCUENTOS COMERCIALES'
+    filtro_regex = 'DESCUENTO|NOTA CREDITO'
     filtro_descuento = df_copy['nombre_articulo_norm'].str.contains(filtro_regex, na=False)
 
     df_descuentos = df_copy[filtro_descuento]
@@ -271,7 +271,7 @@ def render_pagina_acciones():
     st.header("💰 Optimización de Rentabilidad y Descuentos")
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Margen Bruto de Productos", f"${analisis_rentabilidad['margen_bruto_productos']:,.0f}")
-    col2.metric("Total Descuentos Otorgados", f"-${analisis_rentabilidad['total_descuentos']:,.0f}", help="Suma de artículos como 'Descuento Comercial' y 'Nota Credito'")
+    col2.metric("Total Descuentos Otorgados", f"-${analisis_rentabilidad['total_descuentos']:,.0f}", help="Suma de artículos que contienen 'Descuento' o 'Nota Credito'")
     col3.metric("Margen Operativo Real", f"${analisis_rentabilidad['margen_operativo']:,.0f}", delta_color="off")
     col4.metric("% Descuento sobre Venta", f"{analisis_rentabilidad['porcentaje_descuento']:.1f}%", help="(Total Descuentos / Venta Bruta de Productos) * 100")
     df_evo = analisis_rentabilidad['df_evolucion']
