@@ -1,31 +1,30 @@
 # ==============================================================================
-# SCRIPT REESTRUCTURADO Y MEJORADO PARA: pages/2_Perfil_del_Vendedor.py
-# VERSIÓN: 16 de Julio, 2025
+# SCRIPT DEFINITIVO PARA: pages/2_Perfil_del_Vendedor.py
+# VERSIÓN: 3.0 (Asistente Estratégico)
+# FECHA: 16 de Julio, 2025
 #
 # DESCRIPCIÓN:
-# Esta versión transforma el "Perfil del Vendedor" en un centro de análisis
-# estratégico integral. Se han incorporado las siguientes mejoras:
+# Esta es una reconstrucción completa del perfil de vendedor para convertirlo en
+# una herramienta de inteligencia de negocios proactiva y accionable. El código
+# ahora responde de manera explícita y potente a los filtros seleccionados.
 #
-# 1.  **Análisis RFM Avanzado:** Segmentación de clientes en categorías
-#     estratégicas (Campeones, Leales, En Riesgo, etc.) para acciones de
-#     marketing y retención dirigidas. Esta sección incluye la corrección
-#     para el error 'ValueError' usando .rank(method='first').
-# 2.  **Análisis de Pareto (80/20):** Identificación precisa del porcentaje
-#     de clientes que generan el 80% de los ingresos, con visualizaciones claras.
-# 3.  **Inteligencia de Producto y Rentabilidad:** Análisis profundo del mix
-#     de ventas por categoría y marca, y un desglose detallado de la
-#     rentabilidad por producto y cliente.
-# 4.  **Diagnóstico de Salud de Cartera:** Métricas mejoradas sobre clientes
-#     nuevos, recurrentes, y en riesgo, con listas detalladas para acción inmediata.
-# 5.  **Interfaz de Usuario Mejorada (UI/UX):**
-#     -   Uso de pestañas más descriptivas para una navegación intuitiva.
-#     -   Resumen ejecutivo (KPIs) al frente para una visión rápida.
-#     -   Visualizaciones enriquecidas con Plotly para una mejor comprensión.
-#     -   Contenedores y métricas para destacar la información más relevante.
-# 6.  **Optimización y Escalabilidad:** El código está organizado en secciones
-#     lógicas (Configuración, Lógica de Análisis, Componentes UI, Orquestador Principal),
-#     utilizando caching de Streamlit (`@st.cache_data`) para un rendimiento óptimo.
+# MEJORAS CLAVE ("VERSIÓN 1000%"):
+# 1.  RESUMEN EJECUTIVO DINÁMICO: Un plan de acción generado automáticamente
+#     al inicio que resume los hallazgos más críticos del periodo seleccionado.
 #
+# 2.  ANÁLISIS DE MOVIMIENTO DE CARTERA: Se reemplaza la lógica básica de
+#     "nuevos/recurrentes" por un análisis profesional que identifica clientes
+#     GANADOS, RETENIDOS, REACTIVADOS y EN FUGA (DORMIDOS).
+#
+# 3.  CUADRANTES DE RENTABILIDAD: Un análisis visual de Rentabilidad vs. Volumen
+#     que segmenta los productos en "Motores de Ganancia", "Ventas de Volumen",
+#     "Gemas Ocultas" y "Drenajes de Rentabilidad".
+#
+# 4.  RFM ACCIONABLE: La segmentación RFM ahora incluye recomendaciones
+#     específicas y listas de clientes para cada segmento, facilitando la acción.
+#
+# 5.  INTERFAZ REFINADA: La navegación y presentación están diseñadas para guiar
+#     al vendedor a través de un viaje analítico lógico y enfocado en resultados.
 # ==============================================================================
 
 import streamlit as st
@@ -37,334 +36,237 @@ from datetime import datetime
 import unicodedata
 
 # ==============================================================================
-# SECCIÓN 1: CONFIGURACIÓN INICIAL Y FUNCIONES DE SOPORTE
+# SECCIÓN 1: CONFIGURACIÓN INICIAL Y VALIDACIÓN
 # ==============================================================================
 
-st.set_page_config(page_title="Análisis Estratégico de Vendedor", page_icon="🚀", layout="wide")
+st.set_page_config(page_title="Asistente Estratégico de Ventas", page_icon="💡", layout="wide")
 
 def normalizar_texto(texto):
-    """
-    Normaliza un texto a mayúsculas, sin tildes ni caracteres especiales.
-    Idéntica a la del script principal para mantener consistencia.
-    """
-    if not isinstance(texto, str):
-        return texto
+    if not isinstance(texto, str): return texto
     try:
-        texto_sin_tildes = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
-        return texto_sin_tildes.upper().replace('-', ' ').strip().replace('  ', ' ')
-    except (TypeError, AttributeError):
-        return texto
+        return ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn').upper().replace('-', ' ').strip().replace('  ', ' ')
+    except (TypeError, AttributeError): return texto
 
 def mostrar_acceso_restringido():
-    """Muestra un mensaje de advertencia si el usuario no ha iniciado sesión."""
     st.header("🔒 Acceso Restringido")
     st.warning("Por favor, inicie sesión desde la página principal `🏠 Resumen Mensual` para continuar.")
     st.image("https://raw.githubusercontent.com/DiegoMao201/Resumen-Ventas-Gerenciales/main/LOGO%20FERREINOX%20SAS%20BIC%202024.png", width=300)
     st.stop()
 
-# --- Verificación de estado de la sesión ---
 if not st.session_state.get('autenticado'):
     mostrar_acceso_restringido()
 
-# --- Carga de datos PRE-PROCESADOS desde la sesión principal ---
 df_ventas_historico = st.session_state.get('df_ventas')
 APP_CONFIG = st.session_state.get('APP_CONFIG')
 DATA_CONFIG = st.session_state.get('DATA_CONFIG')
 
-# --- Validación de datos ---
 if df_ventas_historico is None or df_ventas_historico.empty or not APP_CONFIG or not DATA_CONFIG:
     st.error("Error Crítico: No se pudieron cargar los datos desde la sesión. Por favor, regrese a la página '🏠 Resumen Mensual' y vuelva a cargar los datos.")
     st.stop()
 
 
 # ==============================================================================
-# SECCIÓN 2: LÓGICA DE ANÁLISIS AVANZADO (El "Cerebro")
+# SECCIÓN 2: LÓGICA DE ANÁLISIS ESTRATÉGICO (El "Cerebro")
 # ==============================================================================
 
 def calcular_metricas_base(df):
-    """Añade columnas de margen y costo total. Confía en datos de entrada pre-procesados."""
+    """Añade columnas de margen y costo total, asegurando que los datos de entrada sean correctos."""
     df_copy = df.copy()
-    df_copy['costo_total_linea'] = df_copy['costo_unitario'].fillna(0) * df_copy['unidades_vendidas'].fillna(0)
-    df_copy['margen_bruto'] = df_copy['valor_venta'] - df_copy['costo_total_linea']
+    df_copy['costo_total_linea'] = pd.to_numeric(df_copy['costo_unitario'], errors='coerce').fillna(0) * pd.to_numeric(df_copy['unidades_vendidas'], errors='coerce').fillna(0)
+    df_copy['margen_bruto'] = pd.to_numeric(df_copy['valor_venta'], errors='coerce') - df_copy['costo_total_linea']
     df_copy['porcentaje_margen'] = np.where(df_copy['valor_venta'] > 0, (df_copy['margen_bruto'] / df_copy['valor_venta']) * 100, 0)
     return df_copy
 
 @st.cache_data
-def analizar_tendencias_evolutivas(_df_vendedor):
-    """Analiza la evolución mensual de Ventas, Margen y KPIs clave."""
-    df = _df_vendedor.copy()
-    df['mes_anio'] = df['fecha_venta'].dt.to_period('M')
+def analizar_salud_cartera_avanzado(_df_periodo, _df_historico_completo, fecha_inicio_periodo):
+    """Realiza un análisis avanzado de movimiento de cartera: Ganados, Retenidos, Reactivados y En Fuga."""
+    clientes_periodo = set(_df_periodo['cliente_id'].unique())
+    
+    # Clientes que compraron ANTES de que el periodo seleccionado comenzara
+    df_antes_periodo = _df_historico_completo[_df_historico_completo['fecha_venta'] < fecha_inicio_periodo]
+    clientes_antes_periodo = set(df_antes_periodo['cliente_id'].unique())
 
-    df_evolucion = df.groupby('mes_anio').agg(
-        valor_venta=('valor_venta', 'sum'),
-        margen_bruto=('margen_bruto', 'sum'),
-        clientes_unicos=('cliente_id', 'nunique')
+    # Lógica de segmentación
+    clientes_ganados = clientes_periodo - clientes_antes_periodo
+    clientes_retenidos_o_reactivados = clientes_periodo.intersection(clientes_antes_periodo)
+    clientes_en_fuga = clientes_antes_periodo - clientes_periodo
+
+    # Para diferenciar retenidos de reactivados, definimos un umbral de inactividad (ej. 90 días)
+    fecha_reactivacion_limite = fecha_inicio_periodo - pd.Timedelta(days=90)
+    df_ultima_compra_antes = df_antes_periodo.groupby('cliente_id')['fecha_venta'].max()
+    
+    clientes_potencialmente_reactivados = set(df_ultima_compra_antes[df_ultima_compra_antes < fecha_reactivacion_limite].index)
+    clientes_reactivados = clientes_retenidos_o_reactivados.intersection(clientes_potencialmente_reactivados)
+    clientes_retenidos = clientes_retenidos_o_reactivados - clientes_reactivados
+    
+    # DataFrames para listas de acción
+    df_clientes_en_fuga = _df_historico_completo[_df_historico_completo['cliente_id'].isin(clientes_en_fuga)].groupby(['cliente_id', 'nombre_cliente']).agg(
+        ultima_compra=('fecha_venta', 'max'),
+        valor_historico=('valor_venta', 'sum')
+    ).nlargest(10, 'valor_historico').reset_index()
+
+    return {
+        "ganados": len(clientes_ganados),
+        "retenidos": len(clientes_retenidos),
+        "reactivados": len(clientes_reactivados),
+        "en_fuga": len(clientes_en_fuga),
+        "lista_clientes_en_fuga": df_clientes_en_fuga
+    }
+
+@st.cache_data
+def analizar_rentabilidad_avanzado(_df_periodo):
+    """Crea cuadrantes de rentabilidad y analiza productos clave."""
+    if _df_periodo.empty: return pd.DataFrame()
+
+    df_productos = _df_periodo.groupby(['codigo_articulo', 'nombre_articulo']).agg(
+        Volumen_Venta=('valor_venta', 'sum'),
+        Margen_Absoluto=('margen_bruto', 'sum')
     ).reset_index()
 
-    df_evolucion['mes_anio'] = df_evolucion['mes_anio'].dt.to_timestamp()
-    df_evolucion['porcentaje_margen'] = np.where(df_evolucion['valor_venta'] > 0, (df_evolucion['margen_bruto'] / df_evolucion['valor_venta']) * 100, 0)
+    df_productos = df_productos[df_productos['Volumen_Venta'] > 0]
+    df_productos['Rentabilidad_Pct'] = np.where(df_productos['Volumen_Venta'] > 0, (df_productos['Margen_Absoluto'] / df_productos['Volumen_Venta']) * 100, 0)
+    
+    # Definición de cuadrantes
+    volumen_medio = df_productos['Volumen_Venta'].median()
+    rentabilidad_media = df_productos['Rentabilidad_Pct'].median()
+    
+    def get_cuadrante(row):
+        alto_volumen = row['Volumen_Venta'] >= volumen_medio
+        alta_rentabilidad = row['Rentabilidad_Pct'] >= rentabilidad_media
+        if alto_volumen and alta_rentabilidad: return '⭐ Motores de Ganancia'
+        if alto_volumen and not alta_rentabilidad: return '🐄 Ventas de Volumen'
+        if not alto_volumen and alta_rentabilidad: return '💎 Gemas Ocultas'
+        return '🤔 Drenajes de Rentabilidad'
+    
+    df_productos['Cuadrante'] = df_productos.apply(get_cuadrante, axis=1)
+    return df_productos
 
-    return df_evolucion.fillna(0)
 
 @st.cache_data
 def realizar_analisis_rfm(_df_vendedor):
-    """
-    Realiza un análisis de Recencia, Frecuencia y Monetario (RFM) para segmentar clientes.
-    VERSIÓN CORREGIDA: Usa .rank(method='first') para evitar errores de 'qcut' con datos duplicados.
-    """
+    """Realiza un análisis RFM completo y robusto."""
     if _df_vendedor.empty: return pd.DataFrame(), {}
-
     df = _df_vendedor.copy()
     fecha_max_analisis = df['fecha_venta'].max() + pd.Timedelta(days=1)
-
     rfm_df = df.groupby(['cliente_id', 'nombre_cliente']).agg(
         Recencia=('fecha_venta', lambda date: (fecha_max_analisis - date.max()).days),
-        Frecuencia=('fecha_venta', 'count'),
+        Frecuencia=('fecha_venta', 'nunique'),
         Monetario=('valor_venta', 'sum')
     ).reset_index()
-
-    # --- CORRECCIÓN CLAVE ---
-    # Se aplica .rank(method='first') para manejar valores duplicados en los datos,
-    # lo que previene el error 'Bin labels must be one fewer than the number of bin edges'.
-    # Ya no se necesita `duplicates='drop'`.
+    
     rfm_df['R_Score'] = pd.qcut(rfm_df['Recencia'].rank(method='first'), 5, labels=[5, 4, 3, 2, 1])
     rfm_df['F_Score'] = pd.qcut(rfm_df['Frecuencia'].rank(method='first'), 5, labels=[1, 2, 3, 4, 5])
     rfm_df['M_Score'] = pd.qcut(rfm_df['Monetario'].rank(method='first'), 5, labels=[1, 2, 3, 4, 5])
-    # --- FIN DE LA CORRECCIÓN ---
-
     rfm_df['R_Score'] = rfm_df['R_Score'].astype(int)
     rfm_df['F_Score'] = rfm_df['F_Score'].astype(int)
     rfm_df['M_Score'] = rfm_df['M_Score'].astype(int)
-
-    rfm_df['RFM_Score'] = rfm_df['R_Score'].astype(str) + rfm_df['F_Score'].astype(str) + rfm_df['M_Score'].astype(str)
-
-    # Segmentación basada en puntajes de Recencia y Frecuencia
-    segt_map = {
-        r'[1-2][1-2]': 'Hibernando',
-        r'[1-2][3-4]': 'En Riesgo',
-        r'[1-2]5': 'No se pueden perder',
-        r'3[1-2]': 'Necesitan Atención',
-        r'33': 'Leales Promedio',
-        r'[3-4][4-5]': 'Clientes Leales',
-        r'41': 'Prometedores',
-        r'51': 'Nuevos Clientes',
-        r'[4-5][2-3]': 'Potenciales Leales',
-        r'5[4-5]': 'Campeones'
-    }
-    rfm_df['Segmento'] = rfm_df['R_Score'].astype(str) + rfm_df['F_Score'].astype(str)
-    rfm_df['Segmento'] = rfm_df['Segmento'].replace(segt_map, regex=True)
-
-    # Conteo de clientes por segmento
-    resumen_segmentos = rfm_df['Segmento'].value_counts().reset_index()
-    resumen_segmentos.columns = ['Segmento', 'Numero_Clientes']
-
-    return rfm_df, resumen_segmentos
-
-@st.cache_data
-def analizar_cartera_y_concentracion(_df_vendedor):
-    """Analiza la salud de la cartera (nuevos, recurrentes) y la concentración de ventas."""
-    if _df_vendedor.empty: return {}
-
-    fecha_max = _df_vendedor['fecha_venta'].max()
-    mes_actual_inicio = fecha_max.replace(day=1)
-
-    # Identificación de clientes
-    clientes_mes_actual = set(_df_vendedor[_df_vendedor['fecha_venta'] >= mes_actual_inicio]['cliente_id'].unique())
-    clientes_historicos = set(_df_vendedor[_df_vendedor['fecha_venta'] < mes_actual_inicio]['cliente_id'].unique())
-
-    clientes_nuevos = clientes_mes_actual - clientes_historicos
-    clientes_recurrentes = clientes_mes_actual.intersection(clientes_historicos)
-
-    # Pareto Analysis (80/20)
-    ventas_por_cliente = _df_vendedor.groupby('nombre_cliente')['valor_venta'].sum().sort_values(ascending=False)
-    df_pareto = ventas_por_cliente.to_frame()
-    df_pareto['Porcentaje_Acumulado'] = (df_pareto['valor_venta'].cumsum() / df_pareto['valor_venta'].sum()) * 100
     
-    # Encontrar el punto del 80%
-    try:
-        clientes_80_pct = df_pareto[df_pareto['Porcentaje_Acumulado'] <= 80].shape[0] + 1
-    except:
-        clientes_80_pct = 0
-    total_clientes = df_pareto.shape[0]
-    porcentaje_clientes_80_20 = (clientes_80_pct / total_clientes * 100) if total_clientes > 0 else 0
-
-
-    return {
-        "nuevos": len(clientes_nuevos),
-        "recurrentes": len(clientes_recurrentes),
-        "top_clientes_volumen": ventas_por_cliente.head(15).reset_index(),
-        "pareto_data": df_pareto.reset_index(),
-        "pareto_summary": {
-            "clientes_top_80": clientes_80_pct,
-            "total_clientes": total_clientes,
-            "porcentaje_clientes_top_80": porcentaje_clientes_80_20
-        }
+    segt_map = {
+        r'[1-2][1-2]': 'Hibernando', r'[1-2][3-4]': 'En Riesgo', r'[1-2]5': 'No Se Pueden Perder',
+        r'3[1-2]': 'Necesitan Atención', r'33': 'Leales Promedio', r'[3-4][4-5]': 'Clientes Leales',
+        r'41': 'Prometedores', r'51': 'Nuevos Clientes', r'[4-5][2-3]': 'Potenciales Leales', r'5[4-5]': 'Campeones'
     }
-
-@st.cache_data
-def analizar_productos_y_rentabilidad(_df_vendedor):
-    """Analiza el mix de productos, marcas y la rentabilidad detallada."""
-    if 'super_categoria' not in _df_vendedor.columns or 'nombre_marca' not in _df_vendedor.columns:
-        return {"error": "Faltan columnas 'super_categoria' o 'nombre_marca'."}
-
-    # Rentabilidad por Producto
-    top_productos_margen = _df_vendedor.groupby('nombre_articulo')['margen_bruto'].sum().nlargest(10).reset_index()
-    bottom_productos_margen = _df_vendedor.groupby('nombre_articulo')['margen_bruto'].sum().nsmallest(10).reset_index()
-
-    # Rentabilidad por Cliente
-    top_clientes_margen = _df_vendedor.groupby(['cliente_id', 'nombre_cliente'])['margen_bruto'].sum().nlargest(10).reset_index()
-
-    # Mix de Ventas
-    mix_super_categoria = _df_vendedor.groupby('super_categoria')['valor_venta'].sum().reset_index()
-    mix_marcas = _df_vendedor.groupby('nombre_marca')['valor_venta'].sum().nlargest(15).reset_index()
-
-    return {
-        "top_productos_margen": top_productos_margen,
-        "bottom_productos_margen": bottom_productos_margen,
-        "top_clientes_margen": top_clientes_margen,
-        "distribucion_margen": _df_vendedor['porcentaje_margen'],
-        "mix_super_categoria": mix_super_categoria,
-        "mix_marcas": mix_marcas
-    }
+    rfm_df['Segmento'] = (rfm_df['R_Score'].astype(str) + rfm_df['F_Score'].astype(str)).replace(segt_map, regex=True)
+    resumen_segmentos = rfm_df.groupby('Segmento').agg(
+        Numero_Clientes=('cliente_id', 'count'),
+        Ventas_Totales=('Monetario', 'sum')
+    ).reset_index()
+    return rfm_df, resumen_segmentos
 
 # ==============================================================================
 # SECCIÓN 3: COMPONENTES DE LA INTERFAZ DE USUARIO (UI)
 # ==============================================================================
 
-def render_kpis_resumen(df, nombre_vendedor):
-    """Muestra los KPIs principales del vendedor en el periodo seleccionado."""
-    st.header(f"KPIs Clave para: {nombre_vendedor}")
+def generar_y_renderizar_resumen_ejecutivo(nombre_vendedor, analisis_cartera, df_rentabilidad):
+    """Genera y muestra un resumen con los hallazgos y acciones más importantes."""
+    st.header(f"💡 Resumen Ejecutivo y Plan de Acción para: {nombre_vendedor}")
+    
     with st.container(border=True):
-        venta_total = df['valor_venta'].sum()
-        margen_total = df['margen_bruto'].sum()
-        porcentaje_margen_promedio = (margen_total / venta_total * 100) if venta_total > 0 else 0
-        clientes_unicos = df['cliente_id'].nunique()
-        ticket_promedio = venta_total / clientes_unicos if clientes_unicos > 0 else 0
+        st.markdown("#### Puntos Clave del Periodo:")
+        
+        # Punto 1: Movimiento de cartera
+        st.markdown(f"- **Movimiento de Cartera:** Has conseguido **{analisis_cartera['ganados']} clientes nuevos** y **reactivado a {analisis_cartera['reactivados']}**. ¡Excelente trabajo! Sin embargo, **{analisis_cartera['en_fuga']} clientes entraron en estado de fuga**. Revisa la pestaña `Diagnóstico de Cartera` para ver la lista y contactarlos.")
+        
+        # Punto 2: Rentabilidad
+        motores = df_rentabilidad[df_rentabilidad['Cuadrante'] == '⭐ Motores de Ganancia']
+        drenajes = df_rentabilidad[df_rentabilidad['Cuadrante'] == '🤔 Drenajes de Rentabilidad']
+        
+        if not motores.empty:
+            producto_motor = motores.nlargest(1, 'Volumen_Venta')['nombre_articulo'].iloc[0]
+            st.markdown(f"- **Rentabilidad:** Tu principal motor de ganancia es **{producto_motor}**. Asegura su disponibilidad y promociónalo activamente. Por otro lado, hay **{len(drenajes)} productos que están drenando tu rentabilidad**. Analízalos en la pestaña `Análisis de Rentabilidad`.")
+        
+        st.markdown("- **Próximos Pasos:** Utiliza las pestañas de abajo para profundizar en cada área. Enfócate en contactar a los clientes en fuga y en impulsar tus productos 'Gemas Ocultas'.")
 
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("💰 Ventas Totales", f"${venta_total:,.0f}")
-        col2.metric("📈 Margen Bruto Total", f"${margen_total:,.0f}")
-        col3.metric("📊 Margen Promedio", f"{porcentaje_margen_promedio:.2f}%")
-        col4.metric("🧑‍🤝‍🧑 Clientes Únicos", f"{clientes_unicos}")
+def render_tab_diagnostico_cartera(analisis):
+    st.subheader("Análisis de Movimiento de Cartera")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Clientes Ganados 🟢", f"{analisis['ganados']}", help="Clientes que compraron por primera vez en este periodo.")
+    col2.metric("Clientes Retenidos 🔵", f"{analisis['retenidos']}", help="Clientes que compraron en periodos anteriores y en este.")
+    col3.metric("Clientes Reactivados ⭐", f"{analisis['reactivados']}", help="Clientes que estaban inactivos y volvieron a comprar.")
+    col4.metric("Clientes en Fuga 🔴", f"{analisis['en_fuga']}", help="Clientes que compraban antes pero no en este periodo.")
 
-def render_tab_tendencias(analisis):
-    """Renderiza la pestaña de análisis de tendencias."""
-    st.subheader("Evolución Mensual del Rendimiento")
-    df_evolucion = analisis['analisis_tendencias']
+    st.markdown("---")
+    st.subheader("⚠️ Top 10 Clientes en Fuga por Valor Histórico")
+    st.info("Estos son los clientes más valiosos que han dejado de comprar. ¡Son tu principal prioridad para contactar!")
+    st.dataframe(analisis['lista_clientes_en_fuga'], use_container_width=True, hide_index=True,
+                 column_config={"ultima_compra": st.column_config.DateColumn("Última Compra", format="YYYY-MM-DD"),
+                                "valor_historico": st.column_config.NumberColumn("Ventas Históricas", format="$ {:,.0f}")})
 
-    if df_evolucion.empty:
-        st.info("No hay suficientes datos históricos para mostrar una tendencia.")
+def render_tab_rentabilidad(df_rentabilidad):
+    st.subheader("Cuadrantes de Rentabilidad de Productos")
+    if df_rentabilidad.empty:
+        st.warning("No hay datos de productos para analizar la rentabilidad.")
         return
-
-    # Gráfico de Ventas vs Margen
-    fig = go.Figure()
-    fig.add_trace(go.Bar(x=df_evolucion['mes_anio'], y=df_evolucion['valor_venta'], name='Ventas', marker_color='royalblue'))
-    fig.add_trace(go.Scatter(x=df_evolucion['mes_anio'], y=df_evolucion['margen_bruto'], name='Margen Bruto', mode='lines+markers', yaxis='y2', line=dict(color='orange', width=3)))
-
-    fig.update_layout(
-        title='Ventas y Margen Bruto Mensual',
-        xaxis_title='Mes',
-        yaxis_title='Ventas ($)',
-        yaxis2=dict(title='Margen Bruto ($)', overlaying='y', side='right'),
-        legend=dict(x=0.01, y=0.99)
+    
+    fig = px.scatter(
+        df_rentabilidad,
+        x="Volumen_Venta", y="Rentabilidad_Pct",
+        size="Margen_Absoluto", color="Cuadrante",
+        hover_name="nombre_articulo", log_x=True, size_max=60,
+        title="Análisis de Rentabilidad vs. Volumen de Venta",
+        labels={"Volumen_Venta": "Volumen de Venta ($)", "Rentabilidad_Pct": "Rentabilidad (%)"},
+        color_discrete_map={
+            '⭐ Motores de Ganancia': 'green', '💎 Gemas Ocultas': 'gold',
+            '🐄 Ventas de Volumen': 'dodgerblue', '🤔 Drenajes de Rentabilidad': 'tomato'
+        }
     )
     st.plotly_chart(fig, use_container_width=True)
 
-def render_tab_analisis_cartera(analisis):
-    """Renderiza la pestaña de análisis de cartera y concentración."""
-    st.subheader("Diagnóstico de la Cartera de Clientes")
-    analisis_cartera = analisis['analisis_cartera']
+    with st.expander("Ver detalle de productos por cuadrante", expanded=False):
+        st.dataframe(df_rentabilidad[['nombre_articulo', 'Cuadrante', 'Volumen_Venta', 'Rentabilidad_Pct', 'Margen_Absoluto']], use_container_width=True, hide_index=True)
 
-    col1, col2 = st.columns(2)
-    with col1:
-        with st.container(border=True):
-            st.markdown("##### 🧑‍🤝‍🧑 Composición de Clientes (Último Mes)")
-            st.metric("Clientes Nuevos", f"{analisis_cartera.get('nuevos', 0)} 🆕")
-            st.metric("Clientes Recurrentes", f"{analisis_cartera.get('recurrentes', 0)} 🔄")
 
-    with col2:
-        with st.container(border=True):
-            st.markdown("##### 🎯 Principio de Pareto (80/20)")
-            pareto_summary = analisis_cartera.get('pareto_summary', {})
-            st.metric(
-                label=f"Clientes que generan el 80% de las ventas:",
-                value=f"{pareto_summary.get('clientes_top_80', 0)} de {pareto_summary.get('total_clientes', 0)}"
-            )
-            st.progress(
-                value=pareto_summary.get('porcentaje_clientes_top_80', 0) / 100,
-                text=f"{pareto_summary.get('porcentaje_clientes_top_80', 0):.1f}% de la base de clientes"
-            )
-
-    st.markdown("---")
-    st.subheader("Top 15 Clientes por Volumen de Venta")
-    st.dataframe(
-        analisis_cartera.get('top_clientes_volumen', pd.DataFrame()),
-        use_container_width=True, hide_index=True,
-        column_config={"valor_venta": st.column_config.NumberColumn("Venta Total", format="$ %d")}
-    )
-
-def render_tab_rfm(analisis):
-    """Renderiza la pestaña de análisis RFM."""
+def render_tab_rfm_accionable(rfm_df, resumen_segmentos):
     st.subheader("Segmentación Estratégica de Clientes (RFM)")
-    rfm_df, resumen_segmentos = analisis.get('analisis_rfm', (pd.DataFrame(), pd.DataFrame()))
-
     if rfm_df.empty:
         st.warning("No hay suficientes datos para realizar el análisis RFM.")
         return
 
     col1, col2 = st.columns([0.4, 0.6])
     with col1:
-        st.markdown("##### Distribución de Clientes por Segmento")
+        st.markdown("##### Clientes por Segmento")
         st.dataframe(resumen_segmentos, use_container_width=True, hide_index=True)
-
     with col2:
-        st.markdown("##### Visualización de Segmentos")
-        fig = px.treemap(resumen_segmentos, path=['Segmento'], values='Numero_Clientes',
-                         title='Proporción de Clientes por Segmento Estratégico',
+        fig = px.treemap(resumen_segmentos, path=['Segmento'], values='Numero_Clientes', title='Distribución de Clientes por Segmento',
                          color_discrete_sequence=px.colors.qualitative.Pastel)
-        fig.update_layout(margin = dict(t=50, l=25, r=25, b=25))
         st.plotly_chart(fig, use_container_width=True)
 
-    with st.expander("Ver detalle completo de la segmentación RFM"):
-        st.dataframe(rfm_df, use_container_width=True, hide_index=True)
-
-
-def render_tab_productos_rentabilidad(analisis):
-    """Renderiza la pestaña de análisis de productos y rentabilidad."""
-    st.subheader("Análisis de Rentabilidad y Mix de Productos")
-    analisis_prod = analisis.get('analisis_productos', {})
-
-    if "error" in analisis_prod:
-        st.error(f"Error en el análisis de productos: {analisis_prod['error']}")
-        return
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("##### 📈 Ventas por Super Categoría")
-        if not analisis_prod['mix_super_categoria'].empty:
-            fig = px.pie(analisis_prod['mix_super_categoria'], names='super_categoria', values='valor_venta', hole=0.4, title="Mix de Ventas por Super Categoría")
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No hay datos de 'Super Categoría' para mostrar.")
-
-    with col2:
-        st.markdown("##### 🏷️ Top 15 Marcas por Venta")
-        if not analisis_prod['mix_marcas'].empty:
-            fig = px.bar(analisis_prod['mix_marcas'], x='valor_venta', y='nombre_marca', orientation='h', title="Top Marcas")
-            fig.update_layout(yaxis={'categoryorder':'total ascending'})
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No hay datos de 'Marca' para mostrar.")
-
     st.markdown("---")
-    st.subheader("Análisis de Rentabilidad por Producto")
-    col3, col4 = st.columns(2)
-    with col3:
-        st.markdown("##### ✅ Top 10 Productos MÁS Rentables (Margen Bruto)")
-        st.dataframe(analisis_prod['top_productos_margen'], use_container_width=True, hide_index=True, column_config={"margen_bruto": st.column_config.NumberColumn("Margen", format="$ %d")})
-    with col4:
-        st.markdown("##### ❌ Top 10 Productos MENOS Rentables (Margen Bruto)")
-        st.dataframe(analisis_prod['bottom_productos_margen'], use_container_width=True, hide_index=True, column_config={"margen_bruto": st.column_config.NumberColumn("Margen", format="$ %d")})
+    st.subheader("Plan de Acción por Segmento")
+    
+    segmentos_accion = {
+        'Campeones': ('⭐ **Acción:** Fidelizar y Recompensar. Son tus mejores clientes. Ofréceles acceso anticipado a productos y pídeles referidos.', 'green'),
+        'Clientes Leales': ('🔵 **Acción:** Venta cruzada (upsell). Ya confían en ti. Ofréceles productos de mayor valor o complementarios.', 'blue'),
+        'En Riesgo': ('🟠 **Acción:** Contacto proactivo. Llámalos, ofréceles un pequeño incentivo. Descubre por qué han disminuido su frecuencia.', 'orange'),
+        'No Se Pueden Perder': ('🔴 **Acción:** ¡Urgente! Estos clientes eran muy frecuentes pero no han vuelto recientemente. Contacto personalizado inmediato.', 'red')
+    }
+    
+    for segmento, (accion, color) in segmentos_accion.items():
+        with st.expander(f"Clientes en Segmento: {segmento}"):
+            st.markdown(f"<p style='color:{color};'>{accion}</p>", unsafe_allow_html=True)
+            df_segmento = rfm_df[rfm_df['Segmento'] == segmento].nlargest(5, 'Monetario')
+            st.dataframe(df_segmento[['nombre_cliente', 'Recencia', 'Frecuencia', 'Monetario']], use_container_width=True, hide_index=True)
 
 # ==============================================================================
 # SECCIÓN 4: ORQUESTADOR PRINCIPAL DE LA PÁGINA
@@ -372,13 +274,14 @@ def render_tab_productos_rentabilidad(analisis):
 
 def render_pagina_perfil():
     """Función principal que orquesta el renderizado completo de la página."""
-    st.title("🚀 Perfil Estratégico de Vendedor")
-    st.markdown("Análisis 360° del rendimiento histórico, cartera de clientes, rentabilidad y mix de productos.")
+    st.title("💡 Asistente Estratégico de Ventas")
+    st.markdown("Análisis 360° para impulsar tus resultados. **Cada dato aquí responde a los filtros que selecciones.**")
     st.markdown("---")
 
     # --- Filtros de Selección ---
     col1, col2 = st.columns([0.4, 0.6])
     with col1:
+        # Lógica de selección de Vendedor/Grupo (sin cambios)
         vendedores_unicos_norm = sorted(list(df_ventas_historico['nomvendedor'].dropna().unique()))
         grupos = DATA_CONFIG.get('grupos_vendedores', {})
         vendedores_en_grupos_norm = [normalizar_texto(v) for lista in grupos.values() for v in lista]
@@ -393,19 +296,16 @@ def render_pagina_perfil():
         if normalizar_texto(usuario_actual) != "GERENTE":
             opciones_analisis = [usuario_actual] if usuario_actual in opciones_analisis else []
         else:
-            opciones_analisis.insert(0, "Seleccione un Vendedor o Grupo")
+            opciones_analisis.insert(0, "Visión General de la Empresa")
 
         if not opciones_analisis:
             st.warning(f"No se encontraron datos asociados al usuario '{usuario_actual}'.")
             st.stop()
         
-        seleccion = st.selectbox("Seleccione el Vendedor o Grupo a analizar:", opciones_analisis, index=default_index, help="Elija un perfil individual o un grupo consolidado.")
-
-    if seleccion == "Seleccione un Vendedor o Grupo":
-        st.info("Por favor, elija un vendedor o grupo para comenzar el análisis.")
-        st.stop()
+        seleccion = st.selectbox("Seleccione el Vendedor, Grupo o Visión a analizar:", opciones_analisis, index=default_index, help="Elija un perfil individual, un grupo consolidado o la visión general.")
 
     with col2:
+        # Lógica del selector de rango de meses (sin cambios)
         df_vendedor_base_copy = df_ventas_historico.copy()
         df_vendedor_base_copy['periodo'] = df_vendedor_base_copy['fecha_venta'].dt.to_period('M')
         meses_disponibles = sorted(df_vendedor_base_copy['periodo'].unique())
@@ -417,59 +317,53 @@ def render_pagina_perfil():
         if start_index > end_index: start_index = end_index
 
         mes_inicio_str, mes_fin_str = st.select_slider(
-            "Seleccione el Rango de Meses para el Análisis Histórico:",
-            options=opciones_slider,
-            value=(opciones_slider[start_index], opciones_slider[end_index])
+            "Seleccione el Rango de Meses para el Análisis:",
+            options=opciones_slider, value=(opciones_slider[start_index], opciones_slider[end_index])
         )
         periodo_inicio, periodo_fin = mapa_meses[mes_inicio_str], mapa_meses[mes_fin_str]
         fecha_inicio, fecha_fin = periodo_inicio.start_time, periodo_fin.end_time.normalize() + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
 
+    # --- Filtrado de Datos Explícito ---
+    if seleccion == "Visión General de la Empresa":
+        df_base_filtrada = df_ventas_historico
+    else:
+        lista_vendedores_a_filtrar = grupos.get(seleccion, [seleccion])
+        lista_vendedores_a_filtrar_norm = [normalizar_texto(v) for v in lista_vendedores_a_filtrar]
+        df_base_filtrada = df_ventas_historico[df_ventas_historico['nomvendedor'].isin(lista_vendedores_a_filtrar_norm)]
+    
+    df_periodo_seleccionado = df_base_filtrada[(df_base_filtrada['fecha_venta'] >= fecha_inicio) & (df_base_filtrada['fecha_venta'] <= fecha_fin)]
 
-    # --- Filtrado final de datos ---
-    lista_vendedores_a_filtrar = grupos.get(seleccion, [seleccion])
-    lista_vendedores_a_filtrar_norm = [normalizar_texto(v) for v in lista_vendedores_a_filtrar]
-    df_base = df_ventas_historico[df_ventas_historico['nomvendedor'].isin(lista_vendedores_a_filtrar_norm)]
-    df_vendedor = df_base[(df_base['fecha_venta'] >= fecha_inicio) & (df_base['fecha_venta'] <= fecha_fin)]
-
-    if df_vendedor.empty:
-        st.warning(f"No se encontraron datos para '{seleccion}' en el rango de meses seleccionado ({mes_inicio_str} a {mes_fin_str}).")
+    if df_periodo_seleccionado.empty:
+        st.warning(f"No se encontraron datos para '{seleccion}' en el rango de meses seleccionado.")
         st.stop()
 
-    # --- Ejecución de análisis y renderizado de resultados ---
-    with st.spinner(f"Realizando análisis estratégico para {seleccion}..."):
-        df_vendedor_procesado = calcular_metricas_base(df_vendedor)
-
-        analisis_completo = {
-            "analisis_tendencias": analizar_tendencias_evolutivas(df_vendedor_procesado),
-            "analisis_rfm": realizar_analisis_rfm(df_vendedor_procesado),
-            "analisis_cartera": analizar_cartera_y_concentracion(df_vendedor_procesado),
-            "analisis_productos": analizar_productos_y_rentabilidad(df_vendedor_procesado)
-        }
-
+    # --- Ejecución de TODOS los análisis con los datos filtrados ---
+    with st.spinner(f"Generando inteligencia de negocios para {seleccion}..."):
+        df_procesado = calcular_metricas_base(df_periodo_seleccionado)
+        analisis_cartera = analizar_salud_cartera_avanzado(df_procesado, df_base_filtrada, fecha_inicio)
+        df_rentabilidad = analizar_rentabilidad_avanzado(df_procesado)
+        rfm_df, resumen_rfm = realizar_analisis_rfm(df_procesado)
+    
     st.markdown("---")
-    render_kpis_resumen(df_vendedor_procesado, seleccion)
+    
+    # --- Renderizado de la página con los resultados del análisis ---
+    generar_y_renderizar_resumen_ejecutivo(seleccion, analisis_cartera, df_rentabilidad)
+    
     st.markdown("---")
 
-    # --- Pestañas de Análisis Detallado ---
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "📈 **Tendencias y Evolución**",
-        "👥 **Salud de la Cartera**",
-        "🏆 **Segmentación RFM**",
-        "📦 **Rentabilidad y Productos**"
+    tab1, tab2, tab3 = st.tabs([
+        "🩺 **Diagnóstico de Cartera**",
+        "🏆 **Segmentación de Clientes (RFM)**",
+        "💰 **Análisis de Rentabilidad**"
     ])
 
     with tab1:
-        render_tab_tendencias(analisis_completo)
+        render_tab_diagnostico_cartera(analisis_cartera)
     with tab2:
-        render_tab_analisis_cartera(analisis_completo)
+        render_tab_rfm_accionable(rfm_df, resumen_rfm)
     with tab3:
-        render_tab_rfm(analisis_completo)
-    with tab4:
-        render_tab_productos_rentabilidad(analisis_completo)
+        render_tab_rentabilidad(df_rentabilidad)
 
-
-# ==============================================================================
-# PUNTO DE ENTRADA DEL SCRIPT
-# ==============================================================================
+# --- Punto de Entrada del Script ---
 if __name__ == "__main__":
     render_pagina_perfil()
