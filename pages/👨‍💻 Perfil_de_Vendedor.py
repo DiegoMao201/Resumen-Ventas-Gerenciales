@@ -8,7 +8,8 @@
 #
 # 1.  **Análisis RFM Avanzado:** Segmentación de clientes en categorías
 #     estratégicas (Campeones, Leales, En Riesgo, etc.) para acciones de
-#     marketing y retención dirigidas.
+#     marketing y retención dirigidas. Esta sección incluye la corrección
+#     para el error 'ValueError' usando .rank(method='first').
 # 2.  **Análisis de Pareto (80/20):** Identificación precisa del porcentaje
 #     de clientes que generan el 80% de los ingresos, con visualizaciones claras.
 # 3.  **Inteligencia de Producto y Rentabilidad:** Análisis profundo del mix
@@ -109,6 +110,7 @@ def analizar_tendencias_evolutivas(_df_vendedor):
 def realizar_analisis_rfm(_df_vendedor):
     """
     Realiza un análisis de Recencia, Frecuencia y Monetario (RFM) para segmentar clientes.
+    VERSIÓN CORREGIDA: Usa .rank(method='first') para evitar errores de 'qcut' con datos duplicados.
     """
     if _df_vendedor.empty: return pd.DataFrame(), {}
 
@@ -121,11 +123,15 @@ def realizar_analisis_rfm(_df_vendedor):
         Monetario=('valor_venta', 'sum')
     ).reset_index()
 
-    # Creación de quintiles para puntajes
-    rfm_df['R_Score'] = pd.qcut(rfm_df['Recencia'], 5, labels=[5, 4, 3, 2, 1], duplicates='drop')
-    rfm_df['F_Score'] = pd.qcut(rfm_df['Frecuencia'].rank(method='first'), 5, labels=[1, 2, 3, 4, 5], duplicates='drop')
-    rfm_df['M_Score'] = pd.qcut(rfm_df['Monetario'], 5, labels=[1, 2, 3, 4, 5], duplicates='drop')
-    
+    # --- CORRECCIÓN CLAVE ---
+    # Se aplica .rank(method='first') para manejar valores duplicados en los datos,
+    # lo que previene el error 'Bin labels must be one fewer than the number of bin edges'.
+    # Ya no se necesita `duplicates='drop'`.
+    rfm_df['R_Score'] = pd.qcut(rfm_df['Recencia'].rank(method='first'), 5, labels=[5, 4, 3, 2, 1])
+    rfm_df['F_Score'] = pd.qcut(rfm_df['Frecuencia'].rank(method='first'), 5, labels=[1, 2, 3, 4, 5])
+    rfm_df['M_Score'] = pd.qcut(rfm_df['Monetario'].rank(method='first'), 5, labels=[1, 2, 3, 4, 5])
+    # --- FIN DE LA CORRECCIÓN ---
+
     rfm_df['R_Score'] = rfm_df['R_Score'].astype(int)
     rfm_df['F_Score'] = rfm_df['F_Score'].astype(int)
     rfm_df['M_Score'] = rfm_df['M_Score'].astype(int)
