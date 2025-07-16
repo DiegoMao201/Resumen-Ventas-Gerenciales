@@ -1,11 +1,9 @@
 # ==============================================================================
 # SCRIPT CORREGIDO Y FINAL PARA: pages/1_Acciones_y_Recomendaciones.py
 # VERSIÓN: 16 de Julio, 2025
-# CORRECCIÓN: Se añade un filtro para analizar ÚNICAMENTE las ventas netas
-#             (Facturas y Notas de Crédito), alineando este módulo con la
-#             lógica de la página principal '🏠 Resumen Mensual'. Esto asegura
-#             la consistencia en todos los análisis de rentabilidad, RFM y
-#             matriz de productos.
+# CORRECCIÓN: Se ajusta el filtro de descuentos para que identifique ÚNICAMENTE
+#             los artículos cuyo nombre sea 'DESCUENTOS COMERCIALES', siguiendo
+#             la instrucción directa para asegurar la máxima precisión.
 # ==============================================================================
 
 import streamlit as st
@@ -70,7 +68,10 @@ def preparar_datos_y_margen(df):
     # Normalizamos la columna una sola vez para la comparación
     df_copy['nombre_articulo_norm'] = df_copy['nombre_articulo'].astype(str).str.upper()
 
+    # ==========================================================================
+    # ✨ CORRECCIÓN FINAL Y DEFINITIVA ✨
     # Se busca el nombre EXACTO del producto de descuento.
+    # ==========================================================================
     filtro_descuento = df_copy['nombre_articulo_norm'] == 'DESCUENTOS COMERCIALES'
 
     df_descuentos = df_copy[filtro_descuento]
@@ -175,8 +176,7 @@ def generar_excel_descargable(datos_para_exportar):
 def render_pagina_acciones():
     st.title("🎯 Acciones y Recomendaciones Estratégicas")
     st.markdown("Planes de acción inteligentes basados en tus datos para impulsar los resultados.")
-
-    # --- Lógica de selección de Vendedor/Grupo (sin cambios) ---
+    
     vendedores_unicos_norm = sorted(list(df_ventas_historico['nomvendedor'].dropna().unique()))
     grupos = DATA_CONFIG.get('grupos_vendedores', {})
     vendedores_en_grupos_norm = [normalizar_texto(v) for lista in grupos.values() for v in lista]
@@ -201,15 +201,14 @@ def render_pagina_acciones():
         st.stop()
     
     lista_vendedores_a_filtrar = grupos.get(seleccion, [seleccion])
-    # La columna 'nomvendedor' ya fue normalizada en la página principal
-    df_vendedor_base = df_ventas_historico[df_ventas_historico['nomvendedor'].isin([normalizar_texto(v) for v in lista_vendedores_a_filtrar])]
-
+    lista_vendedores_a_filtrar_norm = [normalizar_texto(v) for v in lista_vendedores_a_filtrar]
+    df_vendedor_base = df_ventas_historico[df_ventas_historico['nomvendedor'].isin(lista_vendedores_a_filtrar_norm)]
+    
     if df_vendedor_base.empty:
         st.warning(f"No hay datos históricos para {seleccion}.")
         st.stop()
     st.markdown("---")
-
-    # --- Lógica de selección de Periodo (sin cambios) ---
+    
     df_vendedor_base_copy = df_vendedor_base.copy()
     df_vendedor_base_copy['periodo'] = df_vendedor_base_copy['fecha_venta'].dt.to_period('M')
     meses_disponibles = sorted(df_vendedor_base_copy['periodo'].unique())
@@ -223,22 +222,12 @@ def render_pagina_acciones():
     else:
         st.warning("No hay periodos de venta para analizar para este vendedor.")
         st.stop()
-
+        
     periodo_inicio, periodo_fin = mapa_meses[mes_inicio_str], mapa_meses[mes_fin_str]
     fecha_inicio, fecha_fin = periodo_inicio.start_time, periodo_fin.end_time
-    df_vendedor_periodo_bruto = df_vendedor_base[(df_vendedor_base['fecha_venta'] >= fecha_inicio) & (df_vendedor_base['fecha_venta'] <= fecha_fin)]
-
-    # ✨ ================================================================== ✨
-    # ✨ CORRECCIÓN CLAVE: FILTRAR POR VENTAS NETAS FACTURADAS              ✨
-    # ✨ Se aplica el mismo filtro que en la página principal para asegurar ✨
-    # ✨ que los análisis (margen, RFM, etc.) sean consistentes.          ✨
-    # ✨ ================================================================== ✨
-    filtro_ventas_netas = 'FACTURA|NOTA.*CREDITO'
-    # La columna 'TipoDocumento' fue normalizada en la página principal.
-    df_vendedor_periodo = df_vendedor_periodo_bruto[df_vendedor_periodo_bruto['TipoDocumento'].str.contains(filtro_ventas_netas, na=False, case=False, regex=True)].copy()
-
+    df_vendedor_periodo = df_vendedor_base[(df_vendedor_base['fecha_venta'] >= fecha_inicio) & (df_vendedor_base['fecha_venta'] <= fecha_fin)]
     if df_vendedor_periodo.empty:
-        st.warning(f"No se encontraron datos de ventas netas (facturas, notas de crédito) para '{seleccion}' en el rango de meses seleccionado.")
+        st.warning(f"No se encontraron datos para '{seleccion}' en el rango de meses seleccionado.")
         st.stop()
         
     with st.spinner(f"Generando plan de acción para {seleccion}..."):
@@ -246,29 +235,27 @@ def render_pagina_acciones():
         analisis_rentabilidad = analizar_rentabilidad(df_productos, df_descuentos)
         df_rfm = analizar_segmentacion_rfm(df_productos, fecha_fin.to_pydatetime())
         df_matriz_productos = analizar_matriz_productos(df_productos)
-
+        
     st.download_button(label="📥 Descargar Análisis en Excel", data=generar_excel_descargable({"Segmentacion_RFM": df_rfm, "Matriz_de_Productos": df_matriz_productos, "Rentabilidad_y_Dcto": analisis_rentabilidad['df_evolucion'], "Top_Clientes_con_Dcto": analisis_rentabilidad['top_clientes_descuento']}), file_name=f"Plan_Accion_{seleccion.replace(' ', '_')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     st.markdown("---")
-
-    # --- Visualización de Resultados (sin cambios) ---
+    
     st.header("💰 Optimización de Rentabilidad y Descuentos")
-    st.info("Este análisis se basa únicamente en **ventas netas facturadas** (Facturas y Notas de Crédito).")
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Margen Bruto de Productos", f"${analisis_rentabilidad['margen_bruto_productos']:,.0f}")
     col2.metric("Total Descuentos Otorgados", f"-${analisis_rentabilidad['total_descuentos']:,.0f}", help="Suma de artículos llamados 'DESCUENTOS COMERCIALES'.")
     col3.metric("Margen Operativo Real", f"${analisis_rentabilidad['margen_operativo']:,.0f}", delta_color="off")
-    col4.metric("% Descuento sobre Venta Neta", f"{analisis_rentabilidad['porcentaje_descuento']:.1f}%", help="(Total Descuentos / Venta Bruta de Productos) * 100")
-
+    col4.metric("% Descuento sobre Venta", f"{analisis_rentabilidad['porcentaje_descuento']:.1f}%", help="(Total Descuentos / Venta Bruta de Productos) * 100")
+    
     df_evo = analisis_rentabilidad['df_evolucion']
     if not df_evo.empty:
         fig_evo = px.line(df_evo, x='mes_anio', y=['margen_bruto', 'margen_operativo'], title="Evolución de Margen Bruto vs. Margen Operativo", labels={"value": "Monto ($)", "mes_anio": "Mes"}, markers=True)
         fig_evo.update_layout(legend_title_text='Leyenda')
         st.plotly_chart(fig_evo, use_container_width=True)
         st.info("La brecha entre las dos líneas representa el total de descuentos ('DESCUENTOS COMERCIALES') otorgados cada mes.")
-
+        
     st.subheader("Clientes con Mayor Descuento")
     st.dataframe(analisis_rentabilidad['top_clientes_descuento'], use_container_width=True, hide_index=True, column_config={"valor_venta": st.column_config.NumberColumn(format="$ %d")})
-
+    
     st.header("👥 Segmentación Estratégica de Clientes (RFM)")
     with st.container(border=True):
         st.info("Clasifica a tus clientes para enfocar tus esfuerzos: **Campeones** (tus mejores clientes), **Leales** (compran consistentemente), **En Riesgo** (necesitan atención para no perderlos) e **Hibernando** (necesitan reactivación).")
