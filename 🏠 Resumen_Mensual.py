@@ -1,9 +1,8 @@
 # ==============================================================================
 # SCRIPT COMPLETO Y DEFINITIVO PARA: 🏠 Resumen Mensual.py
-# VERSIÓN FINAL: 15 de Julio, 2025
-# DESCRIPCIÓN: Versión final con lógica de ventas netas garantizada, incluyendo
-#              correctamente las NOTA_CREDITO con su valor negativo para que
-#              resten del total de ventas en todos los cálculos.
+# VERSIÓN FINAL: 15 de Julio, 2025 (VERSIÓN DE DEPURACIÓN)
+# DESCRIPCIÓN: Versión para detectar errores de carga en el CSV. Se modificó
+#              on_bad_lines='warn' para encontrar filas que se estén omitiendo.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -79,13 +78,19 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
         with dropbox.Dropbox(app_key=st.secrets.dropbox.app_key, app_secret=st.secrets.dropbox.app_secret, oauth2_refresh_token=st.secrets.dropbox.refresh_token) as dbx:
             _, res = dbx.files_download(path=ruta_archivo)
             contenido_csv = res.content.decode('latin-1')
-            df = pd.read_csv(io.StringIO(contenido_csv), header=None, sep=',', on_bad_lines='skip', dtype=str)
+            
+            # ==================================================================
+            # MODIFICACIÓN CLAVE PARA DEPURACIÓN
+            # Cambiamos on_bad_lines='skip' por on_bad_lines='warn' para que nos
+            # avise en la consola si está omitiendo alguna fila durante la carga.
+            # ==================================================================
+            df = pd.read_csv(io.StringIO(contenido_csv), header=None, sep=',', on_bad_lines='warn', dtype=str)
+            
             if df.shape[1] != len(nombres_columnas):
                 st.warning(f"Formato en {ruta_archivo}: Se esperaban {len(nombres_columnas)} columnas pero se encontraron {df.shape[1]}. Algunas columnas podrían faltar.")
                 df = df.reindex(columns=range(len(nombres_columnas)))
             df.columns = nombres_columnas
-            # GARANTÍA: Asegurar que las columnas de valor se traten como números, aceptando negativos.
-            # Esta sección es crucial para que los valores negativos de las notas de crédito se procesen correctamente.
+            
             numeric_cols = ['anio', 'mes', 'valor_venta', 'valor_cobro', 'unidades_vendidas', 'costo_unitario', 'marca_producto']
             for col in numeric_cols:
                 if col in df.columns:
@@ -117,12 +122,9 @@ def calcular_marquilla_optimizado(df_periodo):
 
 def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel):
     ### PASO 1: SEPARACIÓN Y CÁLCULOS BÁSICOS ###
-    # --- LÓGICA GARANTIZADA: Se usa una expresión regular para capturar FACTURA y todas las variantes de NOTA CREDITO.
-    # 'NOTA.*CREDITO' captura 'NOTA CREDITO', 'NOTA_CREDITO', 'NOTACREDITO', etc.
     filtro_ventas_netas = 'FACTURA|NOTA.*CREDITO'
     df_ventas_reales = df_ventas_periodo[df_ventas_periodo['TipoDocumento'].str.contains(filtro_ventas_netas, na=False, case=False, regex=True)].copy()
     
-    # La función .sum() sumará los valores positivos (facturas) y los negativos (notas de crédito), resultando en la venta neta.
     resumen_ventas = df_ventas_reales.groupby(['codigo_vendedor', 'nomvendedor']).agg(ventas_totales=('valor_venta', 'sum'), impactos=('cliente_id', 'nunique')).reset_index()
     resumen_cobros = df_cobros_periodo.groupby('codigo_vendedor').agg(cobros_totales=('valor_cobro', 'sum')).reset_index()
     df_ventas_comp = df_ventas_reales[df_ventas_reales['super_categoria'] != APP_CONFIG['complementarios']['exclude_super_categoria']]
@@ -174,7 +176,6 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
         df_grupo_actual = df_resumen[df_resumen['nomvendedor'].isin(lista_vendedores_norm)]
         if not df_grupo_actual.empty:
             anio_anterior = anio_sel - 1
-            # --- LÓGICA GARANTIZADA: El presupuesto histórico también se calcula sobre ventas netas.
             df_grupo_historico_facturas = df_ventas_historicas[
                 (df_ventas_historicas['TipoDocumento'].str.contains(filtro_ventas_netas, na=False, case=False, regex=True)) &
                 (df_ventas_historicas['anio'] == anio_anterior) & 
@@ -281,7 +282,6 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
     with tab3:
         st.subheader("Top 10 Clientes del Periodo (Por Venta Neta)")
         if not df_ventas_enfocadas.empty:
-            # --- LÓGICA GARANTIZADA: El Top Clientes ahora se calcula sobre ventas netas.
             filtro_ventas_netas = 'FACTURA|NOTA.*CREDITO'
             df_facturas_enfocadas = df_ventas_enfocadas[df_ventas_enfocadas['TipoDocumento'].str.contains(filtro_ventas_netas, na=False, case=False, regex=True)]
             top_clientes = df_facturas_enfocadas.groupby('nombre_cliente')['valor_venta'].sum().nlargest(10).reset_index()
