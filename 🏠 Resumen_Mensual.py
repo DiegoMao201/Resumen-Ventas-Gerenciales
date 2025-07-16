@@ -1,9 +1,9 @@
 # ==============================================================================
 # SCRIPT COMPLETO Y DEFINITIVO PARA: 🏠 Resumen Mensual.py
-# VERSIÓN FINAL: 16 de Julio, 2025 (VERSIÓN HÍBRIDA + DIAGNÓSTICO AVANZADO)
-# DESCRIPCIÓN: Mantiene la lógica de datos robusta e incluye una sección de
-#              diagnóstico para comparar los códigos del CSV vs. los del script,
-#              resolviendo así el problema de asignación de presupuestos.
+# VERSIÓN FINAL: 16 de Julio, 2025 (CÁLCULO DE COMPLEMENTARIOS AJUSTADO)
+# DESCRIPCIÓN: Se modifica el cálculo del KPI de Venta de Complementarios para
+#              que sea la suma de las 'categorias_clave_venta', alineando el
+#              KPI con la meta específica del tablero.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -78,7 +78,7 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
             df = pd.read_csv(io.StringIO(contenido_csv), header=None, sep='|', engine='python', quoting=3, on_bad_lines='warn')
 
             if df.shape[1] < 5 and not df.empty:
-                st.error(f"Error de Carga en {ruta_archivo}: Se leyó una sola columna. Aunque confirmaste que el separador es '|', la lectura está fallando. Revisa el archivo en un editor de texto para asegurar que no haya filas o caracteres problemáticos.")
+                st.error(f"Error de Carga en {ruta_archivo}: Se leyó una sola columna. Revisa el archivo CSV para asegurar que el separador sea '|'.")
                 return pd.DataFrame(columns=nombres_columnas)
 
             if df.shape[1] != len(nombres_columnas):
@@ -86,7 +86,6 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
                 df = df.reindex(columns=range(len(nombres_columnas)))
             df.columns = nombres_columnas
             
-            # Limpieza exhaustiva del código de vendedor antes de convertir a string
             if 'codigo_vendedor' in df.columns:
                 df['codigo_vendedor'] = pd.to_numeric(df['codigo_vendedor'], errors='coerce').fillna(0).astype(int).astype(str)
 
@@ -109,7 +108,6 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
         return pd.DataFrame(columns=nombres_columnas)
 
 def calcular_marquilla_optimizado(df_periodo):
-    # Lógica sin cambios
     if df_periodo.empty or 'nombre_articulo' not in df_periodo.columns:
         return pd.DataFrame(columns=['codigo_vendedor', 'nomvendedor', 'promedio_marquilla'])
     df_temp = df_periodo[['codigo_vendedor', 'nomvendedor', 'cliente_id', 'nombre_articulo']].copy()
@@ -122,14 +120,17 @@ def calcular_marquilla_optimizado(df_periodo):
     return df_final_marquilla.rename(columns={'puntaje_marquilla': 'promedio_marquilla'})
 
 def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel):
-    # LÓGICA DE CÁLCULO CENTRAL - SIN CAMBIOS
     filtro_ventas_netas = 'FACTURA|NOTA.*CREDITO'
     df_ventas_reales = df_ventas_periodo[df_ventas_periodo['TipoDocumento'].str.contains(filtro_ventas_netas, na=False, case=False, regex=True)].copy()
     
     resumen_ventas = df_ventas_reales.groupby(['codigo_vendedor', 'nomvendedor']).agg(ventas_totales=('valor_venta', 'sum'), impactos=('cliente_id', 'nunique')).reset_index()
     resumen_cobros = df_cobros_periodo.groupby('codigo_vendedor').agg(cobros_totales=('valor_cobro', 'sum')).reset_index()
-    df_ventas_comp = df_ventas_reales[df_ventas_reales['super_categoria'] != APP_CONFIG['complementarios']['exclude_super_categoria']]
+    
+    # ✨ CAMBIO CLAVE: El cálculo de complementarios ahora se basa en la INCLUSIÓN de categorías clave.
+    categorias_objetivo = APP_CONFIG['categorias_clave_venta']
+    df_ventas_comp = df_ventas_reales[df_ventas_reales['categoria_producto'].isin(categorias_objetivo)]
     resumen_complementarios = df_ventas_comp.groupby(['codigo_vendedor','nomvendedor']).agg(ventas_complementarios=('valor_venta', 'sum')).reset_index()
+    
     marca_sub_meta = APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo']
     df_ventas_sub_meta = df_ventas_reales[df_ventas_reales['nombre_marca'] == marca_sub_meta]
     resumen_sub_meta = df_ventas_sub_meta.groupby(['codigo_vendedor','nomvendedor']).agg(ventas_sub_meta=('valor_venta', 'sum')).reset_index()
@@ -209,7 +210,6 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
 # 3. LÓGICA DE LA INTERFAZ DE USUARIO Y EJECUCIÓN
 # ==============================================================================
 def generar_comentario_asesor(avance_v, avance_c, marquilla_p, avance_comp, avance_sub_meta):
-    # Lógica sin cambios
     comentarios = []
     if avance_v >= 100: comentarios.append("📈 **Ventas:** ¡Felicitaciones! Has superado la meta de ventas netas.")
     elif avance_v >= 80: comentarios.append("📈 **Ventas:** ¡Estás muy cerca de la meta neta! Un último esfuerzo.")
@@ -227,7 +227,6 @@ def generar_comentario_asesor(avance_v, avance_c, marquilla_p, avance_comp, avan
     return comentarios
 
 def render_analisis_detallado(df_vista, df_ventas_periodo):
-    # Lógica sin cambios
     st.markdown("---")
     st.header("🔬 Análisis Detallado del Periodo")
     opciones_enfoque = ["Visión General"] + sorted(df_vista['nomvendedor'].unique())
@@ -396,7 +395,6 @@ def render_dashboard():
 
             st.subheader("Métricas Clave del Periodo")
             
-            # VISUALIZACIÓN DE KPI MEJORADA
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.metric(label="Ventas Netas Facturadas", value=f"${ventas_total:,.0f}", delta=f"{ventas_total - meta_ventas:,.0f}", help=f"Meta: ${meta_ventas:,.0f}")
@@ -420,16 +418,12 @@ def render_dashboard():
                 st.metric(label="Promedio Marquilla", value=f"{marquilla_prom:.2f}", delta=f"{marquilla_prom - meta_marquilla:.2f}", help=f"Meta: {meta_marquilla:.2f}")
                 st.progress(min((marquilla_prom / meta_marquilla), 1.0) if meta_marquilla > 0 else 0, text=f"Meta: {meta_marquilla:.2f}")
             
-            # ✨ NUEVA HERRAMIENTA DE DIAGNÓSTICO
             with st.expander("🔬 Diagnóstico de Códigos de Vendedor", expanded=False):
                 st.info("Usa esta sección para verificar por qué un presupuesto podría no estar cargando. Compara los códigos del archivo CSV con los códigos configurados en el script.")
-                
                 codigos_en_csv = set(df_ventas_periodo['codigo_vendedor'].unique())
                 codigos_en_config = set(DATA_CONFIG['presupuestos'].keys())
-                
                 codigos_coincidentes = codigos_en_csv.intersection(codigos_en_config)
                 codigos_no_coincidentes = codigos_en_csv - codigos_en_config
-
                 col_diag1, col_diag2 = st.columns(2)
                 with col_diag1:
                     st.markdown("#### Códigos en CSV del Periodo")
@@ -437,18 +431,15 @@ def render_dashboard():
                 with col_diag2:
                     st.markdown("#### Códigos en Configuración")
                     st.dataframe(pd.DataFrame(list(codigos_en_config), columns=["Código"]), use_container_width=True)
-                
                 st.markdown("---")
                 if codigos_coincidentes:
                     st.success(f"✅ Se encontraron {len(codigos_coincidentes)} códigos coincidentes que recibirán presupuesto:")
                     st.write(sorted(list(codigos_coincidentes)))
                 else:
                     st.error("❌ No se encontró ninguna coincidencia entre los códigos del CSV y la configuración.")
-                
                 if codigos_no_coincidentes:
                     st.warning(f"⚠️ {len(codigos_no_coincidentes)} códigos del CSV no tienen presupuesto asignado en la configuración:")
                     st.write(sorted(list(codigos_no_coincidentes)))
-
 
             st.markdown("---")
             st.subheader("Desglose por Vendedor / Grupo")
