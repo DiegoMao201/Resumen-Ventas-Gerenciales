@@ -1,10 +1,9 @@
 # ==============================================================================
 # SCRIPT CORREGIDO PARA: pages/1_Acciones_y_Recomendaciones.py
 # VERSIÓN: 16 de Julio, 2025
-# CORRECCIÓN: Se asegura que el script utilice consistentemente los datos
-#             pre-procesados desde la página principal, garantizando que
-#             columnas como 'fecha_venta', 'costo_unitario', etc., tengan el
-#             formato y tipo de dato correcto para los análisis.
+# CORRECCIÓN: Se ajusta el filtro de descuentos para incluir 'NOTA CREDITO'
+#             además de 'DESCUENTO', asegurando que todos los tipos de
+#             reducciones se contabilicen correctamente en los análisis.
 # ==============================================================================
 
 import streamlit as st
@@ -24,7 +23,6 @@ st.set_page_config(page_title="Acciones y Recomendaciones", page_icon="🎯", la
 def normalizar_texto(texto):
     """
     Normaliza un texto a mayúsculas, sin tildes ni caracteres especiales.
-    Función idéntica a la del script principal para mantener consistencia.
     """
     if not isinstance(texto, str):
         return texto
@@ -42,7 +40,6 @@ def mostrar_acceso_restringido():
     st.stop()
 
 # --- Verificación de estado de la sesión ---
-# Es CRUCIAL que estos datos vengan del script principal
 if not st.session_state.get('autenticado'):
     mostrar_acceso_restringido()
 
@@ -53,7 +50,7 @@ DATA_CONFIG = st.session_state.get('DATA_CONFIG')
 
 # Validar que los datos existen y son correctos
 if df_ventas_historico is None or df_ventas_historico.empty or not APP_CONFIG or not DATA_CONFIG:
-    st.error("Error crítico: No se pudieron cargar los datos desde la sesión principal. Por favor, regrese a la página '🏠 Resumen Mensual' y vuelva a intentarlo.")
+    st.error("Error crítico: No se pudieron cargar los datos desde la sesión. Por favor, regrese a la página '🏠 Resumen Mensual' y vuelva a intentarlo.")
     st.stop()
 
 
@@ -64,19 +61,24 @@ if df_ventas_historico is None or df_ventas_historico.empty or not APP_CONFIG or
 @st.cache_data
 def preparar_datos_y_margen(df):
     """
-    Separa el dataframe de ventas en productos y descuentos, y calcula el margen bruto.
-    Confía en que los tipos de datos ('costo_unitario', 'unidades_vendidas') son correctos.
+    Separa el dataframe de ventas en productos y descuentos/notas de crédito,
+    y calcula el margen bruto de los productos.
     """
     df_copy = df.copy()
     df_copy['nombre_articulo_norm'] = df_copy['nombre_articulo'].astype(str).str.upper()
-    filtro_descuento = (df_copy['nombre_articulo_norm'].str.contains('DESCUENTO', na=False)) & \
-                       (df_copy['nombre_articulo_norm'].str.contains('COMERCIAL', na=False))
+
+    # ==========================================================================
+    # ✨ CORRECCIÓN CLAVE APLICADA AQUÍ ✨
+    # Se usa una expresión regular para buscar 'DESCUENTO' O 'NOTA CREDITO'.
+    # Esto captura correctamente todos los tipos de reducciones.
+    # ==========================================================================
+    filtro_regex = 'DESCUENTO|NOTA CREDITO'
+    filtro_descuento = df_copy['nombre_articulo_norm'].str.contains(filtro_regex, na=False)
 
     df_descuentos = df_copy[filtro_descuento]
     df_productos = df_copy[~filtro_descuento].copy()
 
     if not df_productos.empty:
-        # El cálculo depende de que 'costo_unitario' y 'unidades_vendidas' ya sean numéricos
         df_productos['costo_total_linea'] = df_productos['costo_unitario'].fillna(0) * df_productos['unidades_vendidas'].fillna(0)
         df_productos['margen_bruto'] = df_productos['valor_venta'] - df_productos['costo_total_linea']
 
@@ -84,9 +86,46 @@ def preparar_datos_y_margen(df):
 
 
 @st.cache_data
+def analizar_rentabilidad(df_productos, df_descuentos):
+    """
+    Calcula las métricas clave de rentabilidad y su evolución mensual.
+    """
+    venta_bruta = df_productos['valor_venta'].sum()
+    margen_bruto_productos = df_productos['margen_bruto'].sum()
+    total_descuentos = abs(df_descuentos['valor_venta'].sum())
+    margen_operativo = margen_bruto_productos - total_descuentos
+    porcentaje_descuento = (total_descuentos / venta_bruta * 100) if venta_bruta > 0 else 0
+    df_productos_copy = df_productos.copy()
+    df_descuentos_copy = df_descuentos.copy()
+
+    if not df_productos_copy.empty:
+        df_productos_copy['mes_anio'] = df_productos_copy['fecha_venta'].dt.to_period('M')
+    if not df_descuentos_copy.empty:
+        df_descuentos_copy['mes_anio'] = df_descuentos_copy['fecha_venta'].dt.to_period('M')
+
+    margen_bruto_mensual = df_productos_copy.groupby('mes_anio')['margen_bruto'].sum() if not df_productos_copy.empty else pd.Series(dtype=float)
+    descuentos_mensual = abs(df_descuentos_copy.groupby('mes_anio')['valor_venta'].sum()) if not df_descuentos_copy.empty else pd.Series(dtype=float)
+
+    df_evolucion = pd.DataFrame(margen_bruto_mensual).reset_index()
+    df_evolucion = pd.merge(df_evolucion, pd.DataFrame(descuentos_mensual).reset_index(), on='mes_anio', how='outer').fillna(0)
+    df_evolucion['margen_operativo'] = df_evolucion['margen_bruto'] - df_evolucion['valor_venta']
+    df_evolucion['mes_anio'] = df_evolucion['mes_anio'].dt.to_timestamp()
+    top_clientes_descuento = abs(df_descuentos.groupby('nombre_cliente')['valor_venta'].sum()).nlargest(5).reset_index()
+
+    return {
+        "venta_bruta": venta_bruta,
+        "margen_bruto_productos": margen_bruto_productos,
+        "total_descuentos": total_descuentos,
+        "margen_operativo": margen_operativo,
+        "porcentaje_descuento": porcentaje_descuento,
+        "df_evolucion": df_evolucion,
+        "top_clientes_descuento": top_clientes_descuento
+    }
+
+@st.cache_data
 def analizar_segmentacion_rfm(df_productos, fecha_fin_analisis_dt):
     """
-    Realiza la segmentación de clientes usando RFM. Depende de que 'fecha_venta' sea datetime.
+    Realiza la segmentación de clientes usando RFM.
     """
     if df_productos.empty: return pd.DataFrame()
 
@@ -119,36 +158,11 @@ def analizar_segmentacion_rfm(df_productos, fecha_fin_analisis_dt):
 
     return df_rfm[['nombre_cliente', 'Recencia', 'Frecuencia', 'Monetario', 'Clasificacion']].sort_values('Monetario', ascending=False)
 
-# (Las otras funciones de análisis como analizar_rentabilidad y analizar_matriz_productos
-# ya estaban bien, así que no se incluyen aquí para brevedad, pero sí en el código final completo)
-
-# ... (Se asume que las demás funciones de análisis se copian aquí sin cambios)
-@st.cache_data
-def analizar_rentabilidad(df_productos, df_descuentos):
-    # Esta función está bien y se puede copiar tal cual
-    venta_bruta = df_productos['valor_venta'].sum()
-    margen_bruto_productos = df_productos['margen_bruto'].sum()
-    total_descuentos = abs(df_descuentos['valor_venta'].sum())
-    margen_operativo = margen_bruto_productos - total_descuentos
-    porcentaje_descuento = (total_descuentos / venta_bruta * 100) if venta_bruta > 0 else 0
-    df_productos_copy = df_productos.copy()
-    df_descuentos_copy = df_descuentos.copy()
-    if not df_productos_copy.empty:
-        df_productos_copy['mes_anio'] = df_productos_copy['fecha_venta'].dt.to_period('M')
-    if not df_descuentos_copy.empty:
-        df_descuentos_copy['mes_anio'] = df_descuentos_copy['fecha_venta'].dt.to_period('M')
-    margen_bruto_mensual = df_productos_copy.groupby('mes_anio')['margen_bruto'].sum() if not df_productos_copy.empty else pd.Series(dtype=float)
-    descuentos_mensual = abs(df_descuentos_copy.groupby('mes_anio')['valor_venta'].sum()) if not df_descuentos_copy.empty else pd.Series(dtype=float)
-    df_evolucion = pd.DataFrame(margen_bruto_mensual).reset_index()
-    df_evolucion = pd.merge(df_evolucion, pd.DataFrame(descuentos_mensual).reset_index(), on='mes_anio', how='outer').fillna(0)
-    df_evolucion['margen_operativo'] = df_evolucion['margen_bruto'] - df_evolucion['valor_venta']
-    df_evolucion['mes_anio'] = df_evolucion['mes_anio'].dt.to_timestamp()
-    top_clientes_descuento = abs(df_descuentos.groupby('nombre_cliente')['valor_venta'].sum()).nlargest(5).reset_index()
-    return {"venta_bruta": venta_bruta, "margen_bruto_productos": margen_bruto_productos, "total_descuentos": total_descuentos, "margen_operativo": margen_operativo, "porcentaje_descuento": porcentaje_descuento, "df_evolucion": df_evolucion, "top_clientes_descuento": top_clientes_descuento}
-
 @st.cache_data
 def analizar_matriz_productos(df_productos):
-    # Esta función está bien y se puede copiar tal cual
+    """
+    Clasifica los productos en una matriz de tipo BCG.
+    """
     if df_productos.empty: return pd.DataFrame()
     df_matriz = df_productos.groupby('nombre_articulo').agg(Volumen=('valor_venta', 'sum'), Margen_Total=('margen_bruto', 'sum')).reset_index()
     df_matriz = df_matriz[df_matriz['Volumen'] > 0]
@@ -165,13 +179,16 @@ def analizar_matriz_productos(df_productos):
     return df_matriz
 
 def generar_excel_descargable(datos_para_exportar):
-    # Esta función está bien y se puede copiar tal cual
+    """
+    Crea un archivo Excel en memoria para su descarga.
+    """
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         for sheet_name, df in datos_para_exportar.items():
             if isinstance(df, pd.DataFrame) and not df.empty:
                 df.to_excel(writer, sheet_name=sheet_name, index=False)
     return output.getvalue()
+
 
 # ==============================================================================
 # SECCIÓN 3: INTERFAZ DE USUARIO (UI) Y EJECUCIÓN
@@ -184,8 +201,7 @@ def render_pagina_acciones():
     st.title("🎯 Acciones y Recomendaciones Estratégicas")
     st.markdown("Planes de acción inteligentes basados en tus datos para impulsar los resultados.")
 
-    # --- Lógica para el selector de vendedor/grupo, idéntica a la principal ---
-    # (Se copia la lógica del selector para garantizar consistencia)
+    # Lógica del selector de vendedor/grupo
     vendedores_unicos_norm = sorted(list(df_ventas_historico['nomvendedor'].dropna().unique()))
     grupos = DATA_CONFIG.get('grupos_vendedores', {})
     vendedores_en_grupos_norm = [normalizar_texto(v) for lista in grupos.values() for v in lista]
@@ -209,9 +225,8 @@ def render_pagina_acciones():
         st.info("Por favor, elija un vendedor o grupo para comenzar.")
         st.stop()
 
-    # --- Filtrado de Datos por Selección y Rango de Fechas ---
+    # Filtrado de Datos
     lista_vendedores_a_filtrar = grupos.get(seleccion, [seleccion])
-    # Aquí se usan los nombres normalizados, que ya vienen del script principal
     lista_vendedores_a_filtrar_norm = [normalizar_texto(v) for v in lista_vendedores_a_filtrar]
     df_vendedor_base = df_ventas_historico[df_ventas_historico['nomvendedor'].isin(lista_vendedores_a_filtrar_norm)]
 
@@ -221,7 +236,6 @@ def render_pagina_acciones():
 
     st.markdown("---")
     df_vendedor_base_copy = df_vendedor_base.copy()
-    # El filtrado por fecha depende de que la columna 'fecha_venta' sea de tipo datetime
     df_vendedor_base_copy['periodo'] = df_vendedor_base_copy['fecha_venta'].dt.to_period('M')
     meses_disponibles = sorted(df_vendedor_base_copy['periodo'].unique())
     mapa_meses = {f"{DATA_CONFIG['mapeo_meses'].get(p.month, p.month)} {p.year}": p for p in meses_disponibles}
@@ -244,22 +258,20 @@ def render_pagina_acciones():
         st.warning(f"No se encontraron datos para '{seleccion}' en el rango de meses seleccionado.")
         st.stop()
 
-    # --- Ejecución de Análisis y Renderizado ---
+    # Ejecución de Análisis y Renderizado
     with st.spinner(f"Generando plan de acción para {seleccion}..."):
-        # Se llama a las funciones de análisis con el dataframe ya filtrado y correcto
         df_productos, df_descuentos = preparar_datos_y_margen(df_vendedor_periodo.copy())
         analisis_rentabilidad = analizar_rentabilidad(df_productos, df_descuentos)
         df_rfm = analizar_segmentacion_rfm(df_productos, fecha_fin.to_pydatetime())
         df_matriz_productos = analizar_matriz_productos(df_productos)
     
-    # (El resto del código de renderizado que tenías se copia aquí tal cual,
-    # ya que depende de los resultados de los análisis y no de los datos crudos)
+    # El resto del código de renderizado permanece igual, ya que ahora recibe los datos correctos.
     st.download_button(label="📥 Descargar Análisis en Excel", data=generar_excel_descargable({"Segmentacion_RFM": df_rfm, "Matriz_de_Productos": df_matriz_productos, "Rentabilidad_y_Dcto": analisis_rentabilidad['df_evolucion'], "Top_Clientes_con_Dcto": analisis_rentabilidad['top_clientes_descuento']}), file_name=f"Plan_Accion_{seleccion.replace(' ', '_')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     st.markdown("---")
     st.header("💰 Optimización de Rentabilidad y Descuentos")
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Margen Bruto de Productos", f"${analisis_rentabilidad['margen_bruto_productos']:,.0f}")
-    col2.metric("Total Descuentos Otorgados", f"-${analisis_rentabilidad['total_descuentos']:,.0f}", help="Suma de todos los artículos 'Descuento Comercial'")
+    col2.metric("Total Descuentos Otorgados", f"-${analisis_rentabilidad['total_descuentos']:,.0f}", help="Suma de artículos como 'Descuento Comercial' y 'Nota Credito'")
     col3.metric("Margen Operativo Real", f"${analisis_rentabilidad['margen_operativo']:,.0f}", delta_color="off")
     col4.metric("% Descuento sobre Venta", f"{analisis_rentabilidad['porcentaje_descuento']:.1f}%", help="(Total Descuentos / Venta Bruta de Productos) * 100")
     df_evo = analisis_rentabilidad['df_evolucion']
@@ -267,8 +279,8 @@ def render_pagina_acciones():
         fig_evo = px.line(df_evo, x='mes_anio', y=['margen_bruto', 'margen_operativo'], title="Evolución de Margen Bruto vs. Margen Operativo", labels={"value": "Monto ($)", "mes_anio": "Mes"}, markers=True)
         fig_evo.update_layout(legend_title_text='Leyenda')
         st.plotly_chart(fig_evo, use_container_width=True)
-        st.info("La brecha entre las dos líneas representa el total de descuentos comerciales otorgados cada mes.")
-    st.subheader("Clientes con Mayor Descuento Otorgado")
+        st.info("La brecha entre las dos líneas representa el total de descuentos y notas de crédito otorgados cada mes.")
+    st.subheader("Clientes con Mayor Descuento / Nota Crédito")
     st.dataframe(analisis_rentabilidad['top_clientes_descuento'], use_container_width=True, hide_index=True, column_config={"valor_venta": st.column_config.NumberColumn(format="$ %d")})
     st.header("👥 Segmentación Estratégica de Clientes (RFM)")
     with st.container(border=True):
@@ -290,7 +302,6 @@ def render_pagina_acciones():
                 min_rentabilidad = df_filtrada['Rentabilidad'].min()
                 st.dataframe(df_filtrada, use_container_width=True, hide_index=True, height=350, column_config={"Volumen": st.column_config.NumberColumn(format="$ %d"), "Rentabilidad": st.column_config.ProgressColumn(format="%.1f%%", min_value=float(min_rentabilidad-abs(min_rentabilidad*0.1) if min_rentabilidad != 0 else -10), max_value=float(max_rentabilidad+abs(max_rentabilidad*0.1) if max_rentabilidad != 0 else 10))})
         else: st.warning("No hay suficientes datos de productos para generar la matriz en este periodo.")
-
 
 # Ejecución principal de la página
 if __name__ == "__main__":
