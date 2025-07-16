@@ -1,10 +1,9 @@
 # ==============================================================================
 # SCRIPT COMPLETO Y DEFINITIVO PARA: 🏠 Resumen Mensual.py
-# VERSIÓN FINAL: 16 de Julio, 2025 (VERSIÓN HÍBRIDA Y ROBUSTA)
-# DESCRIPCIÓN: Unifica la lógica de datos robusta (separador '|') de la
-#              versión del 15 de Julio con las mejoras visuales y de
-#              presentación de metas de la versión del 29 de Junio.
-#              Los cálculos de fondo no se alteran, solo la presentación.
+# VERSIÓN FINAL: 16 de Julio, 2025 (VERSIÓN HÍBRIDA + DIAGNÓSTICO AVANZADO)
+# DESCRIPCIÓN: Mantiene la lógica de datos robusta e incluye una sección de
+#              diagnóstico para comparar los códigos del CSV vs. los del script,
+#              resolviendo así el problema de asignación de presupuestos.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -45,23 +44,18 @@ st.set_page_config(page_title=APP_CONFIG["page_title"], page_icon="🏠", layout
 st.markdown("""
 <style>
     div[data-testid="stButton"] > button[kind="primary"] {
-        height: 3em;
-        font-size: 1.2em;
-        font-weight: bold;
-        border: 2px solid #FF4B4B;
-        background-color: #FF4B4B;
-        color: white;
+        height: 3em; font-size: 1.2em; font-weight: bold; border: 2px solid #FF4B4B;
+        background-color: #FF4B4B; color: white;
     }
     div[data-testid="stButton"] > button[kind="primary"]:hover {
-        border-color: #FF6B6B;
-        background-color: #FF6B6B;
+        border-color: #FF6B6B; background-color: #FF6B6B;
     }
 </style>
 """, unsafe_allow_html=True)
 
 
 # ==============================================================================
-# 2. LÓGICA DE PROCESAMIENTO DE DATOS (BASE: 15 de Julio)
+# 2. LÓGICA DE PROCESAMIENTO DE DATOS
 # ==============================================================================
 def normalizar_texto(texto):
     if not isinstance(texto, str): return texto
@@ -81,14 +75,21 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
             _, res = dbx.files_download(path=ruta_archivo)
             contenido_csv = res.content.decode('latin-1')
             
-            # Mantenemos la carga robusta con separador '|'
-            df = pd.read_csv(io.StringIO(contenido_csv), header=None, sep='|', engine='python', quoting=3) # quoting=3 para ignorar comillas
+            df = pd.read_csv(io.StringIO(contenido_csv), header=None, sep='|', engine='python', quoting=3, on_bad_lines='warn')
+
+            if df.shape[1] < 5 and not df.empty:
+                st.error(f"Error de Carga en {ruta_archivo}: Se leyó una sola columna. Aunque confirmaste que el separador es '|', la lectura está fallando. Revisa el archivo en un editor de texto para asegurar que no haya filas o caracteres problemáticos.")
+                return pd.DataFrame(columns=nombres_columnas)
 
             if df.shape[1] != len(nombres_columnas):
-                st.warning(f"Formato en {ruta_archivo}: Se esperaban {len(nombres_columnas)} columnas pero se encontraron {df.shape[1]}. Algunas columnas podrían faltar.")
+                st.warning(f"Formato en {ruta_archivo}: Se esperaban {len(nombres_columnas)} columnas pero se encontraron {df.shape[1]}. Se rellenarán las faltantes.")
                 df = df.reindex(columns=range(len(nombres_columnas)))
             df.columns = nombres_columnas
             
+            # Limpieza exhaustiva del código de vendedor antes de convertir a string
+            if 'codigo_vendedor' in df.columns:
+                df['codigo_vendedor'] = pd.to_numeric(df['codigo_vendedor'], errors='coerce').fillna(0).astype(int).astype(str)
+
             numeric_cols = ['anio', 'mes', 'valor_venta', 'valor_cobro', 'unidades_vendidas', 'costo_unitario', 'marca_producto']
             for col in numeric_cols:
                 if col in df.columns:
@@ -96,7 +97,7 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
 
             df.dropna(subset=['anio', 'mes'], inplace=True)
             df = df.astype({'anio': int, 'mes': int})
-            if 'codigo_vendedor' in df.columns: df['codigo_vendedor'] = df['codigo_vendedor'].astype(str)
+            
             if 'fecha_venta' in df.columns: df['fecha_venta'] = pd.to_datetime(df['fecha_venta'], errors='coerce')
             if 'marca_producto' in df.columns: df['nombre_marca'] = df['marca_producto'].map(DATA_CONFIG["mapeo_marcas"]).fillna('No Especificada')
             cols_a_normalizar = ['super_categoria', 'categoria_producto', 'nombre_marca', 'nomvendedor', 'TipoDocumento']
@@ -108,6 +109,7 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
         return pd.DataFrame(columns=nombres_columnas)
 
 def calcular_marquilla_optimizado(df_periodo):
+    # Lógica sin cambios
     if df_periodo.empty or 'nombre_articulo' not in df_periodo.columns:
         return pd.DataFrame(columns=['codigo_vendedor', 'nomvendedor', 'promedio_marquilla'])
     df_temp = df_periodo[['codigo_vendedor', 'nomvendedor', 'cliente_id', 'nombre_articulo']].copy()
@@ -120,10 +122,7 @@ def calcular_marquilla_optimizado(df_periodo):
     return df_final_marquilla.rename(columns={'puntaje_marquilla': 'promedio_marquilla'})
 
 def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel):
-    # SE MANTIENE TODA LA LÓGICA DE CÁLCULO DE LA VERSIÓN DEL 15 DE JULIO
-    # ESTA ES LA LÓGICA MÁS PRECISA Y ROBUSTA.
-    
-    ### PASO 1: SEPARACIÓN Y CÁLCULOS BÁSICOS ###
+    # LÓGICA DE CÁLCULO CENTRAL - SIN CAMBIOS
     filtro_ventas_netas = 'FACTURA|NOTA.*CREDITO'
     df_ventas_reales = df_ventas_periodo[df_ventas_periodo['TipoDocumento'].str.contains(filtro_ventas_netas, na=False, case=False, regex=True)].copy()
     
@@ -136,7 +135,6 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     resumen_sub_meta = df_ventas_sub_meta.groupby(['codigo_vendedor','nomvendedor']).agg(ventas_sub_meta=('valor_venta', 'sum')).reset_index()
     resumen_marquilla = calcular_marquilla_optimizado(df_ventas_periodo)
 
-    ### PASO 2: LÓGICA DE NETEO GLOBAL ###
     df_albaranes_historicos_bruto = df_ventas_historicas[df_ventas_historicas['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
     grouping_keys = ['Serie', 'cliente_id', 'codigo_articulo', 'codigo_vendedor']
     if not df_albaranes_historicos_bruto.empty:
@@ -145,7 +143,6 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     else:
         df_grupos_cancelados_global = pd.DataFrame(columns=grouping_keys)
 
-    ### PASO 3: LIMPIEZA DE ALBARANES DEL PERIODO ACTUAL ###
     df_albaranes_bruto_periodo = df_ventas_periodo[df_ventas_periodo['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
     if not df_albaranes_bruto_periodo.empty and not df_grupos_cancelados_global.empty:
         df_albaranes_reales_pendientes = df_albaranes_bruto_periodo.merge(
@@ -154,7 +151,6 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     else:
         df_albaranes_reales_pendientes = df_albaranes_bruto_periodo.copy()
 
-    ### PASO 4: CÁLCULOS FINALES Y ENSAMBLAJE ###
     if not df_albaranes_reales_pendientes.empty:
         resumen_albaranes = df_albaranes_reales_pendientes[df_albaranes_reales_pendientes['valor_venta'] > 0].groupby(['codigo_vendedor', 'nomvendedor']).agg(albaranes_pendientes=('valor_venta', 'sum')).reset_index()
     else:
@@ -167,8 +163,8 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     df_resumen = pd.merge(df_resumen, resumen_albaranes, on=['codigo_vendedor', 'nomvendedor'], how='left')
 
     presupuestos_fijos = DATA_CONFIG['presupuestos']
-    df_resumen['presupuesto'] = df_resumen['codigo_vendedor'].map(lambda x: presupuestos_fijos.get(str(x), {}).get('presupuesto', 0))
-    df_resumen['presupuestocartera'] = df_resumen['codigo_vendedor'].map(lambda x: presupuestos_fijos.get(str(x), {}).get('presupuestocartera', 0))
+    df_resumen['presupuesto'] = df_resumen['codigo_vendedor'].map(lambda x: presupuestos_fijos.get(x, {}).get('presupuesto', 0))
+    df_resumen['presupuestocartera'] = df_resumen['codigo_vendedor'].map(lambda x: presupuestos_fijos.get(x, {}).get('presupuestocartera', 0))
     df_resumen.fillna(0, inplace=True)
     
     registros_agrupados = []
@@ -180,8 +176,7 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
             anio_anterior = anio_sel - 1
             df_grupo_historico_facturas = df_ventas_historicas[
                 (df_ventas_historicas['TipoDocumento'].str.contains(filtro_ventas_netas, na=False, case=False, regex=True)) &
-                (df_ventas_historicas['anio'] == anio_anterior) & 
-                (df_ventas_historicas['mes'] == mes_sel) & 
+                (df_ventas_historicas['anio'] == anio_anterior) & (df_ventas_historicas['mes'] == mes_sel) & 
                 (df_ventas_historicas['nomvendedor'].isin(lista_vendedores_norm))
             ]
             ventas_anio_anterior = df_grupo_historico_facturas['valor_venta'].sum() if not df_grupo_historico_facturas.empty else 0
@@ -214,6 +209,7 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
 # 3. LÓGICA DE LA INTERFAZ DE USUARIO Y EJECUCIÓN
 # ==============================================================================
 def generar_comentario_asesor(avance_v, avance_c, marquilla_p, avance_comp, avance_sub_meta):
+    # Lógica sin cambios
     comentarios = []
     if avance_v >= 100: comentarios.append("📈 **Ventas:** ¡Felicitaciones! Has superado la meta de ventas netas.")
     elif avance_v >= 80: comentarios.append("📈 **Ventas:** ¡Estás muy cerca de la meta neta! Un último esfuerzo.")
@@ -231,6 +227,7 @@ def generar_comentario_asesor(avance_v, avance_c, marquilla_p, avance_comp, avan
     return comentarios
 
 def render_analisis_detallado(df_vista, df_ventas_periodo):
+    # Lógica sin cambios
     st.markdown("---")
     st.header("🔬 Análisis Detallado del Periodo")
     opciones_enfoque = ["Visión General"] + sorted(df_vista['nomvendedor'].unique())
@@ -251,7 +248,6 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
         df_ventas_enfocadas = df_ventas_periodo[df_ventas_periodo['nomvendedor'].isin(nombres_a_filtrar)]
         df_ranking = df_vista[df_vista['nomvendedor'] == enfoque_sel_norm]
     
-    # AJUSTE VISUAL: Se unifica el título en las pestañas para mayor claridad.
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Análisis de Portafolio", "🏆 Ranking de Rendimiento", "⭐ Clientes Clave", "⚙️ Ventas por Categoría"])
     with tab1:
         st.subheader("Análisis de Marcas y Categorías Estratégicas (Venta Neta)")
@@ -321,7 +317,7 @@ def render_dashboard():
     df_cobros_historicos = st.session_state.df_cobros
     
     if 'anio' not in df_ventas_historicas.columns or df_ventas_historicas.empty:
-        st.error("No hay datos históricos de ventas para analizar.")
+        st.error("No se pudieron cargar los datos de ventas. Revisa la conexión o el formato del archivo.")
         return
 
     lista_anios = sorted(df_ventas_historicas['anio'].unique(), reverse=True)
@@ -369,10 +365,8 @@ def render_dashboard():
 
             if st.button("🔄 ¡Actualizar Todos los Datos!", type="primary", use_container_width=True, help="Fuerza la recarga de los archivos desde Dropbox. Útil si los datos se actualizaron recientemente."):
                 st.cache_data.clear()
-                if 'df_ventas' in st.session_state:
-                    del st.session_state.df_ventas
-                if 'df_cobros' in st.session_state:
-                    del st.session_state.df_cobros
+                if 'df_ventas' in st.session_state: del st.session_state.df_ventas
+                if 'df_cobros' in st.session_state: del st.session_state.df_cobros
                 st.toast("Limpiando caché y recargando datos... ¡Un momento!", icon="⏳")
                 time.sleep(3)
                 st.rerun()
@@ -402,40 +396,66 @@ def render_dashboard():
 
             st.subheader("Métricas Clave del Periodo")
             
-            # ✨ AJUSTE VISUAL: Se unifican los títulos de las métricas para mayor claridad,
-            # mostrando el valor y el delta (diferencia vs meta) en rojo/verde.
+            # VISUALIZACIÓN DE KPI MEJORADA
             col1, col2, col3 = st.columns(3)
             with col1:
-                # El título es claro y el delta_color se encarga del rojo/verde.
-                st.metric("Ventas Netas Facturadas", f"${ventas_total:,.0f}", f"{ventas_total - meta_ventas:,.0f} vs Meta")
+                st.metric(label="Ventas Netas Facturadas", value=f"${ventas_total:,.0f}", delta=f"{ventas_total - meta_ventas:,.0f}", help=f"Meta: ${meta_ventas:,.0f}")
                 st.progress(min(avance_ventas / 100, 1.0), text=f"Avance Ventas Netas: {avance_ventas:.1f}%")
             with col2:
-                st.metric("Recaudo de Cartera", f"${cobros_total:,.0f}", f"{cobros_total - meta_cobros:,.0f} vs Meta")
+                st.metric(label="Recaudo de Cartera", value=f"${cobros_total:,.0f}", delta=f"{cobros_total - meta_cobros:,.0f}", help=f"Meta: ${meta_cobros:,.0f}")
                 st.progress(min(avance_cobros / 100, 1.0), text=f"Avance Cartera: {avance_cobros:.1f}%")
             with col3:
-                st.metric("Valor Albaranes Pendientes", f"${total_albaranes:,.0f}", "Mercancía por facturar")
+                st.metric(label="Valor Albaranes Pendientes", value=f"${total_albaranes:,.0f}", delta="Mercancía por facturar", delta_color="off")
                 st.progress(0, text="Gestión de remisiones")
 
             col4, col5, col6 = st.columns(3)
             with col4:
-                st.metric("Venta Neta Complementarios", f"${comp_total:,.0f}", f"{comp_total - meta_comp:,.0f} vs Meta")
+                st.metric(label="Venta Neta Complementarios", value=f"${comp_total:,.0f}", delta=f"{comp_total - meta_comp:,.0f}", help=f"Meta: ${meta_comp:,.0f}")
                 st.progress(min(avance_comp / 100, 1.0), text=f"Avance: {avance_comp:.1f}%")
             with col5:
                 sub_meta_label = APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo']
-                st.metric(f"Meta Específica ({sub_meta_label})", f"${sub_meta_total:,.0f}", f"{sub_meta_total - meta_sub_meta:,.0f} vs Meta")
+                st.metric(label=f"Meta Específica ({sub_meta_label})", value=f"${sub_meta_total:,.0f}", delta=f"{sub_meta_total - meta_sub_meta:,.0f}", help=f"Meta: ${meta_sub_meta:,.0f}")
                 st.progress(min(avance_sub_meta / 100, 1.0), text=f"Avance: {avance_sub_meta:.1f}%")
             with col6:
-                st.metric("Promedio Marquilla", f"{marquilla_prom:.2f}", f"{marquilla_prom - meta_marquilla:.2f} vs Meta")
+                st.metric(label="Promedio Marquilla", value=f"{marquilla_prom:.2f}", delta=f"{marquilla_prom - meta_marquilla:.2f}", help=f"Meta: {meta_marquilla:.2f}")
                 st.progress(min((marquilla_prom / meta_marquilla), 1.0) if meta_marquilla > 0 else 0, text=f"Meta: {meta_marquilla:.2f}")
+            
+            # ✨ NUEVA HERRAMIENTA DE DIAGNÓSTICO
+            with st.expander("🔬 Diagnóstico de Códigos de Vendedor", expanded=False):
+                st.info("Usa esta sección para verificar por qué un presupuesto podría no estar cargando. Compara los códigos del archivo CSV con los códigos configurados en el script.")
+                
+                codigos_en_csv = set(df_ventas_periodo['codigo_vendedor'].unique())
+                codigos_en_config = set(DATA_CONFIG['presupuestos'].keys())
+                
+                codigos_coincidentes = codigos_en_csv.intersection(codigos_en_config)
+                codigos_no_coincidentes = codigos_en_csv - codigos_en_config
+
+                col_diag1, col_diag2 = st.columns(2)
+                with col_diag1:
+                    st.markdown("#### Códigos en CSV del Periodo")
+                    st.dataframe(pd.DataFrame(list(codigos_en_csv), columns=["Código"]), use_container_width=True)
+                with col_diag2:
+                    st.markdown("#### Códigos en Configuración")
+                    st.dataframe(pd.DataFrame(list(codigos_en_config), columns=["Código"]), use_container_width=True)
+                
+                st.markdown("---")
+                if codigos_coincidentes:
+                    st.success(f"✅ Se encontraron {len(codigos_coincidentes)} códigos coincidentes que recibirán presupuesto:")
+                    st.write(sorted(list(codigos_coincidentes)))
+                else:
+                    st.error("❌ No se encontró ninguna coincidencia entre los códigos del CSV y la configuración.")
+                
+                if codigos_no_coincidentes:
+                    st.warning(f"⚠️ {len(codigos_no_coincidentes)} códigos del CSV no tienen presupuesto asignado en la configuración:")
+                    st.write(sorted(list(codigos_no_coincidentes)))
+
 
             st.markdown("---")
             st.subheader("Desglose por Vendedor / Grupo")
             
-            # ✨ AJUSTE VISUAL: Se ajustan los títulos de las columnas para ser más claros.
             cols_desglose = ['Estatus', 'nomvendedor', 'ventas_totales', 'presupuesto', 'cobros_totales', 'presupuestocartera', 'albaranes_pendientes', 'impactos', 'promedio_marquilla']
             st.dataframe(df_vista[cols_desglose], column_config={
-                "Estatus": st.column_config.TextColumn("🚦", width="small"), 
-                "nomvendedor": "Vendedor/Grupo", 
+                "Estatus": st.column_config.TextColumn("🚦", width="small"), "nomvendedor": "Vendedor/Grupo",
                 "ventas_totales": st.column_config.NumberColumn("Ventas Netas", format="$ %d"), 
                 "presupuesto": st.column_config.NumberColumn("Meta Ventas", format="$ %d"),
                 "cobros_totales": st.column_config.NumberColumn("Recaudo", format="$ %d"),
@@ -464,9 +484,7 @@ def render_dashboard():
             else:
                 st.dataframe(df_albaranes_a_mostrar[['Serie', 'fecha_venta', 'nombre_cliente', 'valor_venta', 'nomvendedor']], 
                     column_config={
-                        "Serie": "Documento",
-                        "fecha_venta": "Fecha",
-                        "nombre_cliente": "Cliente",
+                        "Serie": "Documento", "fecha_venta": "Fecha", "nombre_cliente": "Cliente",
                         "valor_venta": st.column_config.NumberColumn("Valor Pendiente", format="$ %d"),
                         "nomvendedor": "Vendedor"
                     }, use_container_width=True, hide_index=True
