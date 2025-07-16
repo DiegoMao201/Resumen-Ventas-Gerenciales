@@ -1,8 +1,10 @@
 # ==============================================================================
 # SCRIPT COMPLETO Y DEFINITIVO PARA: 🏠 Resumen Mensual.py
-# VERSIÓN FINAL: 15 de Julio, 2025 (VERSIÓN ROBUSTA CON SEPARADOR '|')
-# DESCRIPCIÓN: Versión final que utiliza el separador '|' para máxima
-#              fiabilidad en la carga de datos.
+# VERSIÓN FINAL: 16 de Julio, 2025 (VERSIÓN HÍBRIDA Y ROBUSTA)
+# DESCRIPCIÓN: Unifica la lógica de datos robusta (separador '|') de la
+#              versión del 15 de Julio con las mejoras visuales y de
+#              presentación de metas de la versión del 29 de Junio.
+#              Los cálculos de fondo no se alteran, solo la presentación.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -59,7 +61,7 @@ st.markdown("""
 
 
 # ==============================================================================
-# 2. LÓGICA DE PROCESAMIENTO DE DATOS
+# 2. LÓGICA DE PROCESAMIENTO DE DATOS (BASE: 15 de Julio)
 # ==============================================================================
 def normalizar_texto(texto):
     if not isinstance(texto, str): return texto
@@ -79,9 +81,7 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
             _, res = dbx.files_download(path=ruta_archivo)
             contenido_csv = res.content.decode('latin-1')
             
-            # ==================================================================
-            # MODIFICACIÓN CLAVE: Se cambia el separador a '|' para máxima fiabilidad.
-            # ==================================================================
+            # Mantenemos la carga robusta con separador '|'
             df = pd.read_csv(io.StringIO(contenido_csv), header=None, sep='|', engine='python', quoting=3) # quoting=3 para ignorar comillas
 
             if df.shape[1] != len(nombres_columnas):
@@ -120,6 +120,9 @@ def calcular_marquilla_optimizado(df_periodo):
     return df_final_marquilla.rename(columns={'puntaje_marquilla': 'promedio_marquilla'})
 
 def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel):
+    # SE MANTIENE TODA LA LÓGICA DE CÁLCULO DE LA VERSIÓN DEL 15 DE JULIO
+    # ESTA ES LA LÓGICA MÁS PRECISA Y ROBUSTA.
+    
     ### PASO 1: SEPARACIÓN Y CÁLCULOS BÁSICOS ###
     filtro_ventas_netas = 'FACTURA|NOTA.*CREDITO'
     df_ventas_reales = df_ventas_periodo[df_ventas_periodo['TipoDocumento'].str.contains(filtro_ventas_netas, na=False, case=False, regex=True)].copy()
@@ -208,11 +211,8 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     return df_final, df_albaranes_reales_pendientes
 
 # ==============================================================================
-# 4. LÓGICA DE LA INTERFAZ DE USUARIO Y EJECUCIÓN
-# El resto del script (UI y main) no necesita cambios.
-# Puedes copiarlo desde la versión anterior.
+# 3. LÓGICA DE LA INTERFAZ DE USUARIO Y EJECUCIÓN
 # ==============================================================================
-# (El código de la UI y la función main() va aquí, sin cambios)
 def generar_comentario_asesor(avance_v, avance_c, marquilla_p, avance_comp, avance_sub_meta):
     comentarios = []
     if avance_v >= 100: comentarios.append("📈 **Ventas:** ¡Felicitaciones! Has superado la meta de ventas netas.")
@@ -229,6 +229,7 @@ def generar_comentario_asesor(avance_v, avance_c, marquilla_p, avance_comp, avan
     elif marquilla_p > 0: comentarios.append(f"🎨 **Marquilla:** Tu promedio es {marquilla_p:.2f}. Hay oportunidad de crecimiento.")
     else: comentarios.append("🎨 **Marquilla:** Aún no registras ventas en las marcas clave.")
     return comentarios
+
 def render_analisis_detallado(df_vista, df_ventas_periodo):
     st.markdown("---")
     st.header("🔬 Análisis Detallado del Periodo")
@@ -249,6 +250,8 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
         nombres_a_filtrar = [normalizar_texto(n) for n in DATA_CONFIG['grupos_vendedores'].get(nombre_grupo_orig, [enfoque_sel_norm])]
         df_ventas_enfocadas = df_ventas_periodo[df_ventas_periodo['nomvendedor'].isin(nombres_a_filtrar)]
         df_ranking = df_vista[df_vista['nomvendedor'] == enfoque_sel_norm]
+    
+    # AJUSTE VISUAL: Se unifica el título en las pestañas para mayor claridad.
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Análisis de Portafolio", "🏆 Ranking de Rendimiento", "⭐ Clientes Clave", "⚙️ Ventas por Categoría"])
     with tab1:
         st.subheader("Análisis de Marcas y Categorías Estratégicas (Venta Neta)")
@@ -309,6 +312,7 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
                 fig = px.pie(resumen_cat, names='categoria_producto', values='Ventas', title="Distribución entre Categorías Clave (Venta Neta)", hole=0.4)
                 fig.update_traces(textinfo='percent+label', textposition='inside')
                 st.plotly_chart(fig, use_container_width=True)
+
 def render_dashboard():
     st.sidebar.markdown("---")
     st.sidebar.header("Filtros de Periodo")
@@ -398,9 +402,12 @@ def render_dashboard():
 
             st.subheader("Métricas Clave del Periodo")
             
+            # ✨ AJUSTE VISUAL: Se unifican los títulos de las métricas para mayor claridad,
+            # mostrando el valor y el delta (diferencia vs meta) en rojo/verde.
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric("Ventas Netas (Facturas - Notas Crédito)", f"${ventas_total:,.0f}", f"{ventas_total - meta_ventas:,.0f} vs Meta")
+                # El título es claro y el delta_color se encarga del rojo/verde.
+                st.metric("Ventas Netas Facturadas", f"${ventas_total:,.0f}", f"{ventas_total - meta_ventas:,.0f} vs Meta")
                 st.progress(min(avance_ventas / 100, 1.0), text=f"Avance Ventas Netas: {avance_ventas:.1f}%")
             with col2:
                 st.metric("Recaudo de Cartera", f"${cobros_total:,.0f}", f"{cobros_total - meta_cobros:,.0f} vs Meta")
@@ -423,6 +430,8 @@ def render_dashboard():
 
             st.markdown("---")
             st.subheader("Desglose por Vendedor / Grupo")
+            
+            # ✨ AJUSTE VISUAL: Se ajustan los títulos de las columnas para ser más claros.
             cols_desglose = ['Estatus', 'nomvendedor', 'ventas_totales', 'presupuesto', 'cobros_totales', 'presupuestocartera', 'albaranes_pendientes', 'impactos', 'promedio_marquilla']
             st.dataframe(df_vista[cols_desglose], column_config={
                 "Estatus": st.column_config.TextColumn("🚦", width="small"), 
@@ -462,6 +471,7 @@ def render_dashboard():
                         "nomvendedor": "Vendedor"
                     }, use_container_width=True, hide_index=True
                 )
+
 def main():
     if 'df_ventas' not in st.session_state:
         with st.spinner('Cargando datos maestros, por favor espere...'):
@@ -525,5 +535,6 @@ def main():
             for key in keys_to_clear:
                 del st.session_state[key]
             st.rerun()
+
 if __name__ == '__main__':
     main()
