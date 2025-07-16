@@ -111,6 +111,8 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
             if 'nomvendedor' in df.columns:
                 df['nomvendedor'].replace(r'^\s*$', np.nan, regex=True, inplace=True)
                 df['nomvendedor'].fillna('COMERCIAL FERREINOX', inplace=True)
+                # Se normaliza aquí para asegurar consistencia
+                df['nomvendedor'] = df['nomvendedor'].apply(normalizar_texto)
 
             if 'codigo_vendedor' in df.columns:
                 df['codigo_vendedor'].replace(r'^\s*$', np.nan, regex=True, inplace=True)
@@ -118,13 +120,9 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
 
             if 'marca_producto' in df.columns: df['nombre_marca'] = df['marca_producto'].map(DATA_CONFIG["mapeo_marcas"]).fillna('No Especificada')
             
-            cols_a_normalizar = ['super_categoria', 'categoria_producto', 'nombre_marca', 'nomvendedor', 'TipoDocumento']
+            cols_a_normalizar = ['super_categoria', 'categoria_producto', 'nombre_marca', 'TipoDocumento']
             for col in cols_a_normalizar:
                 if col in df.columns: df[col] = df[col].apply(normalizar_texto)
-
-            if 'TipoDocumento' in df.columns and 'valor_venta' in df.columns:
-                credit_note_mask = df['TipoDocumento'] == 'NOTA CREDITO'
-                df.loc[credit_note_mask, 'valor_venta'] = -df.loc[credit_note_mask, 'valor_venta'].abs()
 
             return df
             
@@ -144,46 +142,32 @@ def calcular_marquilla_optimizado(df_periodo):
     df_final_marquilla = df_cliente_marcas.groupby(['codigo_vendedor', 'nomvendedor'])['puntaje_marquilla'].mean().reset_index()
     return df_final_marquilla.rename(columns={'puntaje_marquilla': 'promedio_marquilla'})
 
-# ==============================================================================
-# FUNCIÓN DE PROCESAMIENTO PRINCIPAL (CORREGIDA)
-# ==============================================================================
 def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel, anio_reciente, mes_reciente):
-    
     # --- 1. CÁLCULO DE ALBARANES PENDIENTES (USANDO LA LÓGICA DE NETEO) ---
-    # Se toman todos los documentos relacionados con albaranes para netearlos.
     df_albaranes_pool = df_ventas_historicas[df_ventas_historicas['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
     grouping_keys = ['Serie', 'cliente_id', 'codigo_articulo', 'codigo_vendedor']
     
     if not df_albaranes_pool.empty and all(col in df_albaranes_pool.columns for col in grouping_keys):
-        # Se calcula el valor neto por grupo de transacción. Los grupos que suman 0 están "completos".
         df_neto_historico = df_albaranes_pool.groupby(grouping_keys).agg(valor_neto=('valor_venta', 'sum')).reset_index()
-        # Se identifican los albaranes que después de netearlos, su valor es mayor a cero (pendientes).
-        df_grupos_pendientes = df_neto_historico[df_neto_historico['valor_neto'] > 0.01] # Usamos un umbral pequeño por si hay decimales
+        df_grupos_pendientes = df_neto_historico[df_neto_historico['valor_neto'] > 0.01]
     else:
         df_grupos_pendientes = pd.DataFrame(columns=grouping_keys + ['valor_neto'])
 
-    # Se filtran los albaranes del periodo actual que corresponden a los grupos identificados como pendientes.
     df_albaranes_pendientes_reales = df_ventas_periodo.merge(
         df_grupos_pendientes[grouping_keys], on=grouping_keys, how='inner'
     )
-    # Nos aseguramos de tomar solo la parte positiva del albarán para el reporte de pendientes.
     df_albaranes_pendientes_reales = df_albaranes_pendientes_reales[df_albaranes_pendientes_reales['valor_venta'] > 0]
     
     # --- 2. CÁLCULO DE VENTAS PARA KPIs (VENTAS REALES FACTURADAS) ---
-    # Las ventas reales son solo los documentos financieros finales, no los movimientos de inventario.
-    tipos_documento_kpi = ['ALBARAN_FACTURADO', 'ALBARAN_NOTA_CREDITO', 'FACTURA_DIRECTA', 'NOTA_CREDITO_DIRECTA']
+    tipos_documento_kpi = ['ALBARAN FACTURADO', 'ALBARAN NOTA CREDITO', 'FACTURA DIRECTA', 'NOTA CREDITO DIRECTA']
     df_ventas_kpi = df_ventas_periodo[df_ventas_periodo['TipoDocumento'].isin(tipos_documento_kpi)].copy()
 
-    # IMPORTANTE: La consulta SQL invierte el signo de 'ALBARAN_FACTURADO' y 'ALBARAN_NOTA_CREDITO' para el neteo.
-    # Aquí lo revertimos para que refleje el valor financiero real para los KPIs.
-    # (ALBARAN_FACTURADO) de -100 pasa a +100 (venta).
-    # (ALBARAN_NOTA_CREDITO) de +100 pasa a -100 (devolución).
+    # Revertimos el signo para el reporte, ya que la consulta SQL lo invirtió para el neteo
     df_ventas_kpi['valor_venta'] = df_ventas_kpi['valor_venta'] * -1
     
     st.info("Lógica de cálculo actualizada: Las 'Ventas Reales' se basan en documentos facturados. Los 'Albaranes Pendientes' se calculan neteando anulaciones y facturas.", icon="✅")
 
-    # --- 3. AGRUPACIÓN DE DATOS PARA EL RESUMEN (Cálculos de KPIs) ---
-    # Todos los cálculos de KPIs se basan ahora en df_ventas_kpi (solo facturado).
+    # --- 3. AGRUPACIÓN DE DATOS PARA EL RESUMEN ---
     if not df_ventas_kpi.empty:
         resumen_ventas = df_ventas_kpi.groupby(['codigo_vendedor', 'nomvendedor']).agg(
             ventas_totales=('valor_venta', 'sum'), 
@@ -192,7 +176,6 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     else:
         resumen_ventas = pd.DataFrame(columns=['codigo_vendedor', 'nomvendedor', 'ventas_totales', 'impactos'])
 
-    # El resto de los cálculos de resumen se mantienen, pero ahora se basan en datos correctos.
     if not df_cobros_periodo.empty and 'valor_cobro' in df_cobros_periodo.columns:
         resumen_cobros = df_cobros_periodo.groupby('codigo_vendedor').agg(cobros_totales=('valor_cobro', 'sum')).reset_index()
     else:
@@ -232,11 +215,9 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     registros_agrupados = []
     incremento_mostradores = 1 + APP_CONFIG['presupuesto_mostradores']['incremento_anual_pct']
     
-    # Para el presupuesto dinámico, se usan los datos de KPI del histórico
-    tipos_historico_kpi = ['ALBARAN_FACTURADO', 'ALBARAN_NOTA_CREDITO', 'FACTURA_DIRECTA', 'NOTA_CREDITO_DIRECTA']
+    tipos_historico_kpi = ['ALBARAN FACTURADO', 'ALBARAN NOTA CREDITO', 'FACTURA DIRECTA', 'NOTA CREDITO DIRECTA']
     df_ventas_historicas_kpi = df_ventas_historicas[df_ventas_historicas['TipoDocumento'].isin(tipos_historico_kpi)].copy()
     df_ventas_historicas_kpi['valor_venta'] = df_ventas_historicas_kpi['valor_venta'] * -1
-
 
     for grupo, lista_vendedores in DATA_CONFIG['grupos_vendedores'].items():
         lista_vendedores_norm = [normalizar_texto(v) for v in lista_vendedores]
@@ -274,7 +255,6 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     df_final['presupuesto_sub_meta'] = df_final['presupuesto_complementarios'] * APP_CONFIG['sub_meta_complementarios']['presupuesto_pct']
     
     return df_final, df_albaranes_pendientes_reales
-
 
 # ==============================================================================
 # 3. LÓGICA DE LA INTERFAZ DE USUARIO (UI)
@@ -324,11 +304,10 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
         df_ventas_enfocadas = df_ventas_periodo[df_ventas_periodo['nomvendedor'].isin(nombres_a_filtrar)]
         df_ranking = df_vista[df_vista['nomvendedor'] == enfoque_sel_norm]
 
-    # CORRECCIÓN: Usar el pool de datos de KPI para los análisis detallados
-    tipos_documento_kpi = ['ALBARAN_FACTURADO', 'ALBARAN_NOTA_CREDITO', 'FACTURA_DIRECTA', 'NOTA_CREDITO_DIRECTA']
+    # Usar el pool de datos de KPI para los análisis detallados
+    tipos_documento_kpi = ['ALBARAN FACTURADO', 'ALBARAN NOTA CREDITO', 'FACTURA DIRECTA', 'NOTA CREDITO DIRECTA']
     df_ventas_enfocadas_kpi = df_ventas_enfocadas[df_ventas_enfocadas['TipoDocumento'].isin(tipos_documento_kpi)].copy()
     df_ventas_enfocadas_kpi['valor_venta'] = df_ventas_enfocadas_kpi['valor_venta'] * -1
-
 
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Análisis de Portafolio", "🏆 Ranking de Rendimiento", "⭐ Clientes Clave", "⚙️ Ventas por Categoría"])
     
@@ -413,7 +392,6 @@ def render_dashboard():
     else:
         df_cobros_periodo = df_cobros_historicos[(df_cobros_historicos['anio'] == anio_sel) & (df_cobros_historicos['mes'] == mes_sel_num)]
         
-        # Se pasan los nuevos parámetros a la función de procesamiento
         df_resumen_final, df_albaranes_pendientes = procesar_datos_periodo(
             df_ventas_periodo, 
             df_cobros_periodo, 
@@ -424,13 +402,32 @@ def render_dashboard():
             mes_reciente
         )
         
+        # ==================================================================
+        # INICIO DE LA CORRECCIÓN DE FILTRADO DE USUARIO
+        # ==================================================================
         usuario_actual_norm = normalizar_texto(st.session_state.usuario)
+        
         if usuario_actual_norm == "GERENTE":
             lista_filtro = sorted(df_resumen_final['nomvendedor'].unique())
             vendedores_sel = st.sidebar.multiselect("Filtrar Vendedores/Grupos", options=lista_filtro, default=lista_filtro, key="ms_vendedores")
             df_vista = df_resumen_final[df_resumen_final['nomvendedor'].isin(vendedores_sel)]
         else:
-            df_vista = df_resumen_final[df_resumen_final['nomvendedor'] == usuario_actual_norm]
+            # Lógica para encontrar si el usuario pertenece a un grupo
+            nombre_a_filtrar = usuario_actual_norm
+            es_miembro_de_grupo = False
+            for grupo, miembros in DATA_CONFIG["grupos_vendedores"].items():
+                miembros_norm = [normalizar_texto(m) for m in miembros]
+                if usuario_actual_norm in miembros_norm:
+                    # Si el usuario es un miembro, el filtro debe ser el nombre del GRUPO
+                    nombre_a_filtrar = normalizar_texto(grupo)
+                    es_miembro_de_grupo = True
+                    break
+            
+            # Aplicar el filtro correcto
+            df_vista = df_resumen_final[df_resumen_final['nomvendedor'] == nombre_a_filtrar]
+        # ==================================================================
+        # FIN DE LA CORRECCIÓN
+        # ==================================================================
             
         if df_vista.empty:
             st.warning("No hay datos disponibles para la selección de usuario/grupo actual.")
@@ -454,8 +451,12 @@ def render_dashboard():
                 time.sleep(3)
                 st.rerun()
 
-            vista_para = st.session_state.usuario if len(df_vista['nomvendedor'].unique()) == 1 else 'Múltiples Seleccionados'
-            st.markdown(f"**Vista para:** `{vista_para}`")
+            # CORRECCIÓN: El nombre de la vista debe ser el que se está filtrando
+            vista_para = nombre_a_filtrar if usuario_actual_norm != "GERENTE" else 'Múltiples Seleccionados'
+            st.markdown(f"**Vista para:** `{st.session_state.usuario}`")
+            if usuario_actual_norm != "GERENTE" and es_miembro_de_grupo:
+                st.markdown(f"*(Viendo datos consolidados del grupo: `{nombre_a_filtrar}`)*")
+
             
             ventas_total = df_vista['ventas_totales'].sum(); meta_ventas = df_vista['presupuesto'].sum()
             cobros_total = df_vista['cobros_totales'].sum(); meta_cobros = df_vista['presupuestocartera'].sum()
@@ -555,18 +556,25 @@ def main():
         def obtener_lista_usuarios(df_ventas_cache):
             grupos_orig = list(DATA_CONFIG['grupos_vendedores'].keys())
             if not df_ventas_cache.empty and 'nomvendedor' in df_ventas_cache.columns:
+                # Usamos una lista de vendedores normalizados desde el df para la lista de login
+                vendedores_unicos_df_norm = df_ventas_cache['nomvendedor'].dropna().unique()
+                mapa_norm_a_orig = {v:v for v in vendedores_unicos_df_norm} # Asumimos que ya están normalizados
+
+                # Reconstruimos los nombres originales para el dropdown si es posible (mejora visual)
+                # Esta parte es compleja, por ahora usamos los normalizados para asegurar funcionalidad.
+                
                 vendedores_en_grupos_norm = [normalizar_texto(v) for lista in DATA_CONFIG['grupos_vendedores'].values() for v in lista]
-                vendedores_unicos_df = df_ventas_cache['nomvendedor'].dropna().unique()
-                mapa_norm_a_orig = {normalizar_texto(v): v for v in vendedores_unicos_df}
-                vendedores_solos_norm = [v_norm for v_norm in [normalizar_texto(v) for v in vendedores_unicos_df] if v_norm not in vendedores_en_grupos_norm]
-                vendedores_solos_orig = sorted([mapa_norm_a_orig.get(v_norm) for v_norm in vendedores_solos_norm if mapa_norm_a_orig.get(v_norm)])
-                return ["GERENTE"] + sorted(grupos_orig) + vendedores_solos_orig
+                
+                vendedores_solos_norm = [v_norm for v_norm in vendedores_unicos_df_norm if v_norm not in vendedores_en_grupos_norm and v_norm not in [normalizar_texto(g) for g in grupos_orig]]
+
+                return ["GERENTE"] + sorted(grupos_orig) + sorted(vendedores_solos_norm)
             return ["GERENTE"] + sorted(grupos_orig)
             
         todos_usuarios = obtener_lista_usuarios(df_para_usuarios)
         usuarios_fijos_orig = {"GERENTE": "1234", "MOSTRADOR PEREIRA": "2345", "MOSTRADOR ARMENIA": "3456", "MOSTRADOR MANIZALES": "4567", "MOSTRADOR LAURELES": "5678"}
         if "MOSTRADOR OPALO" not in usuarios_fijos_orig: usuarios_fijos_orig["MOSTRADOR OPALO"] = "opalo123"
         
+        # Se usan nombres normalizados para las claves del diccionario de contraseñas
         usuarios = {normalizar_texto(k): v for k, v in usuarios_fijos_orig.items()}
         codigo = 1001
         for u in todos_usuarios:
@@ -582,6 +590,7 @@ def main():
             usuario_sel_norm = normalizar_texto(usuario_seleccionado)
             if usuario_sel_norm in usuarios and clave == usuarios[usuario_sel_norm]:
                 st.session_state.autenticado = True
+                # Guardamos el nombre original para mostrarlo, pero usaremos el normalizado para la lógica
                 st.session_state.usuario = usuario_seleccionado
                 st.rerun()
             else:
