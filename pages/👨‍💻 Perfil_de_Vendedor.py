@@ -1,30 +1,24 @@
 # ==============================================================================
 # SCRIPT DEFINITIVO PARA: pages/2_Perfil_del_Vendedor.py
-# VERSIÓN: 4.0 (Reestructuración de Reactividad y Análisis Ampliado)
+# VERSIÓN: 4.1 (Corrección de TypeError en RFM y Robustecimiento General)
 # FECHA: 16 de Julio, 2025
 #
 # DESCRIPCIÓN:
-# Versión completamente reestructurada para garantizar la reactividad a los filtros
-# y enriquecida con nuevos módulos de análisis para una visión 360° del vendedor.
+# Versión que corrige un TypeError crítico en el tab de RFM y mejora la
+# robustez general de la aplicación para manejar casos de borde.
 #
-# MEJORAS CLAVE:
-# 1.  REACTIVIDAD TOTAL: Se eliminó el caché en las funciones de análisis dinámico
-#     para forzar el recálculo con cada cambio de filtro (vendedor o fecha),
-#     solucionando el error fundamental de datos estáticos.
+# CORRECCIONES CLAVE:
+# 1.  ERROR CRÍTICO (TypeError): Solucionado el error en el tab de RFM.
+#     - Se garantiza que TODOS los clientes reciban un nombre de segmento en la
+#       función `realizar_analisis_rfm`, asignando 'Otros' a los no clasificados.
+#     - Se robusteció la función `render_tab_rfm_accionable` para manejar
+#       casos donde no hay segmentos o un segmento no tiene un plan de acción definido.
 #
-# 2.  LÓGICA RFM CORREGIDA: El análisis RFM ahora utiliza el historial COMPLETO
-#     del vendedor seleccionado, no solo el período, para una segmentación precisa.
+# 2.  MEJORA DE DICCIONARIO RFM: Se añadió el segmento 'Otros' al diccionario
+#     de acciones para una gestión completa.
 #
-# 3.  NUEVO TAB DE ANÁLISIS: Se añadió la pestaña "Tendencias y Comparativas" con:
-#     - Gráfico de evolución de ventas mensuales.
-#     - Análisis de Pareto (Top 5 productos vs. el resto).
-#
-# 4.  RESUMEN EJECUTIVO INTELIGENTE: El resumen ahora integra hallazgos de todos
-#     los análisis (Cartera, Rentabilidad y RFM) para generar un plan de
-#     acción más completo y basado en datos.
-#
-# 5.  UI REFINADA: Mejor uso de contenedores, formatos y ayudas visuales para
-#     una experiencia de usuario superior.
+# 3.  MEJORA DE UI: Se añadieron mensajes de advertencia claros cuando no hay
+#     datos de segmentos para mostrar, evitando que la app falle.
 # ==============================================================================
 
 import streamlit as st
@@ -67,7 +61,6 @@ if df_ventas_historico is None or df_ventas_historico.empty or not APP_CONFIG or
 
 # ==============================================================================
 # SECCIÓN 2: LÓGICA DE ANÁLISIS ESTRATÉGICO (El "Cerebro")
-# NOTA: Se eliminó @st.cache_data para garantizar la reactividad a los filtros.
 # ==============================================================================
 
 def calcular_metricas_base(df):
@@ -132,7 +125,9 @@ def analizar_rentabilidad_avanzado(_df_periodo):
     return df_productos
 
 def realizar_analisis_rfm(_df_historico_vendedor):
-    if _df_historico_vendedor.empty: return pd.DataFrame(), pd.DataFrame()
+    if _df_historico_vendedor.empty or _df_historico_vendedor['cliente_id'].nunique() < 5:
+        return pd.DataFrame(), pd.DataFrame()
+        
     df = _df_historico_vendedor.copy()
     fecha_max_analisis = df['fecha_venta'].max() + pd.Timedelta(days=1)
     
@@ -142,11 +137,14 @@ def realizar_analisis_rfm(_df_historico_vendedor):
         Monetario=('valor_venta', 'sum')
     ).reset_index()
     
-    rfm_df['R_Score'] = pd.qcut(rfm_df['Recencia'].rank(method='first'), 5, labels=[5, 4, 3, 2, 1])
-    rfm_df['F_Score'] = pd.qcut(rfm_df['Frecuencia'].rank(method='first'), 5, labels=[1, 2, 3, 4, 5])
-    rfm_df['M_Score'] = pd.qcut(rfm_df['Monetario'].rank(method='first'), 5, labels=[1, 2, 3, 4, 5])
-    rfm_df[['R_Score', 'F_Score', 'M_Score']] = rfm_df[['R_Score', 'F_Score', 'M_Score']].astype(int)
-    
+    # Se necesitan al menos 5 clientes para qcut con 5 quantiles.
+    if len(rfm_df) < 5:
+        return pd.DataFrame(), pd.DataFrame()
+        
+    rfm_df['R_Score'] = pd.qcut(rfm_df['Recencia'].rank(method='first'), 5, labels=[5, 4, 3, 2, 1], duplicates='drop').astype(int)
+    rfm_df['F_Score'] = pd.qcut(rfm_df['Frecuencia'].rank(method='first'), 5, labels=[1, 2, 3, 4, 5], duplicates='drop').astype(int)
+    rfm_df['M_Score'] = pd.qcut(rfm_df['Monetario'].rank(method='first'), 5, labels=[1, 2, 3, 4, 5], duplicates='drop').astype(int)
+
     segt_map = {
         r'55[4-5]': 'Campeones', r'[3-4]5[4-5]': 'Campeones',
         r'54[4-5]': 'Clientes Leales', r'44[4-5]': 'Clientes Leales',
@@ -158,8 +156,11 @@ def realizar_analisis_rfm(_df_historico_vendedor):
         r'12[1-5]': 'A Punto de Dormir', r'22[1-5]': 'A Punto de Dormir',
         r'11[1-5]': 'Hibernando', r'21[1-5]': 'Hibernando',
     }
-    rfm_df['RF_Score'] = rfm_df['R_Score'].astype(str) + rfm_df['F_Score'].astype(str) + rfm_df['M_Score'].astype(str)
-    rfm_df['Segmento'] = rfm_df['RF_Score'].replace(segt_map, regex=True)
+    rfm_df['RFM_Score_Str'] = rfm_df['R_Score'].astype(str) + rfm_df['F_Score'].astype(str) + rfm_df['M_Score'].astype(str)
+    rfm_df['Segmento'] = rfm_df['RFM_Score_Str'].replace(segt_map, regex=True)
+    
+    # *** CORRECCIÓN CLAVE ***: Asignar 'Otros' a los segmentos no clasificados para evitar errores.
+    rfm_df['Segmento'] = rfm_df['Segmento'].apply(lambda x: 'Otros' if x.isnumeric() else x)
     
     resumen_segmentos = rfm_df.groupby('Segmento').agg(
         Numero_Clientes=('cliente_id', 'count'),
@@ -201,11 +202,9 @@ def generar_y_renderizar_resumen_ejecutivo(nombre_vendedor, analisis_cartera, df
     with st.container(border=True):
         st.markdown("#### Diagnóstico Rápido del Periodo:")
         
-        # Insight de Cartera
         insight_cartera = f"**Movimiento de Cartera:** Lograste captar **{analisis_cartera['ganados']} clientes nuevos** y reactivar a **{analisis_cartera['reactivados']}**, ¡bien hecho! Sin embargo, **{analisis_cartera['en_fuga']} clientes importantes están en fuga**. Prioriza contactarlos revisando la pestaña `Diagnóstico de Cartera`."
         st.markdown(f"📈 {insight_cartera}")
 
-        # Insight de Rentabilidad
         motores = df_rentabilidad[df_rentabilidad['Cuadrante'] == '⭐ Motores de Ganancia']
         drenajes = df_rentabilidad[df_rentabilidad['Cuadrante'] == '🤔 Drenajes de Rentabilidad']
         insight_rentabilidad = ""
@@ -223,13 +222,13 @@ def generar_y_renderizar_resumen_ejecutivo(nombre_vendedor, analisis_cartera, df
         if insight_rentabilidad:
             st.markdown(f"💰 **Análisis de Rentabilidad:**{insight_rentabilidad}")
 
-        # Insight de RFM
-        campeones = resumen_rfm[resumen_rfm['Segmento'] == 'Campeones']
-        if not campeones.empty:
-            num_campeones = campeones['Numero_Clientes'].iloc[0]
-            ventas_campeones = campeones['Ventas_Totales'].iloc[0]
-            insight_rfm = f"Posees **{num_campeones} clientes 'Campeones'** que representan un valor de **${ventas_campeones:,.0f}** en tu historial. Son tu activo más valioso. ¡Cuídalos y recompénsalos!"
-            st.markdown(f"❤️ **Fidelidad de Clientes:** {insight_rfm}")
+        if not resumen_rfm.empty:
+            campeones = resumen_rfm[resumen_rfm['Segmento'] == 'Campeones']
+            if not campeones.empty:
+                num_campeones = campeones['Numero_Clientes'].iloc[0]
+                ventas_campeones = campeones['Ventas_Totales'].iloc[0]
+                insight_rfm = f"Posees **{num_campeones} clientes 'Campeones'** que representan un valor de **${ventas_campeones:,.0f}** en tu historial. Son tu activo más valioso. ¡Cuídalos y recompénsalos!"
+                st.markdown(f"❤️ **Fidelidad de Clientes:** {insight_rfm}")
 
         st.markdown("---")
         st.success("**Plan de Acción Sugerido:**\n"
@@ -298,8 +297,8 @@ def render_tab_rentabilidad(df_rentabilidad):
 
 def render_tab_rfm_accionable(rfm_df, resumen_segmentos):
     st.subheader("Segmentación Estratégica de Clientes (RFM)")
-    if rfm_df.empty:
-        st.warning("No hay suficientes datos para realizar el análisis RFM.")
+    if rfm_df.empty or resumen_segmentos.empty:
+        st.warning("No hay suficientes datos de clientes para realizar el análisis RFM con los filtros actuales.")
         return
         
     with st.container(border=True):
@@ -319,7 +318,7 @@ def render_tab_rfm_accionable(rfm_df, resumen_segmentos):
     st.markdown("---")
     st.subheader("Plan de Acción por Segmento")
     
-    segmento_seleccionado = st.selectbox("Selecciona un segmento para ver los clientes y el plan de acción:", resumen_segmentos['Segmento'].unique())
+    # *** CORRECCIÓN CLAVE ***: Lógica robustecida para manejar la selección y visualización.
     
     acciones_segmento = {
         'Campeones': ('⭐ **Acción:** Fidelizar y Recompensar. Son tus mejores clientes. Ofréceles acceso anticipado, beneficios exclusivos y pídeles referidos.', 'green'),
@@ -330,20 +329,33 @@ def render_tab_rfm_accionable(rfm_df, resumen_segmentos):
         'Necesitan Atención': ('🟠 **Acción:** Reactivación con ofertas personalizadas. Descubre por qué han disminuido su actividad.', 'orange'),
         'En Riesgo': ('🔴 **Acción:** Contacto proactivo URGENTE. Llámalos, ofréceles un incentivo fuerte. Descubre el motivo de su ausencia.', 'red'),
         'A Punto de Dormir': ('🟤 **Acción:** Última llamada para retener. Ofrece una oferta irresistible para que vuelvan.', 'brown'),
-        'Hibernando': ('⚫ **Acción:** Limpieza de base de datos o campaña de reactivación masiva de bajo costo. Probablemente perdidos.', 'black')
+        'Hibernando': ('⚫ **Acción:** Limpieza de base de datos o campaña de reactivación masiva de bajo costo. Probablemente perdidos.', 'black'),
+        'Otros': ('❓ **Acción:** Análisis Individual. Estos clientes tienen patrones de compra no clasificados. Investiga sus perfiles para encontrar oportunidades.', 'lightblue')
     }
     
-    if segmento_seleccionado in acciones_segmento:
-        accion, color = acciones_segmento[segmento_seleccionado]
-        st.markdown(f"<p style='color:{color}; font-size:18px;'>{accion}</p>", unsafe_allow_html=True)
+    opciones_segmento = resumen_segmentos['Segmento'].unique()
+    
+    if opciones_segmento.size > 0:
+        segmento_seleccionado = st.selectbox("Selecciona un segmento para ver los clientes y el plan de acción:", options=opciones_segmento)
         
-        df_display_segmento = rfm_df[rfm_df['Segmento'] == segmento_seleccionado].sort_values('Monetario', ascending=False)
-        st.dataframe(df_display_segmento[['nombre_cliente', 'Recencia', 'Frecuencia', 'Monetario']],
-                     help="Recencia (días desde la última compra), Frecuencia (nº de compras), Monetario (valor total histórico)",
-                     use_container_width=True, hide_index=True,
-                     column_config={
-                         "Monetario": st.column_config.NumberColumn("Valor Histórico", format="$ #,##0")
-                     })
+        # Este bloque ahora se ejecuta solo si el selectbox tiene una opción válida
+        if segmento_seleccionado:
+            if segmento_seleccionado in acciones_segmento:
+                accion, color = acciones_segmento[segmento_seleccionado]
+                st.markdown(f"<p style='color:{color}; font-size:18px;'>{accion}</p>", unsafe_allow_html=True)
+            
+            df_display_segmento = rfm_df[rfm_df['Segmento'] == segmento_seleccionado].sort_values('Monetario', ascending=False)
+            st.dataframe(df_display_segmento[['nombre_cliente', 'Recencia', 'Frecuencia', 'Monetario']],
+                         help="Recencia (días desde la última compra), Frecuencia (nº de compras), Monetario (valor total histórico)",
+                         use_container_width=True, hide_index=True,
+                         column_config={
+                            "nombre_cliente": "Nombre del Cliente",
+                            "Recencia": st.column_config.NumberColumn("Recencia (días)"),
+                            "Frecuencia": st.column_config.NumberColumn("Frecuencia (compras)"),
+                            "Monetario": st.column_config.NumberColumn("Valor Histórico", format="$ #,##0")
+                         })
+    else:
+        st.warning("No se encontraron segmentos de clientes para mostrar con los filtros actuales.")
 
 def render_tab_tendencias(df_ventas_mes, df_pareto):
     st.subheader("Tendencias y Composición de Ventas en el Periodo")
@@ -382,7 +394,6 @@ def render_pagina_perfil():
     st.markdown("Análisis 360° para impulsar tus resultados. **Cada dato aquí responde a los filtros que selecciones.**")
     st.markdown("---")
 
-    # --- FILTROS ---
     with st.container(border=True):
         col1, col2 = st.columns([0.4, 0.6])
         with col1:
@@ -401,7 +412,7 @@ def render_pagina_perfil():
                 opciones_analisis = ["Visión General de la Empresa"] + nombres_grupos + vendedores_solos_orig
                 default_index = 0
             else:
-                opciones_analisis = [usuario_actual] # Un vendedor solo puede verse a sí mismo
+                opciones_analisis = [usuario_actual]
                 default_index = 0
 
             if not opciones_analisis:
@@ -428,8 +439,6 @@ def render_pagina_perfil():
             fecha_inicio = periodo_inicio.start_time.tz_localize(None)
             fecha_fin = (periodo_fin.end_time).tz_localize(None)
 
-
-    # --- FILTRADO DE DATOS EXPLÍCITO Y CONTEXTUAL ---
     if seleccion == "Visión General de la Empresa":
         df_base_filtrada = df_ventas_historico
     else:
@@ -443,25 +452,15 @@ def render_pagina_perfil():
         st.warning(f"No se encontraron datos para '{seleccion}' en el rango de meses seleccionado. Por favor, ajuste los filtros.")
         st.stop()
 
-    # --- EJECUCIÓN DE ANÁLISIS (SIN CACHÉ PARA REACTIVIDAD) ---
     with st.spinner(f"Generando inteligencia de negocios para {seleccion}..."):
         df_procesado = calcular_metricas_base(df_periodo_seleccionado)
-        
-        # Análisis de Cartera (usa el periodo y el histórico contextual)
         analisis_cartera = analizar_salud_cartera_avanzado(df_procesado, df_base_filtrada, fecha_inicio)
-        
-        # Análisis de Rentabilidad (usa solo los datos del periodo)
         df_rentabilidad = analizar_rentabilidad_avanzado(df_procesado)
-        
-        # Análisis RFM (usa el HISTÓRICO COMPLETO del vendedor para una segmentación más robusta)
         rfm_df, resumen_rfm = realizar_analisis_rfm(df_base_filtrada)
-        
-        # Análisis de Tendencias (usa solo los datos del periodo)
         df_ventas_mes, df_pareto = analizar_tendencias(df_procesado)
     
     st.markdown("---")
     
-    # --- RENDERIZADO DE LA PÁGINA ---
     generar_y_renderizar_resumen_ejecutivo(seleccion, analisis_cartera, df_rentabilidad, resumen_rfm)
     st.markdown("---")
 
