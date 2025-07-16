@@ -148,8 +148,9 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo):
     
     # --- 1. IDENTIFICAR VENTAS PARA KPIs ---
     # Las ventas reales son todos los documentos que representan una transacción financiera final.
-    # La consulta SQL ya nos entrega estos tipos de documento limpios.
-    tipos_documento_kpi = ['FACTURA ALBARAN', 'NOTA CREDITO', 'FACTURA DIRECTA', 'NOTA CREDITO DIRECTA']
+    # CORRECCIÓN: Se alinea esta lista con la salida de la consulta SQL final y robusta.
+    # Ahora solo hay dos tipos de documentos facturados: FACTURA DIRECTA (positiva) y NOTA CREDITO (negativa).
+    tipos_documento_kpi = ['FACTURA DIRECTA', 'NOTA CREDITO']
     df_ventas_kpi = df_ventas_periodo[df_ventas_periodo['TipoDocumento'].isin(tipos_documento_kpi)].copy()
     
     # --- 2. IDENTIFICAR ALBARANES PENDIENTES ---
@@ -294,7 +295,8 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
         df_ranking = df_vista[df_vista['nomvendedor'] == enfoque_sel_norm]
 
     # Usar el pool de datos de KPI para los análisis detallados
-    tipos_documento_kpi = ['FACTURA ALBARAN', 'NOTA CREDITO', 'FACTURA DIRECTA', 'NOTA CREDITO DIRECTA']
+    # CORRECCIÓN: Se alinea esta lista con la nueva lógica de la consulta SQL.
+    tipos_documento_kpi = ['FACTURA DIRECTA', 'NOTA CREDITO']
     df_ventas_enfocadas_kpi = df_ventas_enfocadas[df_ventas_enfocadas['TipoDocumento'].isin(tipos_documento_kpi)].copy()
 
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Análisis de Portafolio", "🏆 Ranking de Rendimiento", "⭐ Clientes Clave", "⚙️ Ventas por Categoría"])
