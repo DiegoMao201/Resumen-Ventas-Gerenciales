@@ -1,10 +1,11 @@
 # ==============================================================================
 # SCRIPT CORREGIDO Y FINAL PARA: pages/1_Acciones_y_Recomendaciones.py
 # VERSIÓN: 16 de Julio, 2025
-# CORRECCIÓN: Se simplifica y fortalece el filtro de Tipo de Documento para
-#             asegurar que todos los tipos de factura (ej. FACTURA_DIRECTA)
-#             sean capturados correctamente, resolviendo el problema de
-#             descuentos no encontrados.
+# CORRECCIÓN: Se alinea la lógica de detección de descuentos con el archivo
+#             principal. Ahora, los descuentos se identifican buscando el
+#             nombre del artículo "DESCUENTOS COMERCIALES", en lugar de
+#             usar un código de artículo fijo, solucionando el problema
+#             de descuentos no encontrados.
 # ==============================================================================
 
 import streamlit as st
@@ -62,20 +63,30 @@ if df_ventas_historico is None or df_ventas_historico.empty or not APP_CONFIG or
 @st.cache_data
 def preparar_datos_y_margen(df):
     """
-    Separa el dataframe en productos y descuentos de la forma más precisa:
-    usando el código de artículo específico para los descuentos.
+    Separa el dataframe en productos y descuentos.
+
+    LOGICA CORREGIDA: En lugar de usar un código de artículo fijo, ahora se
+    identifican los descuentos buscando el nombre de artículo normalizado
+    'DESCUENTOS COMERCIALES'. Esto alinea el cálculo con el script principal
+    y captura todos los descuentos correctamente.
     """
     df_copy = df.copy()
 
-    codigos_de_descuento = ['4790512']
+    # Se aplica la misma normalización que en el script principal para consistencia.
+    if 'nombre_articulo' in df_copy.columns:
+        # Se crea una columna temporal normalizada para el filtro
+        df_copy['nombre_articulo_norm'] = df_copy['nombre_articulo'].apply(normalizar_texto)
+    else:
+        # Si no existe la columna, se crea una vacía para evitar errores.
+        df_copy['nombre_articulo_norm'] = ''
 
-    df_copy['codigo_articulo'] = df_copy['codigo_articulo'].astype(str)
-    
-    filtro_descuento = df_copy['codigo_articulo'].isin(codigos_de_descuento)
+    # Filtro NUEVO Y CORREGIDO para identificar descuentos por su nombre.
+    filtro_descuento = df_copy['nombre_articulo_norm'] == 'DESCUENTOS COMERCIALES'
 
     df_descuentos = df_copy[filtro_descuento]
     df_productos = df_copy[~filtro_descuento].copy()
 
+    # El resto del cálculo de margen para los productos no cambia.
     if not df_productos.empty:
         df_productos['costo_unitario'] = pd.to_numeric(df_productos['costo_unitario'], errors='coerce').fillna(0)
         df_productos['unidades_vendidas'] = pd.to_numeric(df_productos['unidades_vendidas'], errors='coerce').fillna(0)
@@ -90,9 +101,10 @@ def preparar_datos_y_margen(df):
 def analizar_rentabilidad(df_productos, df_descuentos):
     """
     Analiza la rentabilidad reconstruyendo la Venta Bruta a partir de la Venta Neta
-    y los descuentos con valor positivo. Corregido para manejar periodos sin descuentos.
+    y los descuentos. Corregido para manejar periodos sin descuentos.
     """
     venta_neta_productos = df_productos['valor_venta'].sum()
+    # Los descuentos ya vienen como valores negativos de la factura, se usa abs() para sumarlos.
     total_descuentos = abs(df_descuentos['valor_venta'].sum())
     venta_bruta_reconstruida = venta_neta_productos + total_descuentos
     margen_bruto_productos = df_productos['margen_bruto'].sum() if 'margen_bruto' in df_productos.columns else 0
@@ -123,6 +135,7 @@ def analizar_rentabilidad(df_productos, df_descuentos):
     df_evolucion['margen_operativo'] = df_evolucion['margen_bruto'] - df_evolucion['descuentos_mes']
     df_evolucion['mes_anio'] = df_evolucion['mes_anio'].dt.to_timestamp()
     
+    # El valor de los descuentos es negativo, usamos abs() para el ranking.
     top_clientes_descuento = abs(df_descuentos.groupby('nombre_cliente')['valor_venta'].sum()).nlargest(5).reset_index()
 
     return {
@@ -242,9 +255,8 @@ def render_pagina_acciones():
     fecha_inicio, fecha_fin = periodo_inicio.start_time, periodo_fin.end_time
     df_vendedor_periodo_bruto = df_vendedor_base[(df_vendedor_base['fecha_venta'] >= fecha_inicio) & (df_vendedor_base['fecha_venta'] <= fecha_fin)]
 
-    # ✨ CORRECCIÓN DEFINITIVA DEL FILTRO DE DOCUMENTOS ✨
-    # La columna 'TipoDocumento' fue normalizada en la página principal (ej. 'FACTURA_DIRECTA' -> 'FACTURA DIRECTA')
-    # Este filtro simplificado y robusto captura cualquier tipo de factura.
+    # Filtro de documentos robusto que se alinea con el script principal.
+    # Captura cualquier tipo de factura y nota de crédito.
     filtro_facturas = df_vendedor_periodo_bruto['TipoDocumento'].str.startswith('FACTURA', na=False)
     filtro_notas = df_vendedor_periodo_bruto['TipoDocumento'].str.contains('NOTA.*CREDITO', na=False, regex=True)
     df_vendedor_periodo = df_vendedor_periodo_bruto[filtro_facturas | filtro_notas].copy()
@@ -263,10 +275,10 @@ def render_pagina_acciones():
     st.markdown("---")
 
     st.header("💰 Optimización de Rentabilidad y Descuentos")
-    st.info("Este análisis se basa únicamente en **ventas netas facturadas** (Facturas y Notas de Crédito).")
+    st.info("Este análisis se basa únicamente en **ventas netas facturadas** (Facturas y Notas de Crédito). Los descuentos se identifican por el artículo 'DESCUENTOS COMERCIALES'.")
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Margen Bruto de Productos", f"${analisis_rentabilidad['margen_bruto_productos']:,.0f}")
-    col2.metric("Total Descuentos Otorgados", f"-${analisis_rentabilidad['total_descuentos']:,.0f}", help="Suma de artículos con el código de descuento específico.")
+    col2.metric("Total Descuentos Otorgados", f"-${analisis_rentabilidad['total_descuentos']:,.0f}", help="Suma de artículos con el nombre 'DESCUENTOS COMERCIALES'.")
     col3.metric("Margen Operativo Real", f"${analisis_rentabilidad['margen_operativo']:,.0f}", delta_color="off")
     col4.metric("% Descuento sobre Venta Bruta", f"{analisis_rentabilidad['porcentaje_descuento']:.1f}%", help="(Total Descuentos / (Venta Neta Productos + Total Descuentos)) * 100")
 
