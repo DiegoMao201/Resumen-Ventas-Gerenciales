@@ -1,8 +1,9 @@
 # ==============================================================================
 # SCRIPT COMPLETO Y DEFINITIVO PARA: 🏠 Resumen Mensual.py
-# VERSIÓN FINAL: 29 de Junio, 2025
+# VERSIÓN FINAL: 15 de Julio, 2025
 # DESCRIPCIÓN: Versión final con todas las correcciones de lógica de datos,
-#              errores de frontend y botón de actualización forzada.
+#              errores de frontend, botón de actualización forzada y la
+#              inclusión de NOTA_CREDITO para el cálculo de ventas reales netas.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -117,8 +118,8 @@ def calcular_marquilla_optimizado(df_periodo):
 
 def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel):
     ### PASO 1: SEPARACIÓN Y CÁLCULOS BÁSICOS ###
-    # --- CORRECCIÓN DE LÓGICA: Ahora se consideran todos los tipos de factura ('FACTURA_ALBARAN', 'FACTURA_DIRECTA').
-    df_ventas_reales = df_ventas_periodo[df_ventas_periodo['TipoDocumento'].str.contains('FACTURA', na=False, case=False)].copy()
+    # --- MODIFICACIÓN DE LÓGICA: Ahora se consideran 'FACTURA' y 'NOTA CREDITO' para calcular la venta real neta.
+    df_ventas_reales = df_ventas_periodo[df_ventas_periodo['TipoDocumento'].str.contains('FACTURA|NOTA CREDITO', na=False, case=False)].copy()
     
     resumen_ventas = df_ventas_reales.groupby(['codigo_vendedor', 'nomvendedor']).agg(ventas_totales=('valor_venta', 'sum'), impactos=('cliente_id', 'nunique')).reset_index()
     resumen_cobros = df_cobros_periodo.groupby('codigo_vendedor').agg(cobros_totales=('valor_cobro', 'sum')).reset_index()
@@ -171,9 +172,9 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
         df_grupo_actual = df_resumen[df_resumen['nomvendedor'].isin(lista_vendedores_norm)]
         if not df_grupo_actual.empty:
             anio_anterior = anio_sel - 1
-            # --- CORRECCIÓN DE LÓGICA: El presupuesto histórico ahora también busca todos los tipos de factura.
+            # --- MODIFICACIÓN DE LÓGICA: El presupuesto histórico ahora también busca ventas netas (Factura - Nota Crédito).
             df_grupo_historico_facturas = df_ventas_historicas[
-                (df_ventas_historicas['TipoDocumento'].str.contains('FACTURA', na=False, case=False)) &
+                (df_ventas_historicas['TipoDocumento'].str.contains('FACTURA|NOTA CREDITO', na=False, case=False)) &
                 (df_ventas_historicas['anio'] == anio_anterior) & 
                 (df_ventas_historicas['mes'] == mes_sel) & 
                 (df_ventas_historicas['nomvendedor'].isin(lista_vendedores_norm))
@@ -209,16 +210,16 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
 # ==============================================================================
 def generar_comentario_asesor(avance_v, avance_c, marquilla_p, avance_comp, avance_sub_meta):
     comentarios = []
-    if avance_v >= 100: comentarios.append("📈 **Ventas:** ¡Felicitaciones! Has superado la meta de ventas.")
-    elif avance_v >= 80: comentarios.append("📈 **Ventas:** ¡Estás muy cerca de la meta! Un último esfuerzo.")
-    else: comentarios.append("📈 **Ventas:** Planifica tus visitas y aprovecha cada oportunidad.")
+    if avance_v >= 100: comentarios.append("📈 **Ventas:** ¡Felicitaciones! Has superado la meta de ventas netas.")
+    elif avance_v >= 80: comentarios.append("📈 **Ventas:** ¡Estás muy cerca de la meta neta! Un último esfuerzo.")
+    else: comentarios.append("📈 **Ventas:** Planifica tus visitas y aprovecha cada oportunidad para mejorar tu venta neta.")
     if avance_c >= 100: comentarios.append("💰 **Cartera:** Objetivo de recaudo cumplido. ¡Gestión impecable!")
     else: comentarios.append("💰 **Cartera:** Recuerda hacer seguimiento a la cartera pendiente.")
-    if avance_comp >= 100: comentarios.append("⚙️ **Complementarios:** ¡Excelente! Cumpliste la meta de venta de complementarios.")
-    else: comentarios.append(f"⚙️ **Complementarios:** Tu avance es del {avance_comp:.1f}%. ¡Impulsa la venta cruzada!")
+    if avance_comp >= 100: comentarios.append("⚙️ **Complementarios:** ¡Excelente! Cumpliste la meta de venta neta de complementarios.")
+    else: comentarios.append(f"⚙️ **Complementarios:** Tu avance neto es del {avance_comp:.1f}%. ¡Impulsa la venta cruzada!")
     sub_meta_label = APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo']
-    if avance_sub_meta >= 100: comentarios.append(f"🎯 **Meta Específica:** ¡Logrado! Superaste la meta de venta de '{sub_meta_label}'.")
-    else: comentarios.append(f"🎯 **Meta Específica:** Tu avance en '{sub_meta_label}' es del {avance_sub_meta:.1f}%. ¡Hay una gran oportunidad ahí!")
+    if avance_sub_meta >= 100: comentarios.append(f"🎯 **Meta Específica:** ¡Logrado! Superaste la meta de venta neta de '{sub_meta_label}'.")
+    else: comentarios.append(f"🎯 **Meta Específica:** Tu avance neto en '{sub_meta_label}' es del {avance_sub_meta:.1f}%. ¡Hay una gran oportunidad ahí!")
     if marquilla_p >= APP_CONFIG['kpi_goals']['meta_marquilla']: comentarios.append(f"🎨 **Marquilla:** Tu promedio de {marquilla_p:.2f} es excelente.")
     elif marquilla_p > 0: comentarios.append(f"🎨 **Marquilla:** Tu promedio es {marquilla_p:.2f}. Hay oportunidad de crecimiento.")
     else: comentarios.append("🎨 **Marquilla:** Aún no registras ventas en las marcas clave.")
@@ -246,10 +247,10 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
         df_ranking = df_vista[df_vista['nomvendedor'] == enfoque_sel_norm]
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Análisis de Portafolio", "🏆 Ranking de Rendimiento", "⭐ Clientes Clave", "⚙️ Ventas por Categoría"])
     with tab1:
-        st.subheader("Análisis de Marcas y Categorías Estratégicas")
+        st.subheader("Análisis de Marcas y Categorías Estratégicas (Venta Neta)")
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown("##### Composición de Ventas por Marca")
+            st.markdown("##### Composición de Ventas Netas por Marca")
             if not df_ventas_enfocadas.empty and 'nombre_marca' in df_ventas_enfocadas:
                 df_marcas = df_ventas_enfocadas.groupby('nombre_marca')['valor_venta'].sum().reset_index()
                 fig = px.treemap(df_marcas, path=[px.Constant("Todas las Marcas"), 'nombre_marca'], values='valor_venta')
@@ -257,31 +258,31 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
                 st.plotly_chart(fig, use_container_width=True)
             else: st.info("No hay datos de marcas de productos para mostrar.")
         with col2:
-            st.markdown("##### Ventas de Marquillas Clave")
+            st.markdown("##### Ventas de Marquillas Clave (Venta Bruta)")
             if not df_ventas_enfocadas.empty and 'nombre_articulo' in df_ventas_enfocadas:
                 ventas_marquillas = {p: df_ventas_enfocadas[df_ventas_enfocadas['nombre_articulo'].str.contains(p, case=False, na=False)]['valor_venta'].sum() for p in APP_CONFIG['marquillas_clave']}
                 df_ventas_marquillas = pd.DataFrame(list(ventas_marquillas.items()), columns=['Marquilla', 'Ventas']).sort_values('Ventas', ascending=False)
-                fig = px.pie(df_ventas_marquillas, names='Marquilla', values='Ventas', title="Distribución Venta Marquillas", hole=0.4)
+                fig = px.pie(df_ventas_marquillas, names='Marquilla', values='Ventas', title="Distribución Venta Neta Marquillas", hole=0.4)
                 st.plotly_chart(fig, use_container_width=True)
             else: st.info("No hay datos de marquillas para mostrar.")
     with tab2:
-        st.subheader("Ranking de Cumplimiento de Metas")
+        st.subheader("Ranking de Cumplimiento de Metas (Sobre Venta Neta)")
         df_ranking_con_meta = df_ranking[df_ranking['presupuesto'] > 0].copy()
         if not df_ranking_con_meta.empty:
             df_ranking_con_meta['avance_ventas'] = (df_ranking_con_meta['ventas_totales'] / df_ranking_con_meta['presupuesto']) * 100
             df_ranking_con_meta.sort_values('avance_ventas', ascending=True, inplace=True)
-            fig = px.bar(df_ranking_con_meta, x='avance_ventas', y='nomvendedor', orientation='h', text='avance_ventas', title="Cumplimiento de Meta de Ventas (%)")
+            fig = px.bar(df_ranking_con_meta, x='avance_ventas', y='nomvendedor', orientation='h', text='avance_ventas', title="Cumplimiento de Meta de Ventas Netas (%)")
             fig.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
             fig.update_layout(xaxis_title="Cumplimiento (%)", yaxis_title=None)
             st.plotly_chart(fig, use_container_width=True)
         else: st.info("No hay datos de presupuesto para generar el ranking.")
     with tab3:
-        st.subheader("Top 10 Clientes del Periodo")
+        st.subheader("Top 10 Clientes del Periodo (Por Venta Neta)")
         if not df_ventas_enfocadas.empty:
-            # --- CORRECCIÓN DE LÓGICA: El filtro de Top Clientes ahora considera todos los tipos de factura.
-            df_facturas_enfocadas = df_ventas_enfocadas[df_ventas_enfocadas['TipoDocumento'].str.contains('FACTURA', na=False, case=False)]
+            # --- MODIFICACIÓN DE LÓGICA: El Top Clientes ahora considera ventas netas (Facturas - Notas Crédito).
+            df_facturas_enfocadas = df_ventas_enfocadas[df_ventas_enfocadas['TipoDocumento'].str.contains('FACTURA|NOTA CREDITO', na=False, case=False)]
             top_clientes = df_facturas_enfocadas.groupby('nombre_cliente')['valor_venta'].sum().nlargest(10).reset_index()
-            st.dataframe(top_clientes, column_config={"nombre_cliente": "Cliente", "valor_venta": st.column_config.NumberColumn("Total Compra", format="$ %d")}, use_container_width=True, hide_index=True)
+            st.dataframe(top_clientes, column_config={"nombre_cliente": "Cliente", "valor_venta": st.column_config.NumberColumn("Total Compra (Neta)", format="$ %d")}, use_container_width=True, hide_index=True)
         else: st.info("No hay datos de clientes para este periodo.")
     with tab4:
         st.subheader(f"Desempeño en Categorías Clave para: {enfoque_sel}")
@@ -292,16 +293,16 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
         else:
             col1, col2 = st.columns([0.5, 0.5])
             with col1:
-                st.markdown("##### Ventas por Categoría")
+                st.markdown("##### Ventas Netas por Categoría")
                 resumen_cat = df_ventas_cat.groupby('categoria_producto').agg(Ventas=('valor_venta', 'sum')).reset_index()
                 total_ventas_enfocadas = df_ventas_enfocadas['valor_venta'].sum()
                 if total_ventas_enfocadas > 0: resumen_cat['Participacion (%)'] = (resumen_cat['Ventas'] / total_ventas_enfocadas) * 100
                 else: resumen_cat['Participacion (%)'] = 0
                 resumen_cat = resumen_cat.sort_values('Ventas', ascending=False)
-                st.dataframe(resumen_cat, column_config={"categoria_producto": "Categoría", "Ventas": st.column_config.NumberColumn("Total Venta", format="$ %d"),"Participacion (%)": st.column_config.ProgressColumn("Part. sobre Venta Total", format="%.2f%%", min_value=0, max_value=resumen_cat['Participacion (%)'].max())}, use_container_width=True, hide_index=True)
+                st.dataframe(resumen_cat, column_config={"categoria_producto": "Categoría", "Ventas": st.column_config.NumberColumn("Total Venta Neta", format="$ %d"),"Participacion (%)": st.column_config.ProgressColumn("Part. sobre Venta Neta Total", format="%.2f%%", min_value=0, max_value=resumen_cat['Participacion (%)'].max())}, use_container_width=True, hide_index=True)
             with col2:
-                st.markdown("##### Distribución de Ventas")
-                fig = px.pie(resumen_cat, names='categoria_producto', values='Ventas', title="Distribución entre Categorías Clave", hole=0.4)
+                st.markdown("##### Distribución de Ventas Netas")
+                fig = px.pie(resumen_cat, names='categoria_producto', values='Ventas', title="Distribución entre Categorías Clave (Venta Neta)", hole=0.4)
                 fig.update_traces(textinfo='percent+label', textposition='inside')
                 st.plotly_chart(fig, use_container_width=True)
 
@@ -400,8 +401,8 @@ def render_dashboard():
             
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric("Ventas Reales (Facturadas)", f"${ventas_total:,.0f}", f"{ventas_total - meta_ventas:,.0f} vs Meta")
-                st.progress(min(avance_ventas / 100, 1.0), text=f"Avance Ventas: {avance_ventas:.1f}%")
+                st.metric("Ventas Netas (Facturas - Notas Crédito)", f"${ventas_total:,.0f}", f"{ventas_total - meta_ventas:,.0f} vs Meta")
+                st.progress(min(avance_ventas / 100, 1.0), text=f"Avance Ventas Netas: {avance_ventas:.1f}%")
             with col2:
                 st.metric("Recaudo de Cartera", f"${cobros_total:,.0f}", f"{cobros_total - meta_cobros:,.0f} vs Meta")
                 st.progress(min(avance_cobros / 100, 1.0), text=f"Avance Cartera: {avance_cobros:.1f}%")
@@ -411,7 +412,7 @@ def render_dashboard():
 
             col4, col5, col6 = st.columns(3)
             with col4:
-                st.metric("Venta Complementarios", f"${comp_total:,.0f}", f"{comp_total - meta_comp:,.0f} vs Meta")
+                st.metric("Venta Neta Complementarios", f"${comp_total:,.0f}", f"{comp_total - meta_comp:,.0f} vs Meta")
                 st.progress(min(avance_comp / 100, 1.0), text=f"Avance: {avance_comp:.1f}%")
             with col5:
                 sub_meta_label = APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo']
@@ -427,7 +428,7 @@ def render_dashboard():
             st.dataframe(df_vista[cols_desglose], column_config={
                 "Estatus": st.column_config.TextColumn("🚦", width="small"), 
                 "nomvendedor": "Vendedor/Grupo", 
-                "ventas_totales": st.column_config.NumberColumn("Ventas Reales", format="$ %d"), 
+                "ventas_totales": st.column_config.NumberColumn("Ventas Netas", format="$ %d"), 
                 "presupuesto": st.column_config.NumberColumn("Meta Ventas", format="$ %d"),
                 "cobros_totales": st.column_config.NumberColumn("Recaudo", format="$ %d"),
                 "presupuestocartera": st.column_config.NumberColumn("Meta Recaudo", format="$ %d"),
