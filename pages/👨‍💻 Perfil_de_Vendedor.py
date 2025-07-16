@@ -1,27 +1,23 @@
 # ==============================================================================
 # SCRIPT DEFINITIVO PARA: pages/2_Perfil_del_Vendedor.py
-# VERSIÓN: 5.1 (Solución Definitiva y Robusta de TypeError)
+# VERSIÓN: 5.2 (Solución "Paranoica" y Definitiva de TypeError)
 # FECHA: 16 de Julio, 2025
 #
 # DESCRIPCIÓN:
-# Versión final que incorpora una limpieza de datos ultra-robusta en la
-# función RFM para prevenir de raíz el TypeError en st.dataframe, incluso
-# con los filtros más extremos. Esta versión es la más estable.
+# Versión final que adopta un enfoque de limpieza de datos "paranoico" para
+# erradicar de forma definitiva el persistente TypeError en st.dataframe.
+# Esta versión añade limpieza a las columnas de texto y utiliza las prácticas
+# de pandas más seguras.
 #
-# CORRECCIONES CLAVE (v5.1):
-# 1.  ERROR CRÍTICO (TypeError) SOLUCIONADO DE RAÍZ:
-#     - Se implementó un bloque de validación de varias etapas en la función
-#       `realizar_analisis_rfm` que:
-#       a) Reemplaza valores infinitos (inf).
-#       b) Elimina filas con valores nulos (NaN) en métricas clave.
-#       c) Filtra ventas no positivas.
-#       d) Realiza una conversión de tipo segura (.astype) dentro de un try-except.
-#     - Esto garantiza que el DataFrame final sea 100% limpio y con los
-#       tipos de datos correctos, eliminando el error en cualquier escenario.
-#
-# 2.  MANTENIBILIDAD Y ROBUSTEZ GENERAL:
-#     - Mantiene el uso de constantes globales para nombres de columnas,
-#       reduciendo errores y facilitando el mantenimiento.
+# CORRECCIONES CLAVE (v5.2):
+# 1.  NUEVO: Limpieza de la columna `NOMBRE_CLIENTE`: Se fuerza la conversión a
+#     string y se rellenan los nulos. Un `NaN` en una columna de texto puede
+#     causar el TypeError durante la renderización.
+# 2.  NUEVO: Eliminación de `inplace=True`: Todas las operaciones de limpieza
+#     ahora usan reasignación (ej: `df = df.dropna()`), que es una práctica
+#     más segura y predecible en pandas.
+# 3.  MANTIENE: El robusto bloque de saneamiento de datos numéricos (inf, NaN)
+#     y la conversión de tipos segura introducida en v5.1.
 # ==============================================================================
 
 import streamlit as st
@@ -43,10 +39,8 @@ def normalizar_texto(texto):
     if not isinstance(texto, str):
         return texto
     try:
-        # Pasa a NFD para separar caracteres de sus acentos
         s = ''.join(c for c in unicodedata.normalize('NFD', texto)
                     if unicodedata.category(c) != 'Mn')
-        # Convierte a mayúsculas, reemplaza guiones y normaliza espacios
         return ' '.join(s.upper().replace('-', ' ').split())
     except (TypeError, AttributeError):
         return texto
@@ -58,7 +52,6 @@ def mostrar_acceso_restringido():
     st.image("https://raw.githubusercontent.com/DiegoMao201/Resumen-Ventas-Gerenciales/main/LOGO%20FERREINOX%20SAS%20BIC%202024.png", width=300)
     st.stop()
 
-# Carga de datos y configuración desde la sesión
 if not st.session_state.get('autenticado'):
     mostrar_acceso_restringido()
 
@@ -67,7 +60,7 @@ APP_CONFIG = st.session_state.get('APP_CONFIG')
 DATA_CONFIG = st.session_state.get('DATA_CONFIG')
 
 if df_ventas_historico is None or df_ventas_historico.empty or not APP_CONFIG or not DATA_CONFIG:
-    st.error("Error Crítico: No se pudieron cargar los datos desde la sesión. Por favor, regrese a la página '🏠 Resumen Mensual' y vuelva a cargar los datos.")
+    st.error("Error Crítico: No se pudieron cargar los datos. Regrese a '🏠 Resumen Mensual' y recargue.")
     st.stop()
 
 
@@ -75,8 +68,6 @@ if df_ventas_historico is None or df_ventas_historico.empty or not APP_CONFIG or
 # SECCIÓN 2: CONSTANTES Y LÓGICA DE ANÁLISIS ESTRATÉGICO
 # ==============================================================================
 
-# --- Definición de Constantes para Nombres de Columnas ---
-# Esto evita errores de tipeo y facilita el mantenimiento.
 FECHA_VENTA = 'fecha_venta'
 CLIENTE_ID = 'cliente_id'
 NOMBRE_CLIENTE = 'nombre_cliente'
@@ -158,8 +149,8 @@ def analizar_rentabilidad_avanzado(_df_periodo):
 
 def realizar_analisis_rfm(_df_historico_vendedor):
     """
-    Realiza un análisis RFM completo y robusto sobre el historial de un vendedor.
-    VERSIÓN 5.1: Con limpieza de datos ultra-robusta para prevenir TypeErrors.
+    Realiza un análisis RFM con un saneamiento de datos "paranoico" para máxima estabilidad.
+    VERSIÓN 5.2: Limpia columnas de texto y numéricas antes de cualquier cálculo.
     """
     if _df_historico_vendedor.empty or _df_historico_vendedor[CLIENTE_ID].nunique() < 5:
         return pd.DataFrame(), pd.DataFrame()
@@ -173,14 +164,15 @@ def realizar_analisis_rfm(_df_historico_vendedor):
         Monetario=(VALOR_VENTA, 'sum')
     ).reset_index()
 
-    # --- INICIO DE LA SOLUCIÓN DEFINITIVA (v5.1) ---
-    # 1. Reemplazar valores infinitos (si los hubiera) por NaN.
-    rfm_df.replace([np.inf, -np.inf], np.nan, inplace=True)
+    # --- INICIO DE LA SOLUCIÓN DEFINITIVA (v5.2) ---
+    # 1. (NUEVO) Limpiar la columna de texto para asegurar que sea siempre string.
+    rfm_df[NOMBRE_CLIENTE] = rfm_df[NOMBRE_CLIENTE].fillna('CLIENTE NO IDENTIFICADO').astype(str)
 
-    # 2. Eliminar filas donde CUALQUIERA de las métricas clave sea NaN.
-    rfm_df.dropna(subset=['Recencia', 'Frecuencia', 'Monetario'], inplace=True)
+    # 2. (MEJORADO) Reemplazar infinitos y eliminar nulos usando reasignación segura.
+    rfm_df = rfm_df.replace([np.inf, -np.inf], np.nan)
+    rfm_df = rfm_df.dropna(subset=['Recencia', 'Frecuencia', 'Monetario'])
 
-    # 3. Asegurar que el valor Monetario sea positivo. RFM no tiene sentido para ventas <= 0.
+    # 3. Asegurar que el valor Monetario sea positivo.
     rfm_df = rfm_df[rfm_df['Monetario'] > 0]
 
     # 4. Comprobar si el DataFrame resultante es válido para el análisis.
@@ -188,34 +180,30 @@ def realizar_analisis_rfm(_df_historico_vendedor):
         return pd.DataFrame(), pd.DataFrame()
 
     # 5. Con los datos 100% limpios, ahora es seguro convertirlos a los tipos correctos.
-    #    Este es el paso crítico que previene el TypeError en st.dataframe.
     try:
         rfm_df['Recencia'] = rfm_df['Recencia'].astype(int)
         rfm_df['Frecuencia'] = rfm_df['Frecuencia'].astype(int)
         rfm_df['Monetario'] = rfm_df['Monetario'].astype(float)
     except (ValueError, TypeError):
-        # En el improbable caso de que la conversión falle, devolvemos un DF vacío para no bloquear la app.
         return pd.DataFrame(), pd.DataFrame()
     # --- FIN DE LA SOLUCIÓN ---
 
-    # Puntuación de Recencia (menos días = mejor) - Lógica de umbrales fijos.
+    # Puntuación de Recencia (menos días = mejor)
     recencia_bins = [-1, 30, 90, 180, 365, rfm_df['Recencia'].max() + 1]
     rfm_df['R_Score'] = pd.cut(rfm_df['Recencia'], bins=recencia_bins, labels=[5, 4, 3, 2, 1], right=False)
 
-    # Puntuación de Frecuencia (más compras = mejor) - Lógica de umbrales fijos.
+    # Puntuación de Frecuencia (más compras = mejor)
     frecuencia_bins = [0, 1, 3, 5, 10, rfm_df['Frecuencia'].max() + 1]
     rfm_df['F_Score'] = pd.cut(rfm_df['Frecuencia'], bins=frecuencia_bins, labels=[1, 2, 3, 4, 5], right=False)
 
-    # Puntuación Monetaria (más valor = mejor) - qcut es aceptable aquí pero con seguridad.
+    # Puntuación Monetaria (más valor = mejor)
     try:
         rfm_df['M_Score'] = pd.qcut(rfm_df['Monetario'], 5, labels=[1, 2, 3, 4, 5], duplicates='drop')
-    except ValueError: # Si aún falla (baja varianza), asignar un puntaje por defecto.
+    except ValueError:
         rfm_df['M_Score'] = 3
 
-    # Convertir a entero, ahora de forma segura
     rfm_df[['R_Score', 'F_Score', 'M_Score']] = rfm_df[['R_Score', 'F_Score', 'M_Score']].fillna(3).astype(int)
 
-    # Mapa de segmentos basado en expresiones regulares para una clasificación flexible.
     segt_map = {
         r'55[4-5]': 'Campeones', r'[3-4]5[4-5]': 'Campeones',
         r'54[4-5]': 'Clientes Leales', r'44[4-5]': 'Clientes Leales',
@@ -406,7 +394,6 @@ def render_tab_rfm_accionable(rfm_df, resumen_segmentos):
             
             df_display_segmento = rfm_df[rfm_df['Segmento'] == segmento_seleccionado].sort_values('Monetario', ascending=False)
             
-            # Esta visualización es ahora segura gracias a la conversión de tipos en `realizar_analisis_rfm`
             st.dataframe(
                 df_display_segmento[[NOMBRE_CLIENTE, 'Recencia', 'Frecuencia', 'Monetario']],
                 help="Recencia (días desde la última compra), Frecuencia (nº de compras), Monetario (valor total histórico)",
@@ -458,12 +445,10 @@ def render_pagina_perfil():
     st.markdown(f"Bienvenido, **{st.session_state.usuario}**. Usa los filtros para obtener un análisis 360° y potenciar tus resultados.")
     st.markdown("---")
     
-    # --- FILTROS PRINCIPALES ---
     with st.container(border=True):
         col1, col2 = st.columns([0.4, 0.6])
         
         with col1:
-            # Lógica de selección de Vendedor/Grupo
             grupos = DATA_CONFIG.get('grupos_vendedores', {})
             vendedores_unicos_orig = sorted(list(df_ventas_historico[NOM_VENDEDOR].dropna().unique()))
             nombres_grupos = sorted(grupos.keys())
@@ -489,13 +474,11 @@ def render_pagina_perfil():
             )
 
         with col2:
-            # Lógica de selección de Rango de Fechas
             df_ventas_historico['periodo'] = df_ventas_historico[FECHA_VENTA].dt.to_period('M')
             meses_disponibles = sorted(df_ventas_historico['periodo'].unique())
             mapa_meses = {f"{DATA_CONFIG['mapeo_meses'].get(p.month, p.month)} {p.year}": p for p in meses_disponibles}
             opciones_slider = list(mapa_meses.keys())
             
-            # Define un rango por defecto (ej. últimos 12 meses) de forma segura
             start_index = max(0, len(opciones_slider) - 12)
             end_index = len(opciones_slider) - 1
             if start_index > end_index: start_index = end_index
@@ -510,11 +493,9 @@ def render_pagina_perfil():
             fecha_inicio = periodo_inicio.start_time.tz_localize(None)
             fecha_fin = periodo_fin.end_time.tz_localize(None)
 
-    # --- FILTRADO DE DATOS ---
     if seleccion == "Visión General de la Empresa":
         df_base_filtrada = df_ventas_historico
     else:
-        # Normaliza la lista de vendedores a filtrar (puede ser un grupo o un individuo)
         lista_vendedores_a_filtrar = grupos.get(seleccion, [seleccion])
         lista_vendedores_a_filtrar_norm = [normalizar_texto(v) for v in lista_vendedores_a_filtrar]
         df_base_filtrada = df_ventas_historico[df_ventas_historico[NOM_VENDEDOR].isin(lista_vendedores_a_filtrar_norm)]
@@ -527,7 +508,6 @@ def render_pagina_perfil():
         st.warning(f"No se encontraron datos para **'{seleccion}'** en el rango de **{mes_inicio_str}** a **{mes_fin_str}**. Por favor, ajuste los filtros.")
         st.stop()
 
-    # --- EJECUCIÓN DE ANÁLISIS Y RENDERIZADO ---
     with st.spinner(f"Generando inteligencia de negocios para {seleccion}..."):
         df_procesado = calcular_metricas_base(df_periodo_seleccionado)
         analisis_cartera = analizar_salud_cartera_avanzado(df_procesado, df_base_filtrada, fecha_inicio)
@@ -540,7 +520,6 @@ def render_pagina_perfil():
     generar_y_renderizar_resumen_ejecutivo(seleccion, analisis_cartera, df_rentabilidad, resumen_rfm)
     st.markdown("---")
 
-    # --- PESTAÑAS DE ANÁLISIS DETALLADO ---
     tab1, tab2, tab3, tab4 = st.tabs([
         "🩺 **Diagnóstico de Cartera**",
         "🏆 **Segmentación de Clientes (RFM)**",
