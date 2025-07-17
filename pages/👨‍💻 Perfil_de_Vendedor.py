@@ -1,6 +1,6 @@
 # ==============================================================================
 # SCRIPT DEFINITIVO PARA: pages/2_Perfil_del_Vendedor.py
-# VERSIÓN: 5.2 (Solución "Paranoica" y Definitiva de TypeError)
+# VERSIÓN: 5.3 (Solución "Paranoica" y Definitiva de TypeError)
 # FECHA: 16 de Julio, 2025
 #
 # DESCRIPCIÓN:
@@ -9,15 +9,17 @@
 # Esta versión añade limpieza a las columnas de texto y utiliza las prácticas
 # de pandas más seguras.
 #
-# CORRECCIONES CLAVE (v5.2):
-# 1.  NUEVO: Limpieza de la columna `NOMBRE_CLIENTE`: Se fuerza la conversión a
-#     string y se rellenan los nulos. Un `NaN` en una columna de texto puede
-#     causar el TypeError durante la renderización.
-# 2.  NUEVO: Eliminación de `inplace=True`: Todas las operaciones de limpieza
-#     ahora usan reasignación (ej: `df = df.dropna()`), que es una práctica
-#     más segura y predecible en pandas.
-# 3.  MANTIENE: El robusto bloque de saneamiento de datos numéricos (inf, NaN)
-#     y la conversión de tipos segura introducida en v5.1.
+# CORRECCIONES CLAVE (v5.3):
+# 1.  NUEVO Y CRÍTICO: Se añade un bloque de "Saneamiento de Datos Global" al
+#     inicio. Este bloque normaliza las columnas de texto clave (`nomvendedor`,
+#     `nombre_cliente`, `nombre_articulo`) en el DataFrame principal una sola vez.
+#     Esto resuelve el error fundamental de filtrado al comparar texto
+#     normalizado con texto no normalizado.
+# 2.  REFINADO: La lógica de filtrado de vendedores ahora funciona correctamente
+#     porque tanto la selección del usuario como la columna de datos están
+#     en el mismo formato normalizado.
+# 3.  MANTIENE: El robusto bloque de saneamiento de datos numéricos y la
+#     conversión de tipos segura introducida en versiones anteriores.
 # ==============================================================================
 
 import streamlit as st
@@ -37,13 +39,13 @@ st.set_page_config(page_title="Perfil del Vendedor", page_icon="💡", layout="w
 def normalizar_texto(texto):
     """Normaliza un texto a mayúsculas, sin acentos y con espacios simples."""
     if not isinstance(texto, str):
-        return texto
+        return str(texto) # Forzar conversión a string si no lo es
     try:
         s = ''.join(c for c in unicodedata.normalize('NFD', texto)
                     if unicodedata.category(c) != 'Mn')
         return ' '.join(s.upper().replace('-', ' ').split())
     except (TypeError, AttributeError):
-        return texto
+        return str(texto) # Retornar como string en caso de cualquier error
 
 def mostrar_acceso_restringido():
     """Muestra un mensaje de advertencia si el usuario no está autenticado."""
@@ -55,19 +57,25 @@ def mostrar_acceso_restringido():
 if not st.session_state.get('autenticado'):
     mostrar_acceso_restringido()
 
-df_ventas_historico = st.session_state.get('df_ventas')
+df_ventas_historico_raw = st.session_state.get('df_ventas')
 APP_CONFIG = st.session_state.get('APP_CONFIG')
 DATA_CONFIG = st.session_state.get('DATA_CONFIG')
 
-if df_ventas_historico is None or df_ventas_historico.empty or not APP_CONFIG or not DATA_CONFIG:
+if df_ventas_historico_raw is None or df_ventas_historico_raw.empty or not APP_CONFIG or not DATA_CONFIG:
     st.error("Error Crítico: No se pudieron cargar los datos. Regrese a '🏠 Resumen Mensual' y recargue.")
     st.stop()
 
+# Copia para trabajar de forma segura
+df_ventas_historico = df_ventas_historico_raw.copy()
 
 # ==============================================================================
-# SECCIÓN 2: CONSTANTES Y LÓGICA DE ANÁLISIS ESTRATÉGICO
+# ### CORRECCIÓN CLAVE ###
+# SECCIÓN 1.5: SANEAMIENTO DE DATOS GLOBAL
+# Normalizar todas las columnas críticas una sola vez al principio.
+# Esto garantiza consistencia en todo el script (filtros, agrupaciones, etc.).
 # ==============================================================================
 
+# Definir columnas constantes para evitar errores de tipeo
 FECHA_VENTA = 'fecha_venta'
 CLIENTE_ID = 'cliente_id'
 NOMBRE_CLIENTE = 'nombre_cliente'
@@ -81,12 +89,38 @@ COSTO_TOTAL_LINEA = 'costo_total_linea'
 MARGEN_BRUTO = 'margen_bruto'
 PORCENTAJE_MARGEN = 'porcentaje_margen'
 
+with st.spinner("Preparando y limpiando datos..."):
+    # 1. Normalizar columnas de texto para consistencia
+    df_ventas_historico[NOM_VENDEDOR] = df_ventas_historico[NOM_VENDEDOR].apply(normalizar_texto)
+    df_ventas_historico[NOMBRE_CLIENTE] = df_ventas_historico[NOMBRE_CLIENTE].fillna('N/A').apply(normalizar_texto)
+    df_ventas_historico[NOMBRE_ARTICULO] = df_ventas_historico[NOMBRE_ARTICULO].fillna('N/A').apply(normalizar_texto)
+
+    # 2. Asegurar tipos de datos correctos para columnas numéricas y de fecha
+    df_ventas_historico[FECHA_VENTA] = pd.to_datetime(df_ventas_historico[FECHA_VENTA], errors='coerce')
+    df_ventas_historico[VALOR_VENTA] = pd.to_numeric(df_ventas_historico[VALOR_VENTA], errors='coerce').fillna(0)
+    df_ventas_historico[COSTO_UNITARIO] = pd.to_numeric(df_ventas_historico[COSTO_UNITARIO], errors='coerce').fillna(0)
+    df_ventas_historico[UNIDADES_VENDIDAS] = pd.to_numeric(df_ventas_historico[UNIDADES_VENDIDAS], errors='coerce').fillna(0)
+
+    # 3. Eliminar filas donde la fecha es nula, ya que son inútiles para el análisis
+    df_ventas_historico = df_ventas_historico.dropna(subset=[FECHA_VENTA])
+
+
+# ==============================================================================
+# SECCIÓN 2: LÓGICA DE ANÁLISIS ESTRATÉGICO
+# (Las funciones ahora pueden asumir que reciben datos limpios)
+# ==============================================================================
+
 def calcular_metricas_base(df):
     """Calcula el costo, margen y porcentaje de margen para cada línea de venta."""
     df_copy = df.copy()
-    df_copy[COSTO_TOTAL_LINEA] = pd.to_numeric(df_copy[COSTO_UNITARIO], errors='coerce').fillna(0) * pd.to_numeric(df_copy[UNIDADES_VENDIDAS], errors='coerce').fillna(0)
-    df_copy[MARGEN_BRUTO] = pd.to_numeric(df_copy[VALOR_VENTA], errors='coerce') - df_copy[COSTO_TOTAL_LINEA]
-    df_copy[PORCENTAJE_MARGEN] = np.where(df_copy[VALOR_VENTA] > 0, (df_copy[MARGEN_BRUTO] / df_copy[VALOR_VENTA]) * 100, 0)
+    # Los datos ya vienen limpios, pero una comprobación extra no hace daño
+    costo_unit = pd.to_numeric(df_copy[COSTO_UNITARIO], errors='coerce').fillna(0)
+    unidades = pd.to_numeric(df_copy[UNIDADES_VENDIDAS], errors='coerce').fillna(0)
+    valor_venta = pd.to_numeric(df_copy[VALOR_VENTA], errors='coerce').fillna(0)
+
+    df_copy[COSTO_TOTAL_LINEA] = costo_unit * unidades
+    df_copy[MARGEN_BRUTO] = valor_venta - df_copy[COSTO_TOTAL_LINEA]
+    df_copy[PORCENTAJE_MARGEN] = np.where(valor_venta > 0, (df_copy[MARGEN_BRUTO] / valor_venta) * 100, 0)
     return df_copy
 
 def analizar_salud_cartera_avanzado(_df_periodo, _df_historico_contextual, fecha_inicio_periodo):
@@ -132,8 +166,9 @@ def analizar_rentabilidad_avanzado(_df_periodo):
     
     df_productos['Rentabilidad_Pct'] = np.where(df_productos['Volumen_Venta'] > 0, (df_productos['Margen_Absoluto'] / df_productos['Volumen_Venta']) * 100, 0)
     
-    volumen_medio = df_productos['Volumen_Venta'].median()
-    rentabilidad_media = df_productos['Rentabilidad_Pct'].median()
+    # Usar np.median para mayor robustez ante outliers
+    volumen_medio = np.median(df_productos['Volumen_Venta'])
+    rentabilidad_media = np.median(df_productos['Rentabilidad_Pct'])
     
     def get_cuadrante(row):
         alto_volumen = row['Volumen_Venta'] >= volumen_medio
@@ -149,8 +184,7 @@ def analizar_rentabilidad_avanzado(_df_periodo):
 
 def realizar_analisis_rfm(_df_historico_vendedor):
     """
-    Realiza un análisis RFM con un saneamiento de datos "paranoico" para máxima estabilidad.
-    VERSIÓN 5.2: Limpia columnas de texto y numéricas antes de cualquier cálculo.
+    Realiza un análisis RFM. Asume que el DF de entrada ya ha pasado la limpieza global.
     """
     if _df_historico_vendedor.empty or _df_historico_vendedor[CLIENTE_ID].nunique() < 5:
         return pd.DataFrame(), pd.DataFrame()
@@ -164,30 +198,22 @@ def realizar_analisis_rfm(_df_historico_vendedor):
         Monetario=(VALOR_VENTA, 'sum')
     ).reset_index()
 
-    # --- INICIO DE LA SOLUCIÓN DEFINITIVA (v5.2) ---
-    # 1. (NUEVO) Limpiar la columna de texto para asegurar que sea siempre string.
-    rfm_df[NOMBRE_CLIENTE] = rfm_df[NOMBRE_CLIENTE].fillna('CLIENTE NO IDENTIFICADO').astype(str)
-
-    # 2. (MEJORADO) Reemplazar infinitos y eliminar nulos usando reasignación segura.
+    # --- SANEAMIENTO ADICIONAL ESPECIAL PARA RFM ---
     rfm_df = rfm_df.replace([np.inf, -np.inf], np.nan)
     rfm_df = rfm_df.dropna(subset=['Recencia', 'Frecuencia', 'Monetario'])
-
-    # 3. Asegurar que el valor Monetario sea positivo.
     rfm_df = rfm_df[rfm_df['Monetario'] > 0]
 
-    # 4. Comprobar si el DataFrame resultante es válido para el análisis.
     if rfm_df.empty or len(rfm_df) < 5:
         return pd.DataFrame(), pd.DataFrame()
 
-    # 5. Con los datos 100% limpios, ahora es seguro convertirlos a los tipos correctos.
     try:
         rfm_df['Recencia'] = rfm_df['Recencia'].astype(int)
         rfm_df['Frecuencia'] = rfm_df['Frecuencia'].astype(int)
         rfm_df['Monetario'] = rfm_df['Monetario'].astype(float)
     except (ValueError, TypeError):
+        st.error("Error al convertir tipos de datos en análisis RFM.")
         return pd.DataFrame(), pd.DataFrame()
-    # --- FIN DE LA SOLUCIÓN ---
-
+    
     # Puntuación de Recencia (menos días = mejor)
     recencia_bins = [-1, 30, 90, 180, 365, rfm_df['Recencia'].max() + 1]
     rfm_df['R_Score'] = pd.cut(rfm_df['Recencia'], bins=recencia_bins, labels=[5, 4, 3, 2, 1], right=False)
@@ -245,6 +271,7 @@ def analizar_tendencias(_df_periodo):
 
 # ==============================================================================
 # SECCIÓN 3: COMPONENTES DE LA INTERFAZ DE USUARIO (UI)
+# (Las funciones de renderizado no cambian, pero ahora reciben datos más fiables)
 # ==============================================================================
 
 def generar_y_renderizar_resumen_ejecutivo(nombre_vendedor, analisis_cartera, df_rentabilidad, resumen_rfm):
@@ -329,8 +356,9 @@ def render_tab_rentabilidad(df_rentabilidad):
                 '🐄 Ventas de Volumen': '#1f77b4', '🤔 Drenajes de Rentabilidad': '#d62728'
             }
         )
-        fig.add_vline(x=df_rentabilidad['Volumen_Venta'].median(), line_dash="dash", annotation_text="Mediana Volumen")
-        fig.add_hline(y=df_rentabilidad['Rentabilidad_Pct'].median(), line_dash="dash", annotation_text="Mediana Rentabilidad")
+        # Usar np.median para consistencia con la función de análisis
+        fig.add_vline(x=np.median(df_rentabilidad['Volumen_Venta']), line_dash="dash", annotation_text="Mediana Volumen")
+        fig.add_hline(y=np.median(df_rentabilidad['Rentabilidad_Pct']), line_dash="dash", annotation_text="Mediana Rentabilidad")
         st.plotly_chart(fig, use_container_width=True)
         
     with st.expander("Ver detalle de productos por cuadrante y explicación", expanded=False):
@@ -362,7 +390,7 @@ def render_tab_rfm_accionable(rfm_df, resumen_segmentos):
         with col1:
             st.markdown("##### Resumen de Segmentos")
             st.dataframe(resumen_segmentos, use_container_width=True, hide_index=True,
-                         column_config={"Ventas_Totales": st.column_config.NumberColumn("Ventas Históricas", format="$ #,##0")})
+                          column_config={"Ventas_Totales": st.column_config.NumberColumn("Ventas Históricas", format="$ #,##0")})
         with col2:
             fig = px.treemap(resumen_segmentos, path=['Segmento'], values='Numero_Clientes',
                              title='Distribución de Clientes por Segmento (Cantidad)',
@@ -450,21 +478,29 @@ def render_pagina_perfil():
         
         with col1:
             grupos = DATA_CONFIG.get('grupos_vendedores', {})
-            vendedores_unicos_orig = sorted(list(df_ventas_historico[NOM_VENDEDOR].dropna().unique()))
-            nombres_grupos = sorted(grupos.keys())
+            # ### CORRECCIÓN CLAVE ###
+            # Ahora se obtienen los vendedores únicos del DF ya normalizado.
+            vendedores_unicos_norm = sorted(list(df_ventas_historico[NOM_VENDEDOR].unique()))
+            
+            # Normalizar los nombres de los grupos para la comparación
+            grupos_norm = {normalizar_texto(k): [normalizar_texto(v) for v in vs] for k, vs in grupos.items()}
+            nombres_grupos_norm = sorted(grupos_norm.keys())
             
             usuario_actual = st.session_state.usuario
-            es_gerente = normalizar_texto(usuario_actual) == "GERENTE"
+            # Normalizar el usuario actual para la lógica de roles
+            usuario_actual_norm = normalizar_texto(usuario_actual)
+            es_gerente = usuario_actual_norm == "GERENTE"
             
             if es_gerente:
-                opciones_analisis = ["Visión General de la Empresa"] + nombres_grupos + vendedores_unicos_orig
+                opciones_analisis = ["Visión General de la Empresa"] + nombres_grupos_norm + vendedores_unicos_norm
                 default_index = 0
             else:
-                opciones_analisis = [usuario_actual]
+                # Si el usuario actual no es gerente, solo puede ver sus propios datos.
+                opciones_analisis = [usuario_actual_norm] if usuario_actual_norm in vendedores_unicos_norm else []
                 default_index = 0
             
             if not opciones_analisis:
-                st.error(f"No se encontraron datos de ventas asociados al usuario '{usuario_actual}'.")
+                st.error(f"No se encontraron datos de ventas asociados al usuario '{usuario_actual}'. Verifique la fuente de datos.")
                 st.stop()
                 
             seleccion = st.selectbox(
@@ -479,6 +515,10 @@ def render_pagina_perfil():
             mapa_meses = {f"{DATA_CONFIG['mapeo_meses'].get(p.month, p.month)} {p.year}": p for p in meses_disponibles}
             opciones_slider = list(mapa_meses.keys())
             
+            if not opciones_slider:
+                st.error("No hay meses disponibles para el análisis en los datos cargados.")
+                st.stop()
+
             start_index = max(0, len(opciones_slider) - 12)
             end_index = len(opciones_slider) - 1
             if start_index > end_index: start_index = end_index
@@ -493,11 +533,12 @@ def render_pagina_perfil():
             fecha_inicio = periodo_inicio.start_time.tz_localize(None)
             fecha_fin = periodo_fin.end_time.tz_localize(None)
 
+    # --- LÓGICA DE FILTRADO (AHORA CORRECTA Y ROBUSTA) ---
     if seleccion == "Visión General de la Empresa":
         df_base_filtrada = df_ventas_historico
     else:
-        lista_vendedores_a_filtrar = grupos.get(seleccion, [seleccion])
-        lista_vendedores_a_filtrar_norm = [normalizar_texto(v) for v in lista_vendedores_a_filtrar]
+        # Busca la selección en los grupos normalizados o la trata como un vendedor individual
+        lista_vendedores_a_filtrar_norm = grupos_norm.get(seleccion, [seleccion])
         df_base_filtrada = df_ventas_historico[df_ventas_historico[NOM_VENDEDOR].isin(lista_vendedores_a_filtrar_norm)]
     
     df_periodo_seleccionado = df_base_filtrada[
