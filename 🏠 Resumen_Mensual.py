@@ -4,7 +4,7 @@
 # DESCRIPCIÓN: Se modifica el cálculo del KPI de Venta de Complementarios para
 #              que sea la suma de las 'categorias_clave_venta', alineando el
 #              KPI con la meta específica del tablero.
-#              Se añade botón para descargar albaranes pendientes en Excel.
+#              Se añade botón para descargar TODOS los albaranes pendientes del AÑO.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -465,9 +465,13 @@ def render_dashboard():
             }, use_container_width=True, hide_index=True)
 
             render_analisis_detallado(df_vista, df_ventas_periodo)
-
+            
+            # --- INICIO DE LA SECCIÓN MODIFICADA ---
+            
+            # 1. VISTA MENSUAL (FILTRADA) - CÓDIGO ORIGINAL SIN CAMBIOS
             st.markdown("---")
-            st.header("📄 Detalle de Albaranes Pendientes por Facturar (Neto)")
+            st.header("📄 Detalle de Albaranes Pendientes (Vista Mensual Filtrada)")
+            
             vendedores_vista_actual = df_vista['nomvendedor'].unique()
             nombres_a_filtrar = []
             for vendedor in vendedores_vista_actual:
@@ -475,11 +479,13 @@ def render_dashboard():
                 nombre_grupo_orig = next((k for k in DATA_CONFIG['grupos_vendedores'] if normalizar_texto(k) == vendedor_norm), vendedor_norm)
                 lista_vendedores = DATA_CONFIG['grupos_vendedores'].get(nombre_grupo_orig, [vendedor_norm])
                 nombres_a_filtrar.extend([normalizar_texto(v) for v in lista_vendedores])
+            
+            # 'df_albaranes_pendientes' viene de la función mensual 'procesar_datos_periodo'
             df_albaranes_vista = df_albaranes_pendientes[df_albaranes_pendientes['nomvendedor'].isin(nombres_a_filtrar)]
             df_albaranes_a_mostrar = df_albaranes_vista[df_albaranes_vista['valor_venta'] > 0]
 
             if df_albaranes_a_mostrar.empty:
-                st.info("No hay albaranes pendientes de facturación para la selección actual en este periodo.")
+                st.info("No hay albaranes pendientes de facturación para la selección de filtros actual (mes/vendedor).")
             else:
                 st.dataframe(df_albaranes_a_mostrar[['Serie', 'fecha_venta', 'nombre_cliente', 'valor_venta', 'nomvendedor']], 
                     column_config={
@@ -489,25 +495,53 @@ def render_dashboard():
                     }, use_container_width=True, hide_index=True
                 )
 
-                # --- INICIO DEL CÓDIGO AÑADIDO ---
-                # Preparar el dataframe para la descarga con las columnas solicitadas
-                df_para_descargar = df_albaranes_a_mostrar.copy()
-                df_para_descargar = df_para_descargar[['fecha_venta', 'nombre_cliente', 'Serie', 'nomvendedor', 'valor_venta']]
-                df_para_descargar.columns = ['Fecha', 'Nombre Cliente', 'Numero Albaran/Serie', 'Nombre Vendedor', 'Valor Total Albaran']
+            # 2. SECCIÓN DE DESCARGA ANUAL (NUEVA FUNCIONALIDAD)
+            st.markdown("---")
+            st.header(f"📥 Descarga Anual de Albaranes Pendientes ({anio_sel})")
+            st.info(f"El siguiente botón descargará **TODOS** los albaranes pendientes del año **{anio_sel}**, sin importar los filtros de mes o vendedor seleccionados arriba.")
 
-                # Convertir el dataframe a un archivo Excel en memoria
-                excel_data = to_excel(df_para_descargar)
+            with st.spinner(f"Preparando archivo de descarga para el año {anio_sel}..."):
+                # Se repite la lógica de cálculo de albaranes pero usando TODOS los datos del año
+                df_albaranes_historicos_bruto = df_ventas_historicas[df_ventas_historicas['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
+                grouping_keys = ['Serie', 'cliente_id', 'codigo_articulo', 'codigo_vendedor']
+                if not df_albaranes_historicos_bruto.empty:
+                    df_neto_historico = df_albaranes_historicos_bruto.groupby(grouping_keys).agg(valor_neto=('valor_venta', 'sum')).reset_index()
+                    df_grupos_cancelados_global = df_neto_historico[df_neto_historico['valor_neto'] == 0]
+                else:
+                    df_grupos_cancelados_global = pd.DataFrame(columns=grouping_keys)
 
-                # Añadir el botón de descarga
+                df_ventas_anual = df_ventas_historicas[df_ventas_historicas['anio'] == anio_sel]
+                df_albaranes_bruto_anual = df_ventas_anual[df_ventas_anual['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
+
+                if not df_albaranes_bruto_anual.empty and not df_grupos_cancelados_global.empty:
+                    df_albaranes_pendientes_del_anio = df_albaranes_bruto_anual.merge(
+                        df_grupos_cancelados_global[grouping_keys], on=grouping_keys, how='left', indicator=True
+                    ).query('_merge == "left_only"').drop(columns=['_merge'])
+                else:
+                    df_albaranes_pendientes_del_anio = df_albaranes_bruto_anual.copy()
+
+                df_albaranes_pendientes_del_anio = df_albaranes_pendientes_del_anio[df_albaranes_pendientes_del_anio['valor_venta'] > 0]
+
+            if df_albaranes_pendientes_del_anio.empty:
+                st.warning(f"No se encontraron albaranes pendientes para descargar en todo el año {anio_sel}.")
+            else:
+                df_para_descargar_anual = df_albaranes_pendientes_del_anio.copy()
+                df_para_descargar_anual = df_para_descargar_anual[['fecha_venta', 'nombre_cliente', 'Serie', 'nomvendedor', 'valor_venta']]
+                df_para_descargar_anual.columns = ['Fecha', 'Nombre Cliente', 'Numero Albaran/Serie', 'Nombre Vendedor', 'Valor Total Albaran']
+
+                excel_data_anual = to_excel(df_para_descargar_anual)
+
                 st.download_button(
-                    label="📥 Descargar Albaranes Pendientes (Excel)",
-                    data=excel_data,
-                    file_name=f"albaranes_pendientes_{anio_sel}_{DATA_CONFIG['mapeo_meses'].get(mes_sel_num, '')}.xlsx",
+                    label=f"✔️ Descargar TODOS los Albaranes Pendientes de {anio_sel}",
+                    data=excel_data_anual,
+                    file_name=f"TODOS_albaranes_pendientes_{anio_sel}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True,
-                    help="Descarga el detalle de albaranes pendientes en un archivo Excel."
+                    type="primary",
+                    help=f"Descarga todos los albaranes pendientes del año {anio_sel}, sin aplicar filtros de mes o vendedor."
                 )
-                # --- FIN DEL CÓDIGO AÑADIDO ---
+            # --- FIN DE LA SECCIÓN MODIFICADA ---
+
 
 def main():
     if 'df_ventas' not in st.session_state:
