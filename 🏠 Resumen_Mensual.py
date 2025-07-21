@@ -1,11 +1,9 @@
 # ==============================================================================
 # SCRIPT COMPLETO Y DEFINITIVO PARA: 🏠 Resumen Mensual.py
-# VERSIÓN FINAL: 16 de Julio, 2025 (CÁLCULO DE COMPLEMENTARIOS AJUSTADO)
-# DESCRIPCIÓN: Se modifica el cálculo del KPI de Venta de Complementarios para
-#              que sea la suma de las 'categorias_clave_venta', alineando el
-#              KPI con la meta específica del tablero.
-#              Se añade botón para descargar TODOS los albaranes pendientes del AÑO,
-#              agrupados por el total de cada albarán y con formato profesional.
+# VERSIÓN FINAL: 21 de Julio, 2025 (CORRECCIÓN DE AGRUPACIÓN)
+# DESCRIPCIÓN: Se ajusta la lógica de agrupación para la descarga de albaranes.
+#              Un albarán único se define por la combinación de Fecha, Cliente,
+#              Serie y Vendedor, solucionando el problema de series repetidas.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -59,24 +57,20 @@ st.markdown("""
 # ==============================================================================
 # 2. LÓGICA DE PROCESAMIENTO DE DATOS
 # ==============================================================================
-
-# --- FUNCIÓN to_excel MODIFICADA PARA AÑADIR FORMATO PROFESIONAL ---
 def to_excel(df):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        # Escribe el DataFrame en la hoja de Excel sin el encabezado de pandas y empezando en la segunda fila
         df.to_excel(writer, index=False, sheet_name='AlbaranesPendientes', startrow=1, header=False)
 
         workbook = writer.book
         worksheet = writer.sheets['AlbaranesPendientes']
 
-        # --- Define los formatos de celda ---
         header_format = workbook.add_format({
             'bold': True,
             'text_wrap': False,
             'valign': 'vcenter',
             'align': 'center',
-            'fg_color': '#1F4E78',  # Azul oscuro corporativo
+            'fg_color': '#1F4E78',
             'font_color': 'white',
             'border': 1
         })
@@ -84,19 +78,15 @@ def to_excel(df):
         date_format = workbook.add_format({'num_format': 'yyyy-mm-dd', 'border': 1, 'align': 'left'})
         default_format = workbook.add_format({'border': 1})
 
-        # Escribe el encabezado de la tabla con el formato personalizado
         for col_num, value in enumerate(df.columns.values):
             worksheet.write(0, col_num, value, header_format)
 
-        # --- Ajusta el ancho y formato de las columnas ---
-        # Columnas esperadas: ['Fecha', 'Nombre Cliente', 'Numero Albaran/Serie', 'Nombre Vendedor', 'Valor Total Albaran']
         worksheet.set_column('A:A', 12, date_format)
         worksheet.set_column('B:B', 35, default_format)
         worksheet.set_column('C:C', 25, default_format)
         worksheet.set_column('D:D', 35, default_format)
         worksheet.set_column('E:E', 20, currency_format)
         
-        # Agrega un autofiltro a la tabla
         worksheet.autofilter(0, 0, df.shape[0], df.shape[1] - 1)
 
     return output.getvalue()
@@ -501,12 +491,9 @@ def render_dashboard():
 
             render_analisis_detallado(df_vista, df_ventas_periodo)
             
-            # --- INICIO DE LA SECCIÓN MODIFICADA ---
-            
-            st.markdown("<hr style='border:2px solid #FF4B4B'>", unsafe_allow_html=True) # Separador visual
+            st.markdown("<hr style='border:2px solid #FF4B4B'>", unsafe_allow_html=True)
             st.header("📦 Gestión de Albaranes Pendientes")
 
-            # 1. VISTA MENSUAL (FILTRADA) - CÓDIGO ORIGINAL SIN CAMBIOS
             st.subheader("Vista Mensual Filtrada")
             
             vendedores_vista_actual = df_vista['nomvendedor'].unique()
@@ -531,7 +518,6 @@ def render_dashboard():
                     }, use_container_width=True, hide_index=True
                 )
 
-            # 2. SECCIÓN DE DESCARGA ANUAL (NUEVA FUNCIONALIDAD)
             st.subheader(f"Descarga Anual de Albaranes ({anio_sel})")
             st.info(f"El siguiente botón descargará un reporte con el **valor total por albarán** para **TODO** el año **{anio_sel}**, sin importar los filtros de mes o vendedor.")
 
@@ -559,17 +545,16 @@ def render_dashboard():
             if df_albaranes_pendientes_del_anio.empty:
                 st.warning(f"No se encontraron albaranes pendientes para descargar en todo el año {anio_sel}.")
             else:
-                # --- LÓGICA DE AGRUPACIÓN POR ALBARÁN ---
-                df_agrupado_anual = df_albaranes_pendientes_del_anio.groupby('Serie').agg(
-                    valor_venta=('valor_venta', 'sum'),
-                    fecha_venta=('fecha_venta', 'first'),
-                    nombre_cliente=('nombre_cliente', 'first'),
-                    nomvendedor=('nomvendedor', 'first')
+                # --- LÓGICA DE AGRUPACIÓN CORREGIDA ---
+                # Un albarán único se define por esta combinación de campos, no solo por 'Serie'
+                claves_agrupacion = ['fecha_venta', 'nombre_cliente', 'Serie', 'nomvendedor']
+                df_agrupado_anual = df_albaranes_pendientes_del_anio.groupby(claves_agrupacion).agg(
+                    valor_venta=('valor_venta', 'sum')
                 ).reset_index()
 
-                df_para_descargar_anual = df_agrupado_anual.reindex(columns=['fecha_venta', 'nombre_cliente', 'Serie', 'nomvendedor', 'valor_venta'])
+                df_para_descargar_anual = df_agrupado_anual.copy()
                 df_para_descargar_anual.columns = ['Fecha', 'Nombre Cliente', 'Numero Albaran/Serie', 'Nombre Vendedor', 'Valor Total Albaran']
-                df_para_descargar_anual = df_para_descargar_anual.sort_values(by='Fecha', ascending=False)
+                df_para_descargar_anual = df_para_descargar_anual.sort_values(by=['Fecha', 'Nombre Cliente'], ascending=[False, True])
                 
                 excel_data_anual = to_excel(df_para_descargar_anual)
 
@@ -582,8 +567,6 @@ def render_dashboard():
                     type="primary",
                     help=f"Descarga el reporte con el total por albarán de todo el año {anio_sel}."
                 )
-            # --- FIN DE LA SECCIÓN MODIFICADA ---
-
 
 def main():
     if 'df_ventas' not in st.session_state:
