@@ -4,6 +4,7 @@
 # DESCRIPCIÓN: Se modifica el cálculo del KPI de Venta de Complementarios para
 #              que sea la suma de las 'categorias_clave_venta', alineando el
 #              KPI con la meta específica del tablero.
+#              Se añade botón para descargar albaranes pendientes en Excel.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -57,6 +58,13 @@ st.markdown("""
 # ==============================================================================
 # 2. LÓGICA DE PROCESAMIENTO DE DATOS
 # ==============================================================================
+def to_excel(df):
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='AlbaranesPendientes')
+    processed_data = output.getvalue()
+    return processed_data
+
 def normalizar_texto(texto):
     if not isinstance(texto, str): return texto
     try:
@@ -480,6 +488,26 @@ def render_dashboard():
                         "nomvendedor": "Vendedor"
                     }, use_container_width=True, hide_index=True
                 )
+
+                # --- INICIO DEL CÓDIGO AÑADIDO ---
+                # Preparar el dataframe para la descarga con las columnas solicitadas
+                df_para_descargar = df_albaranes_a_mostrar.copy()
+                df_para_descargar = df_para_descargar[['fecha_venta', 'nombre_cliente', 'Serie', 'nomvendedor', 'valor_venta']]
+                df_para_descargar.columns = ['Fecha', 'Nombre Cliente', 'Numero Albaran/Serie', 'Nombre Vendedor', 'Valor Total Albaran']
+
+                # Convertir el dataframe a un archivo Excel en memoria
+                excel_data = to_excel(df_para_descargar)
+
+                # Añadir el botón de descarga
+                st.download_button(
+                    label="📥 Descargar Albaranes Pendientes (Excel)",
+                    data=excel_data,
+                    file_name=f"albaranes_pendientes_{anio_sel}_{DATA_CONFIG['mapeo_meses'].get(mes_sel_num, '')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    help="Descarga el detalle de albaranes pendientes en un archivo Excel."
+                )
+                # --- FIN DEL CÓDIGO AÑADIDO ---
 
 def main():
     if 'df_ventas' not in st.session_state:
