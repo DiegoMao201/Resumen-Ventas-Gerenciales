@@ -658,7 +658,7 @@ def main():
                 grupos_orig = list(DATA_CONFIG['grupos_vendedores'].keys())
                 vendedores_en_grupos_norm = [normalizar_texto(v) for lista in DATA_CONFIG['grupos_vendedores'].values() for v in lista]
                 vendedores_unicos_df = df_ventas_cache['nomvendedor'].dropna().unique()
-                mapa_norm_a_orig = {normalizar_texto(v): v for v inendedores_unicos_df}
+                mapa_norm_a_orig = {normalizar_texto(v): v for v in vendedores_unicos_df}
                 vendedores_solos_norm = [v_norm for v_norm in [normalizar_texto(v) for v in vendedores_unicos_df] if v_norm not in vendedores_en_grupos_norm]
                 vendedores_solos_orig = sorted([mapa_norm_a_orig.get(v_norm) for v_norm in vendedores_solos_norm if mapa_norm_a_orig.get(v_norm)])
                 return ["GERENTE"] + sorted(grupos_orig) + vendedores_solos_orig
