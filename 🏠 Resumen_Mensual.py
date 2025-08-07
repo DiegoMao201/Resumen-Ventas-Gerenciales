@@ -154,7 +154,7 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
         st.error(f"Error crítico al cargar {ruta_archivo}: {e}")
         return pd.DataFrame(columns=nombres_columnas)
 
-# --- NUEVA FUNCIÓN PARA CARGAR REPORTE CL4 ---
+# --- FUNCIÓN MODIFICADA PARA CARGAR Y PROCESAR REPORTE CL4 ---
 @st.cache_data(ttl=1800)
 def cargar_reporte_cl4(ruta_archivo):
     try:
@@ -162,9 +162,12 @@ def cargar_reporte_cl4(ruta_archivo):
             _, res = dbx.files_download(path=ruta_archivo)
             df = pd.read_excel(io.BytesIO(res.content))
 
-            # Extraer código de cliente de la columna NOMBRE
+            # Extraer código de cliente de la columna NOMBRE usando una expresión regular.
+            # La expresión r'\((\d+)\)' busca un grupo de uno o más dígitos (\d+)
+            # que esté dentro de paréntesis literales \( \).
             if 'NOMBRE' in df.columns:
-                df['cliente_id'] = df['NOMBRE'].str.extract(r'\((\d+)\)').fillna('0')
+                # .str.extract() devuelve un DataFrame, por lo que seleccionamos la primera columna [0]
+                df['cliente_id'] = df['NOMBRE'].str.extract(r'\((\d+)\)')[0].fillna('0')
                 df['cliente_id'] = df['cliente_id'].astype(str)
             else:
                 st.error("El archivo de oportunidades no contiene la columna 'NOMBRE'. No se puede procesar.")
@@ -404,6 +407,7 @@ def render_dashboard():
 
     df_ventas_periodo = df_ventas_historicas[(df_ventas_historicas['anio'] == anio_sel) & (df_ventas_historicas['mes'] == mes_sel_num)]
     
+    # Se comprueba que haya datos de ventas o de CL4 para continuar.
     if df_ventas_periodo.empty and (df_cl4_base is None or df_cl4_base.empty):
         st.warning("No se encontraron datos de ventas ni de oportunidades CL4 para el periodo seleccionado.")
     else:
@@ -418,6 +422,7 @@ def render_dashboard():
         else:
             df_vista = df_resumen_final[df_resumen_final['nomvendedor'] == usuario_actual_norm]
         
+        # Se vuelve a comprobar después de filtrar por usuario.
         if df_vista.empty and (df_cl4_base is None or df_cl4_base.empty):
              st.warning("No hay datos disponibles para la selección de usuario/grupo actual.")
         else:
@@ -450,41 +455,54 @@ def render_dashboard():
             # ######################################################################
 
             # --- LÓGICA DINÁMICA PARA KPI DE OPORTUNIDADES (CL4) ---
-            # 1. Usar el reporte CL4 como la base de clientes a analizar.
-            df_cl4_actualizado = df_cl4_base.copy()
+            # 1. Copiar el reporte CL4 base para trabajar con él.
+            df_cl4_actualizado = df_cl4_base.copy() if df_cl4_base is not None else pd.DataFrame()
 
-            # 2. Obtener el historial de ventas del trimestre actual para actualizar el estado de CL4.
-            #    (Esta lógica asume que el reporte CL4 es el punto de partida y se actualiza con ventas)
-            #    Para este ejemplo, se usará el reporte tal cual, pero aquí iría la lógica de actualización trimestral.
+            # 2. Crear un mapa de cliente -> último vendedor conocido a partir del historial de ventas completo.
+            #    Se eliminan duplicados por 'cliente_id', conservando la última aparición, que corresponde
+            #    a la venta más reciente (asumiendo que los datos están ordenados cronológicamente).
+            mapa_cliente_vendedor = pd.DataFrame()
+            if not df_ventas_historicas.empty and 'cliente_id' in df_ventas_historicas:
+                mapa_cliente_vendedor = df_ventas_historicas.dropna(subset=['cliente_id', 'nomvendedor', 'fecha_venta'])\
+                                                            .sort_values('fecha_venta')\
+                                                            .drop_duplicates(subset=['cliente_id'], keep='last')[['cliente_id', 'nomvendedor']]
             
-            # 3. Crear un mapa de cliente -> último vendedor conocido a partir del historial de ventas completo.
-            mapa_cliente_vendedor = df_ventas_historicas.drop_duplicates(subset=['cliente_id'], keep='last')[['cliente_id', 'nomvendedor']]
+            # 3. Enriquecer el reporte CL4 con la información del vendedor. `how='left'` asegura que todos los clientes de CL4 se mantengan.
+            df_cl4_con_vendedor = pd.DataFrame()
+            if not df_cl4_actualizado.empty and not mapa_cliente_vendedor.empty:
+                df_cl4_con_vendedor = pd.merge(df_cl4_actualizado, mapa_cliente_vendedor, on='cliente_id', how='left')
+            elif not df_cl4_actualizado.empty:
+                df_cl4_con_vendedor = df_cl4_actualizado
+                df_cl4_con_vendedor['nomvendedor'] = np.nan # Asegurarse que la columna exista
             
-            # 4. Enriquecer el reporte CL4 con la información del vendedor. `how='left'` asegura que todos los clientes de CL4 se mantengan.
-            df_cl4_con_vendedor = pd.merge(df_cl4_actualizado, mapa_cliente_vendedor, on='cliente_id', how='left')
-            
-            # 5. Normalizar nombres de vendedor y rellenar los vacíos (clientes sin historial de ventas) con 'SIN ASIGNAR'.
-            df_cl4_con_vendedor['nomvendedor'] = df_cl4_con_vendedor['nomvendedor'].apply(normalizar_texto)
-            df_cl4_con_vendedor['nomvendedor'].fillna('SIN ASIGNAR', inplace=True)
+            # 4. Normalizar nombres de vendedor y rellenar los vacíos (clientes sin historial de ventas) con 'SIN ASIGNAR'.
+            if 'nomvendedor' in df_cl4_con_vendedor:
+                df_cl4_con_vendedor['nomvendedor'] = df_cl4_con_vendedor['nomvendedor'].apply(normalizar_texto)
+                df_cl4_con_vendedor['nomvendedor'].fillna('SIN ASIGNAR', inplace=True)
 
-            # 6. Obtener la lista de vendedores/grupos a mostrar en la vista actual.
+            # 5. Obtener la lista de todos los vendedores individuales que pertenecen a los grupos/vendedores de la vista actual.
             vendedores_vista_actual = df_vista['nomvendedor'].unique() if not df_vista.empty else []
-            nombres_a_filtrar = []
-            for vendedor in vendedores_vista_actual:
-                vendedor_norm = normalizar_texto(vendedor)
-                nombre_grupo_orig = next((k for k in DATA_CONFIG['grupos_vendedores'] if normalizar_texto(k) == vendedor_norm), vendedor_norm)
-                lista_vendedores = DATA_CONFIG['grupos_vendedores'].get(nombre_grupo_orig, [vendedor_norm])
-                nombres_a_filtrar.extend([normalizar_texto(v) for v in lista_vendedores])
+            nombres_a_filtrar_cl4 = []
+            for vendedor_o_grupo in vendedores_vista_actual:
+                vendedor_norm = normalizar_texto(vendedor_o_grupo)
+                # Buscar si el nombre normalizado corresponde a un grupo. Si no, es un vendedor individual.
+                nombre_grupo_original = next((k for k, v_norm in {key: normalizar_texto(key) for key in DATA_CONFIG['grupos_vendedores']}.items() if v_norm == vendedor_norm), vendedor_norm)
+                lista_vendedores = DATA_CONFIG['grupos_vendedores'].get(nombre_grupo_original, [vendedor_o_grupo])
+                nombres_a_filtrar_cl4.extend([normalizar_texto(v) for v in lista_vendedores])
             
-            # 7. LÓGICA DE FILTRADO CORREGIDA:
-            # Si el usuario es 'GERENTE', se muestran todos los clientes del reporte CL4. 
-            # De lo contrario, solo se muestran los clientes asignados al vendedor/grupo.
-            if usuario_actual_norm == "GERENTE":
-                df_cl4_filtrado = df_cl4_con_vendedor.copy()
-            else:
-                df_cl4_filtrado = df_cl4_con_vendedor[df_cl4_con_vendedor['nomvendedor'].isin(nombres_a_filtrar)]
+            # 6. LÓGICA DE FILTRADO CORREGIDA:
+            #    Si el usuario es 'GERENTE', se muestran los clientes del reporte CL4 correspondientes a la selección del multiselect.
+            #    De lo contrario, solo se muestran los clientes asignados al vendedor/grupo que inició sesión.
+            df_cl4_filtrado = pd.DataFrame()
+            if not df_cl4_con_vendedor.empty:
+                if usuario_actual_norm == "GERENTE":
+                    # El gerente ve los clientes de los vendedores/grupos seleccionados en el multiselect
+                    df_cl4_filtrado = df_cl4_con_vendedor[df_cl4_con_vendedor['nomvendedor'].isin(nombres_a_filtrar_cl4)]
+                else:
+                    # Un usuario normal ve solo sus clientes asignados
+                    df_cl4_filtrado = df_cl4_con_vendedor[df_cl4_con_vendedor['nomvendedor'].isin(nombres_a_filtrar_cl4)]
             
-            # 8. Calcular métricas clave usando el DataFrame filtrado correctamente.
+            # 7. Calcular métricas clave usando el DataFrame filtrado correctamente.
             clientes_en_meta = df_cl4_filtrado[df_cl4_filtrado['CL4'] >= 4].shape[0] if not df_cl4_filtrado.empty else 0
             meta_clientes_cl4 = APP_CONFIG['kpi_goals']['meta_clientes_cl4']
             avance_clientes_cl4 = (clientes_en_meta / meta_clientes_cl4 * 100) if meta_clientes_cl4 > 0 else 0
@@ -573,13 +591,17 @@ def render_dashboard():
             
             if not df_vista.empty:
                 # --- Añadir columna de Clientes en Meta CL4 al desglose ---
-                def contar_clientes_meta_por_vendedor(nomvendedor):
-                    vendedor_norm = normalizar_texto(nomvendedor)
-                    nombre_grupo_orig = next((k for k in DATA_CONFIG['grupos_vendedores'] if normalizar_texto(k) == vendedor_norm), vendedor_norm)
-                    vendedores_del_grupo = [normalizar_texto(v) for v in DATA_CONFIG['grupos_vendedores'].get(nombre_grupo_orig, [vendedor_norm])]
+                def contar_clientes_meta_por_vendedor(nomvendedor_o_grupo):
+                    vendedor_norm = normalizar_texto(nomvendedor_o_grupo)
+                    # Busca el nombre original del grupo si 'vendedor_norm' es un grupo
+                    nombre_grupo_original = next((k for k, v_norm in {key: normalizar_texto(key) for key in DATA_CONFIG['grupos_vendedores']}.items() if v_norm == vendedor_norm), vendedor_norm)
+                    vendedores_del_grupo = [normalizar_texto(v) for v in DATA_CONFIG['grupos_vendedores'].get(nombre_grupo_original, [nomvendedor_o_grupo])]
                     
-                    df_cl4_vendedor = df_cl4_con_vendedor[df_cl4_con_vendedor['nomvendedor'].isin(vendedores_del_grupo)]
-                    return df_cl4_vendedor[df_cl4_vendedor['CL4'] >= 4].shape[0]
+                    # Filtra el df de CL4 (que ya tiene vendedores asignados) por los vendedores del grupo/individuo
+                    if not df_cl4_con_vendedor.empty:
+                        df_cl4_vendedor = df_cl4_con_vendedor[df_cl4_con_vendedor['nomvendedor'].isin(vendedores_del_grupo)]
+                        return df_cl4_vendedor[df_cl4_vendedor['CL4'] >= 4].shape[0]
+                    return 0
 
                 df_vista['clientes_meta_cl4'] = df_vista['nomvendedor'].apply(contar_clientes_meta_por_vendedor)
                 # --- Fin de la adición ---
@@ -604,7 +626,8 @@ def render_dashboard():
 
             st.subheader("Vista Mensual Filtrada")
             
-            df_albaranes_vista = df_albaranes_pendientes[df_albaranes_pendientes['nomvendedor'].isin(nombres_a_filtrar)] if not df_albaranes_pendientes.empty else pd.DataFrame()
+            # La lista 'nombres_a_filtrar_cl4' contiene los vendedores individuales de la vista, se puede reusar aquí.
+            df_albaranes_vista = df_albaranes_pendientes[df_albaranes_pendientes['nomvendedor'].isin(nombres_a_filtrar_cl4)] if not df_albaranes_pendientes.empty else pd.DataFrame()
             df_albaranes_a_mostrar = df_albaranes_vista[df_albaranes_vista['valor_venta'] > 0] if not df_albaranes_vista.empty else pd.DataFrame()
 
             if df_albaranes_a_mostrar.empty:
