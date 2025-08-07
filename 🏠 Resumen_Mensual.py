@@ -454,8 +454,8 @@ def render_dashboard():
             df_cl4_actualizado = df_cl4_base.copy()
 
             # 2. Obtener el historial de ventas del trimestre actual para actualizar el estado de CL4.
-            #   (Esta lógica asume que el reporte CL4 es el punto de partida y se actualiza con ventas)
-            #   Para este ejemplo, se usará el reporte tal cual, pero aquí iría la lógica de actualización trimestral.
+            #    (Esta lógica asume que el reporte CL4 es el punto de partida y se actualiza con ventas)
+            #    Para este ejemplo, se usará el reporte tal cual, pero aquí iría la lógica de actualización trimestral.
             
             # 3. Crear un mapa de cliente -> último vendedor conocido a partir del historial de ventas completo.
             mapa_cliente_vendedor = df_ventas_historicas.drop_duplicates(subset=['cliente_id'], keep='last')[['cliente_id', 'nomvendedor']]
