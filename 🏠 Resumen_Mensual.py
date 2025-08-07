@@ -383,7 +383,7 @@ def render_dashboard():
 
     df_ventas_historicas = st.session_state.df_ventas
     df_cobros_historicos = st.session_state.df_cobros
-    df_cl4 = st.session_state.df_cl4 # Cargar datos de CL4
+    df_cl4_base = st.session_state.df_cl4 # Cargar datos de CL4
     
     if 'anio' not in df_ventas_historicas.columns or df_ventas_historicas.empty:
         st.error("No se pudieron cargar los datos de ventas. Revisa la conexión o el formato del archivo.")
@@ -404,10 +404,10 @@ def render_dashboard():
 
     df_ventas_periodo = df_ventas_historicas[(df_ventas_historicas['anio'] == anio_sel) & (df_ventas_historicas['mes'] == mes_sel_num)]
     
-    if df_ventas_periodo.empty:
-        st.warning("No se encontraron datos de ventas para el periodo seleccionado.")
+    if df_ventas_periodo.empty and (df_cl4_base is None or df_cl4_base.empty):
+        st.warning("No se encontraron datos de ventas ni de oportunidades CL4 para el periodo seleccionado.")
     else:
-        df_cobros_periodo = df_cobros_historicos[(df_cobros_historicos['anio'] == anio_sel) & (df_cobros_historicos['mes'] == mes_sel_num)]
+        df_cobros_periodo = df_cobros_historicos[(df_cobros_historicos['anio'] == anio_sel) & (df_cobros_historicos['mes'] == mes_sel_num)] if not df_cobros_historicos.empty else pd.DataFrame()
         df_resumen_final, df_albaranes_pendientes = procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel_num)
         
         usuario_actual_norm = normalizar_texto(st.session_state.usuario)
@@ -418,8 +418,8 @@ def render_dashboard():
         else:
             df_vista = df_resumen_final[df_resumen_final['nomvendedor'] == usuario_actual_norm]
         
-        if df_vista.empty:
-            st.warning("No hay datos disponibles para la selección de usuario/grupo actual.")
+        if df_vista.empty and (df_cl4_base is None or df_cl4_base.empty):
+             st.warning("No hay datos disponibles para la selección de usuario/grupo actual.")
         else:
             def asignar_estatus(row):
                 if row['presupuesto'] > 0:
@@ -427,7 +427,8 @@ def render_dashboard():
                     if avance >= 95: return "🟢 En Objetivo"
                     if avance >= 70: return "🟡 Cerca del Objetivo"
                 return "🔴 Necesita Atención"
-            df_vista['Estatus'] = df_vista.apply(asignar_estatus, axis=1)
+            if not df_vista.empty:
+                df_vista['Estatus'] = df_vista.apply(asignar_estatus, axis=1)
 
             st.title("🏠 Resumen de Rendimiento")
             st.header(f"{DATA_CONFIG['mapeo_meses'].get(mes_sel_num, '')} {anio_sel}")
@@ -444,11 +445,30 @@ def render_dashboard():
             vista_para = st.session_state.usuario if len(df_vista['nomvendedor'].unique()) == 1 else 'Múltiples Seleccionados'
             st.markdown(f"**Vista para:** `{vista_para}`")
             
-            # --- CÁLCULOS PARA NUEVOS KPIS DE CL4 ---
-            mapa_cliente_vendedor = df_ventas_historicas.drop_duplicates(subset=['cliente_id'], keep='last')[['cliente_id', 'nomvendedor']]
-            df_cl4_con_vendedor = pd.merge(df_cl4, mapa_cliente_vendedor, on='cliente_id', how='left')
+            # ######################################################################
+            # INICIO DE LA CORRECCIÓN: Lógica de cruce y filtrado de oportunidades (CL4)
+            # ######################################################################
 
-            vendedores_vista_actual = df_vista['nomvendedor'].unique()
+            # --- LÓGICA DINÁMICA PARA KPI DE OPORTUNIDADES (CL4) ---
+            # 1. Usar el reporte CL4 como la base de clientes a analizar.
+            df_cl4_actualizado = df_cl4_base.copy()
+
+            # 2. Obtener el historial de ventas del trimestre actual para actualizar el estado de CL4.
+            #   (Esta lógica asume que el reporte CL4 es el punto de partida y se actualiza con ventas)
+            #   Para este ejemplo, se usará el reporte tal cual, pero aquí iría la lógica de actualización trimestral.
+            
+            # 3. Crear un mapa de cliente -> último vendedor conocido a partir del historial de ventas completo.
+            mapa_cliente_vendedor = df_ventas_historicas.drop_duplicates(subset=['cliente_id'], keep='last')[['cliente_id', 'nomvendedor']]
+            
+            # 4. Enriquecer el reporte CL4 con la información del vendedor. `how='left'` asegura que todos los clientes de CL4 se mantengan.
+            df_cl4_con_vendedor = pd.merge(df_cl4_actualizado, mapa_cliente_vendedor, on='cliente_id', how='left')
+            
+            # 5. Normalizar nombres de vendedor y rellenar los vacíos (clientes sin historial de ventas) con 'SIN ASIGNAR'.
+            df_cl4_con_vendedor['nomvendedor'] = df_cl4_con_vendedor['nomvendedor'].apply(normalizar_texto)
+            df_cl4_con_vendedor['nomvendedor'].fillna('SIN ASIGNAR', inplace=True)
+
+            # 6. Obtener la lista de vendedores/grupos a mostrar en la vista actual.
+            vendedores_vista_actual = df_vista['nomvendedor'].unique() if not df_vista.empty else []
             nombres_a_filtrar = []
             for vendedor in vendedores_vista_actual:
                 vendedor_norm = normalizar_texto(vendedor)
@@ -456,19 +476,32 @@ def render_dashboard():
                 lista_vendedores = DATA_CONFIG['grupos_vendedores'].get(nombre_grupo_orig, [vendedor_norm])
                 nombres_a_filtrar.extend([normalizar_texto(v) for v in lista_vendedores])
             
-            df_cl4_filtrado = df_cl4_con_vendedor[df_cl4_con_vendedor['nomvendedor'].isin(nombres_a_filtrar)]
+            # 7. LÓGICA DE FILTRADO CORREGIDA:
+            # Si el usuario es 'GERENTE', se muestran todos los clientes del reporte CL4. 
+            # De lo contrario, solo se muestran los clientes asignados al vendedor/grupo.
+            if usuario_actual_norm == "GERENTE":
+                df_cl4_filtrado = df_cl4_con_vendedor.copy()
+            else:
+                df_cl4_filtrado = df_cl4_con_vendedor[df_cl4_con_vendedor['nomvendedor'].isin(nombres_a_filtrar)]
             
-            clientes_en_meta = df_cl4_filtrado[df_cl4_filtrado['CL4'] >= 4].shape[0]
+            # 8. Calcular métricas clave usando el DataFrame filtrado correctamente.
+            clientes_en_meta = df_cl4_filtrado[df_cl4_filtrado['CL4'] >= 4].shape[0] if not df_cl4_filtrado.empty else 0
             meta_clientes_cl4 = APP_CONFIG['kpi_goals']['meta_clientes_cl4']
             avance_clientes_cl4 = (clientes_en_meta / meta_clientes_cl4 * 100) if meta_clientes_cl4 > 0 else 0
 
-            # --- FIN CÁLCULOS CL4 ---
+            # ######################################################################
+            # FIN DE LA CORRECCIÓN
+            # ######################################################################
 
-            ventas_total = df_vista['ventas_totales'].sum(); meta_ventas = df_vista['presupuesto'].sum()
-            cobros_total = df_vista['cobros_totales'].sum(); meta_cobros = df_vista['presupuestocartera'].sum()
-            comp_total = df_vista['ventas_complementarios'].sum(); meta_comp = df_vista['presupuesto_complementarios'].sum()
-            sub_meta_total = df_vista['ventas_sub_meta'].sum(); meta_sub_meta = df_vista['presupuesto_sub_meta'].sum()
-            total_albaranes = df_vista['albaranes_pendientes'].sum()
+            ventas_total = df_vista['ventas_totales'].sum() if not df_vista.empty else 0
+            meta_ventas = df_vista['presupuesto'].sum() if not df_vista.empty else 0
+            cobros_total = df_vista['cobros_totales'].sum() if not df_vista.empty else 0
+            meta_cobros = df_vista['presupuestocartera'].sum() if not df_vista.empty else 0
+            comp_total = df_vista['ventas_complementarios'].sum() if not df_vista.empty else 0
+            meta_comp = df_vista['presupuesto_complementarios'].sum() if not df_vista.empty else 0
+            sub_meta_total = df_vista['ventas_sub_meta'].sum() if not df_vista.empty else 0
+            meta_sub_meta = df_vista['presupuesto_sub_meta'].sum() if not df_vista.empty else 0
+            total_albaranes = df_vista['albaranes_pendientes'].sum() if not df_vista.empty else 0
             
             avance_ventas = (ventas_total / meta_ventas * 100) if meta_ventas > 0 else 0
             avance_cobros = (cobros_total / meta_cobros * 100) if meta_cobros > 0 else 0
@@ -510,10 +543,10 @@ def render_dashboard():
             with st.expander("🎯 Análisis de Oportunidades (Clientes con CL4 < 4)", expanded=True):
                 st.info("Utiliza esta tabla para identificar clientes con potencial de crecimiento. Muestra a qué clientes de tu cartera les puedes ofrecer los productos clave para que alcancen la meta de CL4 ≥ 4.")
                 
-                df_oportunidades = df_cl4_filtrado[df_cl4_filtrado['CL4'].isin([1, 2, 3])].copy()
+                df_oportunidades = df_cl4_filtrado[df_cl4_filtrado['CL4'] < 4].copy() if not df_cl4_filtrado.empty else pd.DataFrame()
 
                 if df_oportunidades.empty:
-                    st.success("¡Felicidades! No tienes clientes con oportunidades pendientes en la selección actual. ¡Todos están en la meta!")
+                    st.success("¡Felicidades! No tienes clientes con oportunidades pendientes en la selección actual. ¡Todos están en la meta o no hay datos de oportunidades!")
                 else:
                     def encontrar_faltantes(row):
                         faltantes = [prod for prod in APP_CONFIG['productos_oportunidad_cl4'] if prod in row and row[prod] == 0]
@@ -535,43 +568,44 @@ def render_dashboard():
                         hide_index=True
                     )
 
-
             st.markdown("---")
             st.subheader("Desglose por Vendedor / Grupo")
             
-            # --- Añadir columna de Clientes en Meta CL4 al desglose ---
-            def contar_clientes_meta_por_vendedor(nomvendedor):
-                vendedor_norm = normalizar_texto(nomvendedor)
-                nombre_grupo_orig = next((k for k in DATA_CONFIG['grupos_vendedores'] if normalizar_texto(k) == vendedor_norm), vendedor_norm)
-                vendedores_del_grupo = [normalizar_texto(v) for v in DATA_CONFIG['grupos_vendedores'].get(nombre_grupo_orig, [vendedor_norm])]
-                
-                df_cl4_vendedor = df_cl4_con_vendedor[df_cl4_con_vendedor['nomvendedor'].isin(vendedores_del_grupo)]
-                return df_cl4_vendedor[df_cl4_vendedor['CL4'] >= 4].shape[0]
+            if not df_vista.empty:
+                # --- Añadir columna de Clientes en Meta CL4 al desglose ---
+                def contar_clientes_meta_por_vendedor(nomvendedor):
+                    vendedor_norm = normalizar_texto(nomvendedor)
+                    nombre_grupo_orig = next((k for k in DATA_CONFIG['grupos_vendedores'] if normalizar_texto(k) == vendedor_norm), vendedor_norm)
+                    vendedores_del_grupo = [normalizar_texto(v) for v in DATA_CONFIG['grupos_vendedores'].get(nombre_grupo_orig, [vendedor_norm])]
+                    
+                    df_cl4_vendedor = df_cl4_con_vendedor[df_cl4_con_vendedor['nomvendedor'].isin(vendedores_del_grupo)]
+                    return df_cl4_vendedor[df_cl4_vendedor['CL4'] >= 4].shape[0]
 
-            df_vista['clientes_meta_cl4'] = df_vista['nomvendedor'].apply(contar_clientes_meta_por_vendedor)
-            # --- Fin de la adición ---
+                df_vista['clientes_meta_cl4'] = df_vista['nomvendedor'].apply(contar_clientes_meta_por_vendedor)
+                # --- Fin de la adición ---
 
-            cols_desglose = ['Estatus', 'nomvendedor', 'ventas_totales', 'presupuesto', 'cobros_totales', 'presupuestocartera', 'albaranes_pendientes', 'impactos', 'clientes_meta_cl4']
-            st.dataframe(df_vista[cols_desglose], column_config={
-                "Estatus": st.column_config.TextColumn("🚦", width="small"), "nomvendedor": "Vendedor/Grupo",
-                "ventas_totales": st.column_config.NumberColumn("Ventas Netas", format="$ %d"), 
-                "presupuesto": st.column_config.NumberColumn("Meta Ventas", format="$ %d"),
-                "cobros_totales": st.column_config.NumberColumn("Recaudo", format="$ %d"),
-                "presupuestocartera": st.column_config.NumberColumn("Meta Recaudo", format="$ %d"),
-                "albaranes_pendientes": st.column_config.NumberColumn("Valor Albaranes", format="$ %d"),
-                "impactos": st.column_config.NumberColumn("Clientes Únicos", format="%d"),
-                "clientes_meta_cl4": st.column_config.NumberColumn("Clientes Meta (CL4≥4)", format="%d")
-            }, use_container_width=True, hide_index=True)
+                cols_desglose = ['Estatus', 'nomvendedor', 'ventas_totales', 'presupuesto', 'cobros_totales', 'presupuestocartera', 'albaranes_pendientes', 'impactos', 'clientes_meta_cl4']
+                st.dataframe(df_vista[cols_desglose], column_config={
+                    "Estatus": st.column_config.TextColumn("🚦", width="small"), "nomvendedor": "Vendedor/Grupo",
+                    "ventas_totales": st.column_config.NumberColumn("Ventas Netas", format="$ %d"), 
+                    "presupuesto": st.column_config.NumberColumn("Meta Ventas", format="$ %d"),
+                    "cobros_totales": st.column_config.NumberColumn("Recaudo", format="$ %d"),
+                    "presupuestocartera": st.column_config.NumberColumn("Meta Recaudo", format="$ %d"),
+                    "albaranes_pendientes": st.column_config.NumberColumn("Valor Albaranes", format="$ %d"),
+                    "impactos": st.column_config.NumberColumn("Clientes Únicos", format="%d"),
+                    "clientes_meta_cl4": st.column_config.NumberColumn("Clientes Meta (CL4≥4)", format="%d")
+                }, use_container_width=True, hide_index=True)
 
-            render_analisis_detallado(df_vista, df_ventas_periodo)
+            if not df_vista.empty:
+                render_analisis_detallado(df_vista, df_ventas_periodo)
             
             st.markdown("<hr style='border:2px solid #FF4B4B'>", unsafe_allow_html=True)
             st.header("📦 Gestión de Albaranes Pendientes")
 
             st.subheader("Vista Mensual Filtrada")
             
-            df_albaranes_vista = df_albaranes_pendientes[df_albaranes_pendientes['nomvendedor'].isin(nombres_a_filtrar)]
-            df_albaranes_a_mostrar = df_albaranes_vista[df_albaranes_vista['valor_venta'] > 0]
+            df_albaranes_vista = df_albaranes_pendientes[df_albaranes_pendientes['nomvendedor'].isin(nombres_a_filtrar)] if not df_albaranes_pendientes.empty else pd.DataFrame()
+            df_albaranes_a_mostrar = df_albaranes_vista[df_albaranes_vista['valor_venta'] > 0] if not df_albaranes_vista.empty else pd.DataFrame()
 
             if df_albaranes_a_mostrar.empty:
                 st.info("No hay albaranes pendientes de facturación para la selección de filtros actual (mes/vendedor).")
