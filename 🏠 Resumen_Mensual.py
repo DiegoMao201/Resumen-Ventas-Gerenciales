@@ -4,6 +4,9 @@
 # DESCRIPCIÓN: Se ajusta la lógica de agrupación para la descarga de albaranes.
 #              Un albarán único se define por la combinación de Fecha, Cliente,
 #              Serie y Vendedor, solucionando el problema de series repetidas.
+#
+# MODIFICACIÓN (07 de Agosto, 2025): Se reemplaza el cálculo de Marquilla por
+#              el nuevo análisis de oportunidades basado en el reporte CL4.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -13,6 +16,7 @@ import dropbox
 import io
 import unicodedata
 import time
+import re # Importado para extracción de código de cliente
 
 # ==============================================================================
 # 1. CONFIGURACIÓN CENTRALIZADA (Sin cambios)
@@ -20,13 +24,21 @@ import time
 APP_CONFIG = {
     "page_title": "Resumen Mensual | Tablero de Ventas",
     "url_logo": "https://raw.githubusercontent.com/DiegoMao201/Resumen-Ventas-Gerenciales/main/LOGO%20FERREINOX%20SAS%20BIC%202024.png",
-    "dropbox_paths": {"ventas": "/data/ventas_detalle.csv", "cobros": "/data/cobros_detalle.csv"},
+    "dropbox_paths": {
+        "ventas": "/data/ventas_detalle.csv",
+        "cobros": "/data/cobros_detalle.csv",
+        "cl4_report": "/data/reporte_cl4.xlsx" # NUEVA RUTA: Reporte de oportunidades
+    },
     "column_names": {
         "ventas": ['anio', 'mes', 'fecha_venta', 'Serie', 'TipoDocumento', 'codigo_vendedor', 'nomvendedor', 'cliente_id', 'nombre_cliente', 'codigo_articulo', 'nombre_articulo', 'categoria_producto', 'linea_producto', 'marca_producto', 'valor_venta', 'unidades_vendidas', 'costo_unitario', 'super_categoria'],
         "cobros": ['anio', 'mes', 'fecha_cobro', 'codigo_vendedor', 'valor_cobro']
     },
-    "kpi_goals": {"meta_marquilla": 2.4},
-    "marquillas_clave": ['VINILTEX', 'KORAZA', 'ESTUCOMASTIC', 'VINILICO'],
+    "kpi_goals": {
+        "meta_clientes_cl4": 120 # NUEVA META: Reemplaza la meta de marquilla
+    },
+    # 'marquillas_clave' ya no se usa para el KPI principal, pero se puede mantener para análisis secundarios
+    "marquillas_clave": ['VINILTEX', 'KORAZA', 'ESTUCOMASTIC', 'VINILICO', 'PINTULUX'],
+    "productos_oportunidad_cl4": ['ESTUCOMASTIC', 'PINTULUX-CERA', 'KORAZA-ACRILICO MATE', 'VINILTEX ADVANCED', 'VINILICO'],
     "complementarios": {"exclude_super_categoria": "Pintuco", "presupuesto_pct": 0.10},
     "sub_meta_complementarios": {"nombre_marca_objetivo": "non-AN Third Party", "presupuesto_pct": 0.10},
     "categorias_clave_venta": ['ABRACOL', 'YALE', 'SAINT GOBAIN', 'GOYA', 'ALLEGION', 'SEGUREX'],
@@ -132,6 +144,7 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
             df = df.astype({'anio': int, 'mes': int})
             
             if 'fecha_venta' in df.columns: df['fecha_venta'] = pd.to_datetime(df['fecha_venta'], errors='coerce')
+            if 'cliente_id' in df.columns: df['cliente_id'] = df['cliente_id'].astype(str)
             if 'marca_producto' in df.columns: df['nombre_marca'] = df['marca_producto'].map(DATA_CONFIG["mapeo_marcas"]).fillna('No Especificada')
             cols_a_normalizar = ['super_categoria', 'categoria_producto', 'nombre_marca', 'nomvendedor', 'TipoDocumento']
             for col in cols_a_normalizar:
@@ -141,17 +154,28 @@ def cargar_y_limpiar_datos(ruta_archivo, nombres_columnas):
         st.error(f"Error crítico al cargar {ruta_archivo}: {e}")
         return pd.DataFrame(columns=nombres_columnas)
 
-def calcular_marquilla_optimizado(df_periodo):
-    if df_periodo.empty or 'nombre_articulo' not in df_periodo.columns:
-        return pd.DataFrame(columns=['codigo_vendedor', 'nomvendedor', 'promedio_marquilla'])
-    df_temp = df_periodo[['codigo_vendedor', 'nomvendedor', 'cliente_id', 'nombre_articulo']].copy()
-    df_temp['nombre_articulo'] = df_temp['nombre_articulo'].astype(str)
-    for palabra in APP_CONFIG['marquillas_clave']:
-        df_temp[palabra] = df_temp['nombre_articulo'].str.contains(palabra, case=False, na=False)
-    df_cliente_marcas = df_temp.groupby(['codigo_vendedor', 'nomvendedor', 'cliente_id'])[APP_CONFIG['marquillas_clave']].any()
-    df_cliente_marcas['puntaje_marquilla'] = df_cliente_marcas[APP_CONFIG['marquillas_clave']].sum(axis=1)
-    df_final_marquilla = df_cliente_marcas.groupby(['codigo_vendedor', 'nomvendedor'])['puntaje_marquilla'].mean().reset_index()
-    return df_final_marquilla.rename(columns={'puntaje_marquilla': 'promedio_marquilla'})
+# --- NUEVA FUNCIÓN PARA CARGAR REPORTE CL4 ---
+@st.cache_data(ttl=1800)
+def cargar_reporte_cl4(ruta_archivo):
+    try:
+        with dropbox.Dropbox(app_key=st.secrets.dropbox.app_key, app_secret=st.secrets.dropbox.app_secret, oauth2_refresh_token=st.secrets.dropbox.refresh_token) as dbx:
+            _, res = dbx.files_download(path=ruta_archivo)
+            df = pd.read_excel(io.BytesIO(res.content))
+
+            # Extraer código de cliente de la columna NOMBRE
+            if 'NOMBRE' in df.columns:
+                df['cliente_id'] = df['NOMBRE'].str.extract(r'\((\d+)\)').fillna('0')
+                df['cliente_id'] = df['cliente_id'].astype(str)
+            else:
+                st.error("El archivo de oportunidades no contiene la columna 'NOMBRE'. No se puede procesar.")
+                return pd.DataFrame()
+            
+            return df
+
+    except Exception as e:
+        st.error(f"Error crítico al cargar el reporte de oportunidades desde {ruta_archivo}: {e}")
+        return pd.DataFrame()
+
 
 def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel):
     filtro_ventas_netas = 'FACTURA|NOTA.*CREDITO'
@@ -167,7 +191,9 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     marca_sub_meta = APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo']
     df_ventas_sub_meta = df_ventas_reales[df_ventas_reales['nombre_marca'] == marca_sub_meta]
     resumen_sub_meta = df_ventas_sub_meta.groupby(['codigo_vendedor','nomvendedor']).agg(ventas_sub_meta=('valor_venta', 'sum')).reset_index()
-    resumen_marquilla = calcular_marquilla_optimizado(df_ventas_periodo)
+    
+    # La función de marquilla ya no se usa para el KPI, se elimina la llamada principal.
+    # resumen_marquilla = calcular_marquilla_optimizado(df_ventas_periodo)
 
     df_albaranes_historicos_bruto = df_ventas_historicas[df_ventas_historicas['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
     grouping_keys = ['Serie', 'cliente_id', 'codigo_articulo', 'codigo_vendedor']
@@ -191,7 +217,8 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
         resumen_albaranes = pd.DataFrame(columns=['codigo_vendedor', 'nomvendedor', 'albaranes_pendientes'])
 
     df_resumen = pd.merge(resumen_ventas, resumen_cobros, on='codigo_vendedor', how='left')
-    df_resumen = pd.merge(df_resumen, resumen_marquilla, on=['codigo_vendedor', 'nomvendedor'], how='left')
+    # Ya no se une con el resumen de marquilla
+    # df_resumen = pd.merge(df_resumen, resumen_marquilla, on=['codigo_vendedor', 'nomvendedor'], how='left')
     df_resumen = pd.merge(df_resumen, resumen_complementarios, on=['codigo_vendedor', 'nomvendedor'], how='left')
     df_resumen = pd.merge(df_resumen, resumen_sub_meta, on=['codigo_vendedor', 'nomvendedor'], how='left')
     df_resumen = pd.merge(df_resumen, resumen_albaranes, on=['codigo_vendedor', 'nomvendedor'], how='left')
@@ -218,11 +245,14 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
             
             cols_a_sumar = ['ventas_totales', 'cobros_totales', 'impactos', 'presupuestocartera', 'ventas_complementarios', 'ventas_sub_meta', 'albaranes_pendientes']
             suma_grupo = df_grupo_actual[cols_a_sumar].sum().to_dict()
-            total_impactos = df_grupo_actual['impactos'].sum()
-            promedio_marquilla_grupo = np.average(df_grupo_actual['promedio_marquilla'], weights=df_grupo_actual['impactos']) if total_impactos > 0 else 0.0
+            
+            # El promedio de marquilla ya no es necesario
+            # total_impactos = df_grupo_actual['impactos'].sum()
+            # promedio_marquilla_grupo = np.average(df_grupo_actual['promedio_marquilla'], weights=df_grupo_actual['impactos']) if total_impactos > 0 else 0.0
             
             suma_grupo['presupuesto'] = df_grupo_actual['presupuesto'].sum()
-            registro = {'nomvendedor': normalizar_texto(grupo), 'codigo_vendedor': normalizar_texto(grupo), **suma_grupo, 'promedio_marquilla': promedio_marquilla_grupo}
+            # registro = {'nomvendedor': normalizar_texto(grupo), 'codigo_vendedor': normalizar_texto(grupo), **suma_grupo, 'promedio_marquilla': promedio_marquilla_grupo}
+            registro = {'nomvendedor': normalizar_texto(grupo), 'codigo_vendedor': normalizar_texto(grupo), **suma_grupo}
             
             if presupuesto_dinamico > 0:
                 registro['presupuesto'] = presupuesto_dinamico
@@ -242,21 +272,27 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
 # ==============================================================================
 # 3. LÓGICA DE LA INTERFAZ DE USUARIO Y EJECUCIÓN
 # ==============================================================================
-def generar_comentario_asesor(avance_v, avance_c, marquilla_p, avance_comp, avance_sub_meta):
+def generar_comentario_asesor(avance_v, avance_c, clientes_meta, meta_clientes, avance_comp, avance_sub_meta):
     comentarios = []
     if avance_v >= 100: comentarios.append("📈 **Ventas:** ¡Felicitaciones! Has superado la meta de ventas netas.")
     elif avance_v >= 80: comentarios.append("📈 **Ventas:** ¡Estás muy cerca de la meta neta! Un último esfuerzo.")
     else: comentarios.append("📈 **Ventas:** Planifica tus visitas y aprovecha cada oportunidad para mejorar tu venta neta.")
     if avance_c >= 100: comentarios.append("💰 **Cartera:** Objetivo de recaudo cumplido. ¡Gestión impecable!")
     else: comentarios.append("💰 **Cartera:** Recuerda hacer seguimiento a la cartera pendiente.")
+    
+    # NUEVO COMENTARIO PARA META CL4
+    if clientes_meta >= meta_clientes:
+        comentarios.append(f"🎯 **Meta Clientes (CL4):** ¡Objetivo Cumplido! Tienes {clientes_meta} clientes en la meta de {meta_clientes}.")
+    else:
+        comentarios.append(f"🎯 **Meta Clientes (CL4):** Tu avance es de {clientes_meta} de {meta_clientes} clientes. ¡Revisa el tablero de oportunidades para cerrar la brecha!")
+
     if avance_comp >= 100: comentarios.append("⚙️ **Complementarios:** ¡Excelente! Cumpliste la meta de venta neta de complementarios.")
     else: comentarios.append(f"⚙️ **Complementarios:** Tu avance neto es del {avance_comp:.1f}%. ¡Impulsa la venta cruzada!")
+    
     sub_meta_label = APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo']
-    if avance_sub_meta >= 100: comentarios.append(f"🎯 **Meta Específica:** ¡Logrado! Superaste la meta de venta neta de '{sub_meta_label}'.")
-    else: comentarios.append(f"🎯 **Meta Específica:** Tu avance neto en '{sub_meta_label}' es del {avance_sub_meta:.1f}%. ¡Hay una gran oportunidad ahí!")
-    if marquilla_p >= APP_CONFIG['kpi_goals']['meta_marquilla']: comentarios.append(f"🎨 **Marquilla:** Tu promedio de {marquilla_p:.2f} es excelente.")
-    elif marquilla_p > 0: comentarios.append(f"🎨 **Marquilla:** Tu promedio es {marquilla_p:.2f}. Hay oportunidad de crecimiento.")
-    else: comentarios.append("🎨 **Marquilla:** Aún no registras ventas en las marcas clave.")
+    if avance_sub_meta >= 100: comentarios.append(f"⭐ **Meta Específica:** ¡Logrado! Superaste la meta de venta neta de '{sub_meta_label}'.")
+    else: comentarios.append(f"⭐ **Meta Específica:** Tu avance neto en '{sub_meta_label}' es del {avance_sub_meta:.1f}%. ¡Hay una gran oportunidad ahí!")
+    
     return comentarios
 
 def render_analisis_detallado(df_vista, df_ventas_periodo):
@@ -347,6 +383,7 @@ def render_dashboard():
 
     df_ventas_historicas = st.session_state.df_ventas
     df_cobros_historicos = st.session_state.df_cobros
+    df_cl4 = st.session_state.df_cl4 # Cargar datos de CL4
     
     if 'anio' not in df_ventas_historicas.columns or df_ventas_historicas.empty:
         st.error("No se pudieron cargar los datos de ventas. Revisa la conexión o el formato del archivo.")
@@ -399,6 +436,7 @@ def render_dashboard():
                 st.cache_data.clear()
                 if 'df_ventas' in st.session_state: del st.session_state.df_ventas
                 if 'df_cobros' in st.session_state: del st.session_state.df_cobros
+                if 'df_cl4' in st.session_state: del st.session_state.df_cl4
                 st.toast("Limpiando caché y recargando datos... ¡Un momento!", icon="⏳")
                 time.sleep(3)
                 st.rerun()
@@ -406,6 +444,26 @@ def render_dashboard():
             vista_para = st.session_state.usuario if len(df_vista['nomvendedor'].unique()) == 1 else 'Múltiples Seleccionados'
             st.markdown(f"**Vista para:** `{vista_para}`")
             
+            # --- CÁLCULOS PARA NUEVOS KPIS DE CL4 ---
+            mapa_cliente_vendedor = df_ventas_historicas.drop_duplicates(subset=['cliente_id'], keep='last')[['cliente_id', 'nomvendedor']]
+            df_cl4_con_vendedor = pd.merge(df_cl4, mapa_cliente_vendedor, on='cliente_id', how='left')
+
+            vendedores_vista_actual = df_vista['nomvendedor'].unique()
+            nombres_a_filtrar = []
+            for vendedor in vendedores_vista_actual:
+                vendedor_norm = normalizar_texto(vendedor)
+                nombre_grupo_orig = next((k for k in DATA_CONFIG['grupos_vendedores'] if normalizar_texto(k) == vendedor_norm), vendedor_norm)
+                lista_vendedores = DATA_CONFIG['grupos_vendedores'].get(nombre_grupo_orig, [vendedor_norm])
+                nombres_a_filtrar.extend([normalizar_texto(v) for v in lista_vendedores])
+            
+            df_cl4_filtrado = df_cl4_con_vendedor[df_cl4_con_vendedor['nomvendedor'].isin(nombres_a_filtrar)]
+            
+            clientes_en_meta = df_cl4_filtrado[df_cl4_filtrado['CL4'] >= 4].shape[0]
+            meta_clientes_cl4 = APP_CONFIG['kpi_goals']['meta_clientes_cl4']
+            avance_clientes_cl4 = (clientes_en_meta / meta_clientes_cl4 * 100) if meta_clientes_cl4 > 0 else 0
+
+            # --- FIN CÁLCULOS CL4 ---
+
             ventas_total = df_vista['ventas_totales'].sum(); meta_ventas = df_vista['presupuesto'].sum()
             cobros_total = df_vista['cobros_totales'].sum(); meta_cobros = df_vista['presupuestocartera'].sum()
             comp_total = df_vista['ventas_complementarios'].sum(); meta_comp = df_vista['presupuesto_complementarios'].sum()
@@ -417,13 +475,9 @@ def render_dashboard():
             avance_comp = (comp_total / meta_comp * 100) if meta_comp > 0 else 0
             avance_sub_meta = (sub_meta_total / meta_sub_meta * 100) if meta_sub_meta > 0 else 0
             
-            total_impactos = df_vista['impactos'].sum()
-            marquilla_prom = np.average(df_vista['promedio_marquilla'], weights=df_vista['impactos']) if total_impactos > 0 else 0.0
-            meta_marquilla = APP_CONFIG['kpi_goals']['meta_marquilla']
-            
             with st.container(border=True):
                 st.subheader(f"👨‍💼 Asesor Virtual para: {st.session_state.usuario}")
-                comentarios = generar_comentario_asesor(avance_ventas, avance_cobros, marquilla_prom, avance_comp, avance_sub_meta)
+                comentarios = generar_comentario_asesor(avance_ventas, avance_cobros, clientes_en_meta, meta_clientes_cl4, avance_comp, avance_sub_meta)
                 for comentario in comentarios: st.markdown(f"- {comentario}")
 
             st.subheader("Métricas Clave del Periodo")
@@ -448,36 +502,56 @@ def render_dashboard():
                 st.metric(label=f"Meta Específica ({sub_meta_label})", value=f"${sub_meta_total:,.0f}", delta=f"{sub_meta_total - meta_sub_meta:,.0f}", help=f"Meta: ${meta_sub_meta:,.0f}")
                 st.progress(min(avance_sub_meta / 100, 1.0), text=f"Avance: {avance_sub_meta:.1f}%")
             with col6:
-                st.metric(label="Promedio Marquilla", value=f"{marquilla_prom:.2f}", delta=f"{marquilla_prom - meta_marquilla:.2f}", help=f"Meta: {meta_marquilla:.2f}")
-                st.progress(min((marquilla_prom / meta_marquilla), 1.0) if meta_marquilla > 0 else 0, text=f"Meta: {meta_marquilla:.2f}")
+                # --- MÉTRICA REEMPLAZADA ---
+                st.metric(label="Clientes en Meta (CL4 ≥ 4)", value=f"{clientes_en_meta}", delta=f"{clientes_en_meta - meta_clientes_cl4}", help=f"Meta: {meta_clientes_cl4} clientes")
+                st.progress(min((avance_clientes_cl4 / 100), 1.0), text=f"Avance: {avance_clientes_cl4:.1f}%")
             
-            with st.expander("🔬 Diagnóstico de Códigos de Vendedor", expanded=False):
-                st.info("Usa esta sección para verificar por qué un presupuesto podría no estar cargando. Compara los códigos del archivo CSV con los códigos configurados en el script.")
-                codigos_en_csv = set(df_ventas_periodo['codigo_vendedor'].unique())
-                codigos_en_config = set(DATA_CONFIG['presupuestos'].keys())
-                codigos_coincidentes = codigos_en_csv.intersection(codigos_en_config)
-                codigos_no_coincidentes = codigos_en_csv - codigos_en_config
-                col_diag1, col_diag2 = st.columns(2)
-                with col_diag1:
-                    st.markdown("#### Códigos en CSV del Periodo")
-                    st.dataframe(pd.DataFrame(list(codigos_en_csv), columns=["Código"]), use_container_width=True)
-                with col_diag2:
-                    st.markdown("#### Códigos en Configuración")
-                    st.dataframe(pd.DataFrame(list(codigos_en_config), columns=["Código"]), use_container_width=True)
-                st.markdown("---")
-                if codigos_coincidentes:
-                    st.success(f"✅ Se encontraron {len(codigos_coincidentes)} códigos coincidentes que recibirán presupuesto:")
-                    st.write(sorted(list(codigos_coincidentes)))
+            # --- NUEVO TABLERO DE OPORTUNIDADES (REEMPLAZA DIAGNÓSTICO) ---
+            with st.expander("🎯 Análisis de Oportunidades (Clientes con CL4 < 4)", expanded=True):
+                st.info("Utiliza esta tabla para identificar clientes con potencial de crecimiento. Muestra a qué clientes de tu cartera les puedes ofrecer los productos clave para que alcancen la meta de CL4 ≥ 4.")
+                
+                df_oportunidades = df_cl4_filtrado[df_cl4_filtrado['CL4'].isin([1, 2, 3])].copy()
+
+                if df_oportunidades.empty:
+                    st.success("¡Felicidades! No tienes clientes con oportunidades pendientes en la selección actual. ¡Todos están en la meta!")
                 else:
-                    st.error("❌ No se encontró ninguna coincidencia entre los códigos del CSV y la configuración.")
-                if codigos_no_coincidentes:
-                    st.warning(f"⚠️ {len(codigos_no_coincidentes)} códigos del CSV no tienen presupuesto asignado en la configuración:")
-                    st.write(sorted(list(codigos_no_coincidentes)))
+                    def encontrar_faltantes(row):
+                        faltantes = [prod for prod in APP_CONFIG['productos_oportunidad_cl4'] if prod in row and row[prod] == 0]
+                        return ", ".join(faltantes) if faltantes else "N/A"
+
+                    df_oportunidades['Productos a Ofrecer'] = df_oportunidades.apply(encontrar_faltantes, axis=1)
+                    
+                    df_oportunidades_display = df_oportunidades[[
+                        'NOMBRE', 'CL4', 'Productos a Ofrecer', 'nomvendedor'
+                    ]].rename(columns={
+                        'NOMBRE': 'Cliente',
+                        'CL4': 'Nivel Actual',
+                        'nomvendedor': 'Vendedor Asignado'
+                    })
+
+                    st.dataframe(
+                        df_oportunidades_display,
+                        use_container_width=True,
+                        hide_index=True
+                    )
+
 
             st.markdown("---")
             st.subheader("Desglose por Vendedor / Grupo")
             
-            cols_desglose = ['Estatus', 'nomvendedor', 'ventas_totales', 'presupuesto', 'cobros_totales', 'presupuestocartera', 'albaranes_pendientes', 'impactos', 'promedio_marquilla']
+            # --- Añadir columna de Clientes en Meta CL4 al desglose ---
+            def contar_clientes_meta_por_vendedor(nomvendedor):
+                vendedor_norm = normalizar_texto(nomvendedor)
+                nombre_grupo_orig = next((k for k in DATA_CONFIG['grupos_vendedores'] if normalizar_texto(k) == vendedor_norm), vendedor_norm)
+                vendedores_del_grupo = [normalizar_texto(v) for v in DATA_CONFIG['grupos_vendedores'].get(nombre_grupo_orig, [vendedor_norm])]
+                
+                df_cl4_vendedor = df_cl4_con_vendedor[df_cl4_con_vendedor['nomvendedor'].isin(vendedores_del_grupo)]
+                return df_cl4_vendedor[df_cl4_vendedor['CL4'] >= 4].shape[0]
+
+            df_vista['clientes_meta_cl4'] = df_vista['nomvendedor'].apply(contar_clientes_meta_por_vendedor)
+            # --- Fin de la adición ---
+
+            cols_desglose = ['Estatus', 'nomvendedor', 'ventas_totales', 'presupuesto', 'cobros_totales', 'presupuestocartera', 'albaranes_pendientes', 'impactos', 'clientes_meta_cl4']
             st.dataframe(df_vista[cols_desglose], column_config={
                 "Estatus": st.column_config.TextColumn("🚦", width="small"), "nomvendedor": "Vendedor/Grupo",
                 "ventas_totales": st.column_config.NumberColumn("Ventas Netas", format="$ %d"), 
@@ -486,7 +560,7 @@ def render_dashboard():
                 "presupuestocartera": st.column_config.NumberColumn("Meta Recaudo", format="$ %d"),
                 "albaranes_pendientes": st.column_config.NumberColumn("Valor Albaranes", format="$ %d"),
                 "impactos": st.column_config.NumberColumn("Clientes Únicos", format="%d"),
-                "promedio_marquilla": st.column_config.ProgressColumn("Prom. Marquilla", format="%.2f", min_value=0, max_value=len(APP_CONFIG['marquillas_clave']))
+                "clientes_meta_cl4": st.column_config.NumberColumn("Clientes Meta (CL4≥4)", format="%d")
             }, use_container_width=True, hide_index=True)
 
             render_analisis_detallado(df_vista, df_ventas_periodo)
@@ -495,14 +569,6 @@ def render_dashboard():
             st.header("📦 Gestión de Albaranes Pendientes")
 
             st.subheader("Vista Mensual Filtrada")
-            
-            vendedores_vista_actual = df_vista['nomvendedor'].unique()
-            nombres_a_filtrar = []
-            for vendedor in vendedores_vista_actual:
-                vendedor_norm = normalizar_texto(vendedor)
-                nombre_grupo_orig = next((k for k in DATA_CONFIG['grupos_vendedores'] if normalizar_texto(k) == vendedor_norm), vendedor_norm)
-                lista_vendedores = DATA_CONFIG['grupos_vendedores'].get(nombre_grupo_orig, [vendedor_norm])
-                nombres_a_filtrar.extend([normalizar_texto(v) for v in lista_vendedores])
             
             df_albaranes_vista = df_albaranes_pendientes[df_albaranes_pendientes['nomvendedor'].isin(nombres_a_filtrar)]
             df_albaranes_a_mostrar = df_albaranes_vista[df_albaranes_vista['valor_venta'] > 0]
@@ -573,6 +639,7 @@ def main():
         with st.spinner('Cargando datos maestros, por favor espere...'):
             st.session_state.df_ventas = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["ventas"], APP_CONFIG["column_names"]["ventas"])
             st.session_state.df_cobros = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["cobros"], APP_CONFIG["column_names"]["cobros"])
+            st.session_state.df_cl4 = cargar_reporte_cl4(APP_CONFIG["dropbox_paths"]["cl4_report"]) # CARGA NUEVO REPORTE
             st.session_state['APP_CONFIG'] = APP_CONFIG
             st.session_state['DATA_CONFIG'] = DATA_CONFIG
     
@@ -591,7 +658,7 @@ def main():
                 grupos_orig = list(DATA_CONFIG['grupos_vendedores'].keys())
                 vendedores_en_grupos_norm = [normalizar_texto(v) for lista in DATA_CONFIG['grupos_vendedores'].values() for v in lista]
                 vendedores_unicos_df = df_ventas_cache['nomvendedor'].dropna().unique()
-                mapa_norm_a_orig = {normalizar_texto(v): v for v in vendedores_unicos_df}
+                mapa_norm_a_orig = {normalizar_texto(v): v for v inendedores_unicos_df}
                 vendedores_solos_norm = [v_norm for v_norm in [normalizar_texto(v) for v in vendedores_unicos_df] if v_norm not in vendedores_en_grupos_norm]
                 vendedores_solos_orig = sorted([mapa_norm_a_orig.get(v_norm) for v_norm in vendedores_solos_norm if mapa_norm_a_orig.get(v_norm)])
                 return ["GERENTE"] + sorted(grupos_orig) + vendedores_solos_orig
