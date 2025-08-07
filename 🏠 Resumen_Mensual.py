@@ -38,7 +38,7 @@ APP_CONFIG = {
     },
     # 'marquillas_clave' ya no se usa para el KPI principal, pero se puede mantener para análisis secundarios
     "marquillas_clave": ['VINILTEX', 'KORAZA', 'ESTUCOMASTIC', 'VINILICO', 'PINTULUX'],
-    "productos_oportunidad_cl4": ['ESTUCOMASTIC', 'PINTULUX-CERA', 'KORAZA-ACRILICO MATE', 'VINILTEX ADVANCED', 'VINILICO'],
+    "productos_oportunidad_cl4": ['ESTUCOMASTIC', 'PINTULUX', 'KORAZA', 'VINILTEX', 'VINILICO'],
     "complementarios": {"exclude_super_categoria": "Pintuco", "presupuesto_pct": 0.10},
     "sub_meta_complementarios": {"nombre_marca_objetivo": "non-AN Third Party", "presupuesto_pct": 0.10},
     "categorias_clave_venta": ['ABRACOL', 'YALE', 'SAINT GOBAIN', 'GOYA', 'ALLEGION', 'SEGUREX'],
