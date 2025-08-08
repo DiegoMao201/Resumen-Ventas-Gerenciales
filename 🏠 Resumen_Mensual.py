@@ -23,30 +23,30 @@ import time
 import re # Importado para extracción de código de cliente
 
 # ==============================================================================
-# 1. CONFIGURACIÓN CENTRALIZADA (Sin cambios)
+# 1. CONFIGURACIÓN CENTRALIZADA (BLOQUE DE CÓDIGO LIMPIO)
 # ==============================================================================
 APP_CONFIG = {
-    "page_title": "Resumen Mensual | Tablero de Ventas",
-    "url_logo": "https://raw.githubusercontent.com/DiegoMao2021/Resumen-Ventas-Gerenciales/main/LOGO%20FERREINOX%20SAS%20BIC%202024.png",
-    "dropbox_paths": {
-        "ventas": "/data/ventas_detalle.csv",
-        "cobros": "/data/cobros_detalle.csv",
-        "cl4_report": "/data/reporte_cl4.xlsx" # NUEVA RUTA: Reporte de oportunidades
-    },
-    "column_names": {
-        "ventas": ['anio', 'mes', 'fecha_venta', 'Serie', 'TipoDocumento', 'codigo_vendedor', 'nomvendedor', 'cliente_id', 'nombre_cliente', 'codigo_articulo', 'nombre_articulo', 'categoria_producto', 'linea_producto', 'marca_producto', 'valor_venta', 'unidades_vendidas', 'costo_unitario', 'super_categoria'],
-        "cobros": ['anio', 'mes', 'fecha_cobro', 'codigo_vendedor', 'valor_cobro']
-    },
-    "kpi_goals": {
-        "meta_clientes_cl4": 120 # NUEVA META: Reemplaza la meta de marquilla
-    },
-    # 'marquillas_clave' ya no se usa para el KPI principal, pero se puede mantener para análisis secundarios
-    "marquillas_clave": ['VINILTEX', 'KORAZA', 'ESTUCOMASTIC', 'VINILICO', 'PINTULUX'],
-    "productos_oportunidad_cl4": ['ESTUCOMASTIC', 'PINTULUX', 'KORAZA', 'VINILTEX', 'VINILICO'],
-    "complementarios": {"exclude_super_categoria": "Pintuco", "presupuesto_pct": 0.10},
-    "sub_meta_complementarios": {"nombre_marca_objetivo": "non-AN Third Party", "presupuesto_pct": 0.10},
-    "categorias_clave_venta": ['ABRACOL', 'YALE', 'SAINT GOBAIN', 'GOYA', 'ALLEGION', 'SEGUREX'],
-    "presupuesto_mostradores": {"incremento_anual_pct": 0.10}
+    "page_title": "Resumen Mensual | Tablero de Ventas",
+    "url_logo": "https://raw.githubusercontent.com/DiegoMao2021/Resumen-Ventas-Gerenciales/main/LOGO%20FERREINOX%20SAS%20BIC%202024.png",
+    "dropbox_paths": {
+        "ventas": "/data/ventas_detalle.csv",
+        "cobros": "/data/cobros_detalle.csv",
+        "cl4_report": "/data/reporte_cl4.xlsx" # NUEVA RUTA: Reporte de oportunidades
+    },
+    "column_names": {
+        "ventas": ['anio', 'mes', 'fecha_venta', 'Serie', 'TipoDocumento', 'codigo_vendedor', 'nomvendedor', 'cliente_id', 'nombre_cliente', 'codigo_articulo', 'nombre_articulo', 'categoria_producto', 'linea_producto', 'marca_producto', 'valor_venta', 'unidades_vendidas', 'costo_unitario', 'super_categoria'],
+        "cobros": ['anio', 'mes', 'fecha_cobro', 'codigo_vendedor', 'valor_cobro']
+    },
+    "kpi_goals": {
+        "meta_clientes_cl4": 120 # NUEVA META: Reemplaza la meta de marquilla
+    },
+    # 'marquillas_clave' ya no se usa para el KPI principal, pero se puede mantener para análisis secundarios
+    "marquillas_clave": ['VINILTEX', 'KORAZA', 'ESTUCOMASTIC', 'VINILICO', 'PINTULUX'],
+    "productos_oportunidad_cl4": ['ESTUCOMASTIC', 'PINTULUX', 'KORAZA', 'VINILTEX', 'VINILICO'],
+    "complementarios": {"exclude_super_categoria": "Pintuco", "presupuesto_pct": 0.10},
+    "sub_meta_complementarios": {"nombre_marca_objetivo": "non-AN Third Party", "presupuesto_pct": 0.10},
+    "categorias_clave_venta": ['ABRACOL', 'YALE', 'SAINT GOBAIN', 'GOYA', 'ALLEGION', 'SEGUREX'],
+    "presupuesto_mostradores": {"incremento_anual_pct": 0.10}
 }
 DATA_CONFIG = {
     "presupuestos": {'154033':{'presupuesto':123873239, 'presupuestocartera':127071295}, '154044':{'presupuesto':80000000, 'presupuestocartera':60102413}, '154034':{'presupuesto':82753045, 'presupuestocartera':91489169}, '154014':{'presupuesto':268214737, 'presupuestocartera':353291947}, '154046':{'presupuesto':85469798, 'presupuestocartera':27843193}, '154012':{'presupuesto':246616193, 'presupuestocartera':351282011}, '154043':{'presupuesto':124885413, 'presupuestocartera':132985857}, '154035':{'presupuesto':80000000, 'presupuestocartera':30000000}, '154006':{'presupuesto':81250000, 'presupuestocartera':135714573}, '154049':{'presupuesto':56500000, 'presupuestocartera':61684594}, '154013':{'presupuesto':303422639, 'presupuestocartera':386907842}, '154011':{'presupuesto':447060250, 'presupuestocartera':466331701}, '154029':{'presupuesto':60000000, 'presupuestocartera':14630424}, '154040':{'presupuesto':0, 'presupuestocartera':0},'154053':{'presupuesto':0, 'presupuestocartera':0},'154048':{'presupuesto':0, 'presupuestocartera':0},'154042':{'presupuesto':3000000, 'presupuestocartera':19663757},'154031':{'presupuesto':0, 'presupuestocartera':0},'154039':{'presupuesto':0, 'presupuestocartera':0},'154051':{'presupuesto':0, 'presupuestocartera':0},'154008':{'presupuesto':0, 'presupuestocartera':0},'154052':{'presupuesto':3000000, 'presupuestocartera':21785687},'154050':{'presupuesto':0, 'presupuestocartera':0}},
