@@ -1,6 +1,6 @@
 # ==============================================================================
 # SCRIPT COMPLETO Y DEFINITIVO PARA: 🏠 Resumen Mensual.py
-# VERSIÓN FINAL: 08 de Agosto, 2025 (MEJORAS DE VISUALIZACIÓN Y EXPORTACIÓN)
+# VERSIÓN FINAL: 08 de Agosto, 2025 (MEJORAS DE VISUALIZACIÓN Y FILTROS)
 # DESCRIPCIÓN: Se ajusta la lógica de agrupación para la descarga de albaranes.
 #              Un albarán único se define por la combinación de Fecha, Cliente,
 #              Serie y Vendedor, solucionando el problema de series repetidas.
@@ -11,6 +11,11 @@
 # MODIFICACIÓN (08 de Agosto, 2025): Se añade la columna NIT a la vista de
 #              oportunidades y se crea una función para descargar un reporte
 #              de oportunidades en Excel con formato condicional.
+#
+# MODIFICACIÓN (SOLICITUD DE USUARIO): Se reorganizan los 6 KPIs principales
+#              en dos filas para mejorar la visualización y se corrige el
+#              filtro de la tabla de oportunidades para que responda a la
+#              selección del gerente.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -517,11 +522,11 @@ def render_dashboard():
                 lista_vendedores = DATA_CONFIG['grupos_vendedores'].get(nombre_grupo_orig, [vendedor_norm])
                 nombres_a_filtrar.extend([normalizar_texto(v) for v in lista_vendedores])
 
+            # --- AJUSTE CLAVE: Se corrige el filtro de oportunidades ---
+            # Antes, el gerente veía todas las oportunidades sin importar el filtro.
+            # Ahora, la tabla de oportunidades SIEMPRE se filtra según la selección de 'nombres_a_filtrar'.
             if not df_cl4_con_vendedor.empty:
-                if usuario_actual_norm == "GERENTE":
-                    df_cl4_filtrado = df_cl4_con_vendedor.copy()
-                else:
-                    df_cl4_filtrado = df_cl4_con_vendedor[df_cl4_con_vendedor['nomvendedor'].isin(nombres_a_filtrar)]
+                df_cl4_filtrado = df_cl4_con_vendedor[df_cl4_con_vendedor['nomvendedor'].isin(nombres_a_filtrar)]
             else:
                 df_cl4_filtrado = pd.DataFrame()
 
@@ -551,7 +556,8 @@ def render_dashboard():
 
             st.subheader("Métricas Clave del Periodo")
 
-            col1, col2, col3, col4, col5, col6 = st.columns(6)
+            # --- AJUSTE DE VISUALIZACIÓN: KPIs en dos filas ---
+            col1, col2, col3 = st.columns(3)
             with col1:
                 st.metric(label="Ventas Netas Facturadas", value=f"${ventas_total:,.0f}", delta=f"{ventas_total - meta_ventas:,.0f}", help=f"Meta: ${meta_ventas:,.0f}")
                 st.progress(min(avance_ventas / 100, 1.0), text=f"Avance Ventas Netas: {avance_ventas:.1f}%")
@@ -561,6 +567,10 @@ def render_dashboard():
             with col3:
                 st.metric(label="Albaranes Pendientes", value=f"${total_albaranes:,.0f}")
                 st.info("Valor por facturar")
+
+            st.markdown("<br>", unsafe_allow_html=True) # Espacio entre filas
+
+            col4, col5, col6 = st.columns(3)
             with col4:
                 st.metric(label="Venta Complementarios", value=f"${comp_total:,.0f}", delta=f"{comp_total - meta_comp:,.0f}", help=f"Meta: ${meta_comp:,.0f}")
                 st.progress(min(avance_comp / 100, 1.0), text=f"Avance: {avance_comp:.1f}%")
