@@ -32,7 +32,7 @@ import re # Importado para extracción de código de cliente
 # ==============================================================================
 APP_CONFIG = {
     "page_title": "Resumen Mensual | Tablero de Ventas",
-    "url_logo": "https://raw.githubusercontent.com/DiegoMao2021/Resumen-Ventas-Gerenciales/main/LOGO%20FERREINOX%20SAS%20BIC%202024.png",
+    "url_logo": "https://github.com/DiegoMao201/Resumen-Ventas-Gerenciales/blob/c186faf5975014069a3f0ea80336d8893e365cfe/LOGO%20FERREINOX%20SAS%20BIC%202024.png",
     "dropbox_paths": {
         "ventas": "/data/ventas_detalle.csv",
         "cobros": "/data/cobros_detalle.csv",
