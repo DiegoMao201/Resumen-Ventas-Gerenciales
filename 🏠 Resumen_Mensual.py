@@ -504,9 +504,12 @@ def render_dashboard():
     st.sidebar.markdown("---")
     st.sidebar.header("Filtros de Periodo")
 
-    df_ventas_historicas = st.session_state.df_ventas
-    df_cobros_historicos = st.session_state.df_cobros
-    df_target_clients = st.session_state.df_target_clients
+    # --- LÍNEAS CORREGIDAS ---
+    # Se utiliza .get() para evitar el AttributeError si la variable aún no existe.
+    df_ventas_historicas = st.session_state.get('df_ventas', pd.DataFrame())
+    df_cobros_historicos = st.session_state.get('df_cobros', pd.DataFrame())
+    df_target_clients = st.session_state.get('df_target_clients', pd.DataFrame())
+    # --------------------------
 
     if 'anio' not in df_ventas_historicas.columns or df_ventas_historicas.empty:
         st.error("No se pudieron cargar los datos de ventas. Revisa la conexión o el formato del archivo.")
