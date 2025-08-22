@@ -20,6 +20,11 @@
 #              `reporte_cl4.xlsx` haciendo la detección de 'id_cliente' más robusta.
 #              Se modifica la lógica de la meta CL4 para que sea por trimestre
 #              dinámico basado en el mes seleccionado.
+#
+# MODIFICACIÓN (22 de Agosto, 2025 - Gemini): Se añade funcionalidad en la pestaña
+#              'Clientes Clave' para descargar el detalle de ventas del mes por
+#              cliente y se crea una nueva sección para analizar y descargar
+#              ventas de un cliente específico en un rango de fechas.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -30,6 +35,7 @@ import io
 import unicodedata
 import time
 import re # Importado para extracción de código de cliente
+import datetime
 
 # ==============================================================================
 # 1. CONFIGURACIÓN CENTRALIZADA (BLOQUE DE CÓDIGO LIMPIO)
@@ -161,6 +167,89 @@ def to_excel_oportunidades(df):
 
     return output.getvalue()
 
+# --- NUEVA FUNCIÓN PARA EXCEL DE VENTAS MENSUALES ---
+def to_excel_ventas_mensual(df):
+    output = io.BytesIO()
+    df_excel = df[['fecha_venta', 'TipoDocumento', 'Serie', 'nombre_cliente', 'nombre_articulo', 'unidades_vendidas', 'valor_venta', 'nomvendedor']].copy()
+    df_excel.columns = ['Fecha', 'Tipo Documento', 'Serie', 'Cliente', 'Artículo', 'Unidades', 'Valor Venta', 'Vendedor']
+
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df_excel.to_excel(writer, index=False, sheet_name='Ventas_del_Mes')
+        workbook = writer.book
+        worksheet = writer.sheets['Ventas_del_Mes']
+
+        header_format = workbook.add_format({
+            'bold': True, 'valign': 'vcenter', 'align': 'center',
+            'fg_color': '#4472C4', 'font_color': 'white', 'border': 1
+        })
+        currency_format = workbook.add_format({'num_format': '$#,##0.00', 'border': 1})
+        date_format = workbook.add_format({'num_format': 'yyyy-mm-dd', 'border': 1})
+        default_format = workbook.add_format({'border': 1})
+
+        for col_num, value in enumerate(df_excel.columns):
+            worksheet.write(0, col_num, value, header_format)
+
+        worksheet.set_column('A:A', 12, date_format)      # Fecha
+        worksheet.set_column('B:B', 18, default_format)   # Tipo Documento
+        worksheet.set_column('C:C', 15, default_format)   # Serie
+        worksheet.set_column('D:D', 40, default_format)   # Cliente
+        worksheet.set_column('E:E', 45, default_format)   # Artículo
+        worksheet.set_column('F:F', 10, default_format)   # Unidades
+        worksheet.set_column('G:G', 18, currency_format)  # Valor Venta
+        worksheet.set_column('H:H', 35, default_format)   # Vendedor
+
+        worksheet.autofilter(0, 0, df_excel.shape[0], df_excel.shape[1] - 1)
+        worksheet.freeze_panes(1, 0)
+    return output.getvalue()
+
+# --- NUEVA FUNCIÓN PARA EXCEL DE ANÁLISIS DE CLIENTE POR RANGO ---
+def to_excel_analisis_cliente(df, cliente_nombre, fecha_inicio, fecha_fin, total_venta, num_facturas):
+    output = io.BytesIO()
+    df_excel = df[['fecha_venta', 'TipoDocumento', 'Serie', 'nombre_articulo', 'unidades_vendidas', 'valor_venta']].copy()
+    df_excel.columns = ['Fecha', 'Tipo Documento', 'Serie', 'Artículo', 'Unidades', 'Valor Venta']
+
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df_excel.to_excel(writer, index=False, sheet_name='Analisis_Cliente', startrow=5)
+        workbook = writer.book
+        worksheet = writer.sheets['Analisis_Cliente']
+
+        # Formatos
+        title_format = workbook.add_format({'bold': True, 'font_size': 16, 'font_color': '#1F4E78', 'valign': 'vcenter'})
+        subtitle_format = workbook.add_format({'bold': True, 'font_size': 12, 'fg_color': '#DDEBF7', 'border': 1, 'align': 'right'})
+        value_format = workbook.add_format({'font_size': 12, 'border': 1, 'num_format': '$#,##0.00'})
+        header_format = workbook.add_format({'bold': True, 'valign': 'vcenter', 'align': 'center', 'fg_color': '#4472C4', 'font_color': 'white', 'border': 1})
+        currency_format = workbook.add_format({'num_format': '$#,##0.00', 'border': 1})
+        date_format = workbook.add_format({'num_format': 'yyyy-mm-dd', 'border': 1})
+        default_format = workbook.add_format({'border': 1})
+
+        # Encabezado del reporte
+        worksheet.merge_range('B1:F1', f"Análisis de Compras: {cliente_nombre}", title_format)
+        worksheet.write('B2', 'Periodo Desde:', subtitle_format)
+        worksheet.write('C2', fecha_inicio.strftime('%Y-%m-%d'), value_format)
+        worksheet.write('B3', 'Periodo Hasta:', subtitle_format)
+        worksheet.write('C3', fecha_fin.strftime('%Y-%m-%d'), value_format)
+        worksheet.write('E2', 'Total Venta Neta:', subtitle_format)
+        worksheet.write('F2', total_venta, value_format)
+        worksheet.write('E3', 'Número de Facturas:', subtitle_format)
+        worksheet.write('F3', num_facturas, workbook.add_format({'font_size': 12, 'border': 1}))
+
+
+        # Encabezados de la tabla
+        for col_num, value in enumerate(df_excel.columns):
+            worksheet.write(4, col_num, value, header_format)
+
+        # Ancho de columnas
+        worksheet.set_column(0, 0, 12, date_format)      # Fecha
+        worksheet.set_column(1, 1, 18, default_format)   # Tipo Documento
+        worksheet.set_column(2, 2, 15, default_format)   # Serie
+        worksheet.set_column(3, 3, 50, default_format)   # Artículo
+        worksheet.set_column(4, 4, 10, default_format)   # Unidades
+        worksheet.set_column(5, 5, 18, currency_format)  # Valor Venta
+
+        worksheet.autofilter(4, 0, df_excel.shape[0] + 4, df_excel.shape[1] - 1)
+        worksheet.freeze_panes(5, 0)
+    return output.getvalue()
+
 def normalizar_texto(texto):
     if not isinstance(texto, str): return texto
     try:
@@ -218,7 +307,7 @@ def cargar_reporte_cl4(ruta_archivo):
         with dropbox.Dropbox(app_key=st.secrets.dropbox.app_key, app_secret=st.secrets.dropbox.app_secret, oauth2_refresh_token=st.secrets.dropbox.refresh_token) as dbx:
             _, res = dbx.files_download(path=ruta_archivo)
             df = pd.read_excel(io.BytesIO(res.content))
-            
+
             # 1. Normalizar todos los nombres de columnas para manejo consistente.
             df.columns = [normalizar_texto(col) for col in df.columns]
 
@@ -229,16 +318,16 @@ def cargar_reporte_cl4(ruta_archivo):
                 if nombre in df.columns:
                     columna_id_encontrada = nombre
                     break
-            
+
             if columna_id_encontrada:
                 df.rename(columns={columna_id_encontrada: 'cliente_id'}, inplace=True)
                 df['cliente_id'] = df['cliente_id'].astype(str)
-                
+
                 if 'NIT' in df.columns:
                     df['NIT'] = df['NIT'].astype(str).str.strip()
                 if 'NOMBRE' in df.columns:
                     df['NOMBRE'] = df['NOMBRE'].astype(str)
-                
+
                 for producto in APP_CONFIG['productos_oportunidad_cl4']:
                     if producto in df.columns:
                          df[producto] = pd.to_numeric(df[producto], errors='coerce').fillna(0)
@@ -261,11 +350,11 @@ def actualizar_oportunidades_con_ventas_del_trimestre(df_cl4_original, df_ventas
         return pd.DataFrame()
 
     df_cl4_actualizado = df_cl4_original.copy()
-    
+
     # Calcular el primer mes del trimestre para el mes seleccionado
     inicio_trimestre = (((mes_seleccionado - 1) // 3) * 3) + 1
     meses_a_buscar = list(range(inicio_trimestre, mes_seleccionado + 1))
-    
+
     df_ventas_trimestre = df_ventas_historicas[
         (df_ventas_historicas['anio'] == anio_seleccionado) &
         (df_ventas_historicas['mes'].isin(meses_a_buscar))
@@ -277,7 +366,7 @@ def actualizar_oportunidades_con_ventas_del_trimestre(df_cl4_original, df_ventas
     productos_oportunidad = APP_CONFIG['productos_oportunidad_cl4']
     clientes_cl4 = set(df_cl4_actualizado['cliente_id'])
     df_ventas_clientes_cl4 = df_ventas_trimestre[df_ventas_trimestre['cliente_id'].isin(clientes_cl4)]
-    
+
     if df_ventas_clientes_cl4.empty:
         return df_cl4_actualizado
 
@@ -425,10 +514,10 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
             vendedor_norm = normalizar_texto(vendedor)
             nombre_grupo_orig = next((k for k in DATA_CONFIG['grupos_vendedores'] if normalizar_texto(k) == vendedor_norm), None)
             if nombre_grupo_orig:
-                 lista_vendedores = DATA_CONFIG['grupos_vendedores'].get(nombre_grupo_orig, [])
-                 nombres_a_filtrar.extend([normalizar_texto(v) for v in lista_vendedores])
+                lista_vendedores = DATA_CONFIG['grupos_vendedores'].get(nombre_grupo_orig, [])
+                nombres_a_filtrar.extend([normalizar_texto(v) for v in lista_vendedores])
             else:
-                 nombres_a_filtrar.append(vendedor_norm)
+                nombres_a_filtrar.append(vendedor_norm)
         df_ventas_enfocadas = df_ventas_periodo[df_ventas_periodo['nomvendedor'].isin(nombres_a_filtrar)]
         df_ranking = df_vista
     else:
@@ -471,11 +560,73 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
         else: st.info("No hay datos de presupuesto para generar el ranking.")
     with tab3:
         st.subheader("Top 10 Clientes del Periodo (Por Venta Neta)")
+        filtro_ventas_netas = 'FACTURA|NOTA.*CREDITO'
         if not df_ventas_enfocadas.empty:
-            filtro_ventas_netas = 'FACTURA|NOTA.*CREDITO'
             df_facturas_enfocadas = df_ventas_enfocadas[df_ventas_enfocadas['TipoDocumento'].str.contains(filtro_ventas_netas, na=False, case=False, regex=True)]
             top_clientes = df_facturas_enfocadas.groupby('nombre_cliente')['valor_venta'].sum().nlargest(10).reset_index()
             st.dataframe(top_clientes, column_config={"nombre_cliente": "Cliente", "valor_venta": st.column_config.NumberColumn("Total Compra (Neta)", format="$ %d")}, use_container_width=True, hide_index=True)
+
+            # --- NUEVA SECCIÓN: Descargar ventas del mes ---
+            st.markdown("---")
+            st.subheader("📥 Descargar Reporte de Ventas del Mes")
+            st.info("Descarga un archivo Excel con el detalle de todas las ventas (Facturas y Notas Crédito) para la selección actual.")
+            
+            df_para_descarga_mes = df_facturas_enfocadas.copy()
+            excel_data_mes = to_excel_ventas_mensual(df_para_descarga_mes)
+            st.download_button(
+                label="📥 Descargar Ventas del Mes (Excel)",
+                data=excel_data_mes,
+                file_name=f"Ventas_Mes_{enfoque_sel.replace(' ', '_')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+
+            # --- NUEVA SECCIÓN: Análisis por cliente y rango de fechas ---
+            st.markdown("---")
+            st.subheader("🔍 Análisis Específico por Cliente y Rango de Fechas")
+            
+            lista_clientes = sorted(df_facturas_enfocadas['nombre_cliente'].unique())
+            if lista_clientes:
+                cliente_seleccionado = st.selectbox("Seleccione un Cliente:", options=lista_clientes)
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    fecha_inicio = st.date_input("Fecha de Inicio", datetime.date(st.session_state.get('anio_sel', 2024), st.session_state.get('mes_sel_num', 1), 1))
+                with col2:
+                    fecha_fin = st.date_input("Fecha de Fin", datetime.date.today())
+
+                if fecha_inicio and fecha_fin and fecha_inicio <= fecha_fin:
+                    df_cliente_rango = df_facturas_enfocadas[
+                        (df_facturas_enfocadas['nombre_cliente'] == cliente_seleccionado) &
+                        (df_facturas_enfocadas['fecha_venta'].dt.date >= fecha_inicio) &
+                        (df_facturas_enfocadas['fecha_venta'].dt.date <= fecha_fin)
+                    ].copy()
+
+                    if not df_cliente_rango.empty:
+                        total_venta_cliente = df_cliente_rango['valor_venta'].sum()
+                        num_facturas_cliente = df_cliente_rango[df_cliente_rango['TipoDocumento'] == 'FACTURA']['Serie'].nunique()
+                        
+                        m_col1, m_col2 = st.columns(2)
+                        m_col1.metric("Total Venta Neta en Rango", f"${total_venta_cliente:,.0f}")
+                        m_col2.metric("Número de Facturas", f"{num_facturas_cliente}")
+
+                        st.dataframe(df_cliente_rango[['fecha_venta', 'TipoDocumento', 'Serie', 'valor_venta']], use_container_width=True, hide_index=True)
+                        
+                        excel_data_cliente = to_excel_analisis_cliente(
+                            df_cliente_rango, cliente_seleccionado, fecha_inicio, fecha_fin, total_venta_cliente, num_facturas_cliente
+                        )
+                        st.download_button(
+                            label=f"📥 Descargar Análisis para {cliente_seleccionado}",
+                            data=excel_data_cliente,
+                            file_name=f"Analisis_{cliente_seleccionado.replace(' ', '_')}_{fecha_inicio}_a_{fecha_fin}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True
+                        )
+                    else:
+                        st.warning("El cliente seleccionado no tiene ventas en el rango de fechas especificado.")
+            else:
+                st.info("No hay clientes con ventas para analizar en la selección actual.")
+
         else: st.info("No hay datos de clientes para este periodo.")
     with tab4:
         st.subheader(f"Desempeño en Categorías Clave para: {enfoque_sel}")
@@ -515,6 +666,7 @@ def render_dashboard():
     anio_reciente = int(df_ventas_historicas['anio'].max())
     mes_reciente = int(df_ventas_historicas[df_ventas_historicas['anio'] == anio_reciente]['mes'].max())
     anio_sel = st.sidebar.selectbox("Elija el Año", lista_anios, index=0, key="sb_anio")
+    st.session_state.anio_sel = anio_sel # Guardar en session state para acceso global
     lista_meses_num = sorted(df_ventas_historicas[df_ventas_historicas['anio'] == anio_sel]['mes'].unique())
 
     if not lista_meses_num:
@@ -523,6 +675,7 @@ def render_dashboard():
 
     index_mes_defecto = lista_meses_num.index(mes_reciente) if anio_sel == anio_reciente and mes_reciente in lista_meses_num else len(lista_meses_num) - 1
     mes_sel_num = st.sidebar.selectbox("Elija el Mes", options=lista_meses_num, format_func=lambda x: DATA_CONFIG['mapeo_meses'].get(x, 'N/A'), index=index_mes_defecto, key="sb_mes")
+    st.session_state.mes_sel_num = mes_sel_num # Guardar en session state para acceso global
 
     df_ventas_periodo = df_ventas_historicas[(df_ventas_historicas['anio'] == anio_sel) & (df_ventas_historicas['mes'] == mes_sel_num)]
 
@@ -564,12 +717,12 @@ def render_dashboard():
 
             vista_para = st.session_state.usuario if len(df_vista['nomvendedor'].unique()) == 1 else 'Múltiples Seleccionados'
             st.markdown(f"**Vista para:** `{vista_para}`")
-            
+
             # --- LÓGICA DE ACTUALIZACIÓN DE OPORTUNIDADES ---
             df_cl4_actualizado = actualizar_oportunidades_con_ventas_del_trimestre(df_cl4_base, df_ventas_historicas, anio_sel, mes_sel_num)
 
             mapa_cliente_vendedor = df_ventas_historicas.drop_duplicates(subset=['cliente_id'], keep='last')[['cliente_id', 'nomvendedor', 'codigo_vendedor']]
-            
+
             if not df_cl4_actualizado.empty:
                 df_cl4_con_vendedor = pd.merge(df_cl4_actualizado, mapa_cliente_vendedor, on='cliente_id', how='left')
                 df_cl4_con_vendedor['nomvendedor'] = df_cl4_con_vendedor['nomvendedor'].apply(normalizar_texto).fillna('SIN ASIGNAR')
@@ -579,21 +732,21 @@ def render_dashboard():
 
             vendedores_vista_actual = df_vista['nomvendedor'].unique() if not df_vista.empty else []
             codigos_vista_actual = df_vista['codigo_vendedor'].unique() if not df_vista.empty else []
-            
+
             nombres_a_filtrar = []
             for vendedor_norm in vendedores_vista_actual:
                 nombre_grupo_orig = next((k for k in DATA_CONFIG['grupos_vendedores'] if normalizar_texto(k) == vendedor_norm), None)
                 if nombre_grupo_orig:
-                     lista_vendedores = DATA_CONFIG['grupos_vendedores'].get(nombre_grupo_orig, [])
-                     nombres_a_filtrar.extend([normalizar_texto(v) for v in lista_vendedores])
+                    lista_vendedores = DATA_CONFIG['grupos_vendedores'].get(nombre_grupo_orig, [])
+                    nombres_a_filtrar.extend([normalizar_texto(v) for v in lista_vendedores])
                 else:
-                     nombres_a_filtrar.append(vendedor_norm)
+                    nombres_a_filtrar.append(vendedor_norm)
 
             if not df_cl4_con_vendedor.empty:
                 df_cl4_filtrado = df_cl4_con_vendedor[df_cl4_con_vendedor['nomvendedor'].isin(nombres_a_filtrar)]
             else:
                 df_cl4_filtrado = pd.DataFrame()
-            
+
             meta_clientes_cl4 = 0
             if usuario_actual_norm == "GERENTE":
                 metas_a_sumar = {k: v for k, v in DATA_CONFIG['metas_cl4_individual'].items()}
@@ -603,7 +756,7 @@ def render_dashboard():
                 codigo_usuario_actual = df_vista['codigo_vendedor'].iloc[0] if not df_vista.empty else None
                 if codigo_usuario_actual:
                     meta_clientes_cl4 = DATA_CONFIG['metas_cl4_individual'].get(str(codigo_usuario_actual), 0)
-            
+
             clientes_en_meta = df_cl4_filtrado[df_cl4_filtrado['CL4'] >= 4].shape[0] if not df_cl4_filtrado.empty else 0
             avance_clientes_cl4 = (clientes_en_meta / meta_clientes_cl4 * 100) if meta_clientes_cl4 > 0 else 0
 
@@ -676,7 +829,7 @@ def render_dashboard():
                     })
                     st.dataframe(df_oportunidades_display, use_container_width=True, hide_index=True,
                                  column_config={ "NIT": st.column_config.TextColumn("NIT", width="medium") })
-                    
+
                     st.markdown("---")
                     st.subheader("📥 Descargar Reporte de Oportunidades Filtrado")
                     st.info("Descarga un reporte en Excel con el detalle de las oportunidades de la tabla, resaltando las marcas que faltan por vender.")
@@ -763,9 +916,9 @@ def render_dashboard():
                 df_para_descargar_anual = df_para_descargar_anual.sort_values(by=['Fecha', 'Nombre Cliente'], ascending=[False, True])
                 excel_data_anual = to_excel(df_para_descargar_anual)
                 st.download_button(label=f"📥 Descargar Reporte Anual de Albaranes de {anio_sel}", data=excel_data_anual,
-                                   file_name=f"Reporte_Albaranes_Pendientes_{anio_sel}.xlsx",
-                                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                   use_container_width=True, type="primary")
+                                      file_name=f"Reporte_Albaranes_Pendientes_{anio_sel}.xlsx",
+                                      mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                      use_container_width=True, type="primary")
 
 def main():
     if 'autenticado' not in st.session_state:
@@ -774,13 +927,13 @@ def main():
     if not st.session_state.autenticado:
         st.sidebar.image(APP_CONFIG["url_logo"], use_container_width=True)
         st.sidebar.header("Control de Acceso")
-        
+
         # Cargar datos mínimos para login si es necesario
         if 'df_ventas_login' not in st.session_state:
-             with st.spinner("Cargando configuración de usuarios..."):
-                 df_ventas_temp = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["ventas"], APP_CONFIG["column_names"]["ventas"])
-                 st.session_state.df_ventas_login = df_ventas_temp if not df_ventas_temp.empty else pd.DataFrame(columns=['nomvendedor'])
-        
+            with st.spinner("Cargando configuración de usuarios..."):
+                df_ventas_temp = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["ventas"], APP_CONFIG["column_names"]["ventas"])
+                st.session_state.df_ventas_login = df_ventas_temp if not df_ventas_temp.empty else pd.DataFrame(columns=['nomvendedor'])
+
         @st.cache_data
         def obtener_lista_usuarios(_df_ventas_cache):
             if not _df_ventas_cache.empty and 'nomvendedor' in _df_ventas_cache.columns:
