@@ -25,6 +25,12 @@
 #              'Clientes Clave' para descargar el detalle de ventas del mes por
 #              cliente y se crea una nueva sección para analizar y descargar
 #              ventas de un cliente específico en un rango de fechas.
+#
+# MODIFICACIÓN (22 de Agosto, 2025 - CORRECCIÓN FILTRO FECHAS): Se corrige la
+#              lógica del filtro de fechas en la sección 'Análisis Específico por
+#              Cliente' para que utilice el historial completo de ventas y no se
+#              limite al mes seleccionado en el filtro general. Se asegura que
+#              el número de factura (Serie) se muestre correctamente.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -596,11 +602,18 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
                     fecha_fin = st.date_input("Fecha de Fin", datetime.date.today())
 
                 if fecha_inicio and fecha_fin and fecha_inicio <= fecha_fin:
-                    df_cliente_rango = df_facturas_enfocadas[
-                        (df_facturas_enfocadas['nombre_cliente'] == cliente_seleccionado) &
-                        (df_facturas_enfocadas['fecha_venta'].dt.date >= fecha_inicio) &
-                        (df_facturas_enfocadas['fecha_venta'].dt.date <= fecha_fin)
+                    # --- INICIO DE LA CORRECCIÓN ---
+                    # Usar el DataFrame histórico completo para esta consulta específica.
+                    df_ventas_historicas = st.session_state.df_ventas
+                    df_historico_facturas = df_ventas_historicas[df_ventas_historicas['TipoDocumento'].str.contains(filtro_ventas_netas, na=False, case=False, regex=True)]
+
+                    # Aplicar el filtro de cliente y el NUEVO rango de fechas al histórico.
+                    df_cliente_rango = df_historico_facturas[
+                        (df_historico_facturas['nombre_cliente'] == cliente_seleccionado) &
+                        (df_historico_facturas['fecha_venta'].dt.date >= fecha_inicio) &
+                        (df_historico_facturas['fecha_venta'].dt.date <= fecha_fin)
                     ].copy()
+                    # --- FIN DE LA CORRECCIÓN ---
 
                     if not df_cliente_rango.empty:
                         total_venta_cliente = df_cliente_rango['valor_venta'].sum()
@@ -609,8 +622,9 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
                         m_col1, m_col2 = st.columns(2)
                         m_col1.metric("Total Venta Neta en Rango", f"${total_venta_cliente:,.0f}")
                         m_col2.metric("Número de Facturas", f"{num_facturas_cliente}")
-
-                        st.dataframe(df_cliente_rango[['fecha_venta', 'TipoDocumento', 'Serie', 'valor_venta']], use_container_width=True, hide_index=True)
+                        
+                        # Se muestra la tabla con el número de factura (Serie)
+                        st.dataframe(df_cliente_rango[['fecha_venta', 'TipoDocumento', 'Serie', 'nombre_articulo', 'valor_venta']], use_container_width=True, hide_index=True)
                         
                         excel_data_cliente = to_excel_analisis_cliente(
                             df_cliente_rango, cliente_seleccionado, fecha_inicio, fecha_fin, total_venta_cliente, num_facturas_cliente
