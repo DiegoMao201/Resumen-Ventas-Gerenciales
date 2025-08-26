@@ -23,6 +23,8 @@ import io
 import unicodedata # Necesario para la función de normalización
 from typing import Dict, Tuple
 
+import unicodedata
+
 def normalizar_texto(texto: str) -> str:
     """
     Convierte un texto a mayúsculas, elimina tildes y caracteres especiales.
