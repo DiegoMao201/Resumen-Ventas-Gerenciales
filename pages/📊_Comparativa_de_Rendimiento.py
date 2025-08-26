@@ -1,6 +1,6 @@
 # ==============================================================================
 # SCRIPT PARA PÁGINA: 🎯 Análisis de Potencial en Marquillas Clave
-# VERSIÓN: 2.6 (26 de Agosto, 2025)
+# VERSIÓN: 2.7 (26 de Agosto, 2025)
 # AUTOR: Gemini (Basado en el script principal y mejorado profesionalmente)
 #
 # DESCRIPCIÓN:
@@ -8,7 +8,12 @@
 # marquillas de productos más estratégicas. Identifica qué clientes compran
 # qué productos, segmentándolos para descubrir oportunidades de venta.
 #
-# MEJORAS (Versión 2.6):
+# MEJORAS (Versión 2.7):
+# - AJUSTE CLAVE (Potencial de Venta Aterrizado): Se modifica drásticamente
+#   la función 'calcular_potencial_venta' según solicitud. El "ticket promedio"
+#   ahora se basa en el VALOR PROMEDIO POR TRANSACCIÓN de cada marquilla.
+#   Esto simula la venta de "una unidad" (ej. un galón), aterrizando el KPI
+#   a una cifra mucho más realista y accionable.
 # - CORRECCIÓN CRÍTICA (Potencial de Venta): Se ajusta radicalmente la
 #   función 'calcular_potencial_venta'. El "ticket promedio" ahora se basa
 #   en el gasto MENSUAL promedio por cliente para una marquilla, en lugar del
@@ -101,25 +106,24 @@ def calcular_matriz_compra(_df_ventas_marquillas: pd.DataFrame) -> pd.DataFrame:
 def calcular_potencial_venta(_df_ventas_marquillas: pd.DataFrame, _df_clientes_seleccionados: pd.DataFrame) -> Tuple[float, Dict]:
     """
     Calcula el "punto de quiebre": el potencial de venta si cada cliente
-    comprara las marquillas que le faltan, basado en el ticket promedio MENSUAL.
+    comprara las marquillas que le faltan, basado en el TICKET PROMEDIO POR TRANSACCIÓN.
     """
     if _df_ventas_marquillas.empty or _df_clientes_seleccionados.empty:
         return 0.0, {m: 0.0 for m in MARQUILLAS_CLAVE}
 
-    # --- LÓGICA CORREGIDA PARA UN POTENCIAL REALISTA ---
-    # 1. Calcular el valor de compra MENSUAL promedio por marquilla.
-    #    Esto representa lo que un cliente típico gasta en esa marquilla en un mes.
-    ticket_promedio_por_marquilla = {}
+    # --- INICIO DE LA LÓGICA CORREGIDA PARA UN POTENCIAL ATERRIZADO (VERSIÓN 2.7) ---
+    # 1. Calcular el valor de venta PROMEDIO POR TRANSACCIÓN para cada marquilla.
+    #    Esto simula el precio de una unidad estándar (ej. un galón).
+    ticket_promedio_por_transaccion = {}
     for marquilla in MARQUILLAS_CLAVE:
         df_marquilla = _df_ventas_marquillas[_df_ventas_marquillas['marquilla'] == marquilla]
         if not df_marquilla.empty:
-            # Agrupa las ventas por año, mes y cliente para obtener el gasto mensual por cliente.
-            gasto_mensual_cliente = df_marquilla.groupby(['anio', 'mes', 'nombre_cliente'])['valor_venta'].sum()
-            # El ticket promedio es la media de estos gastos mensuales.
-            ticket_promedio_mensual = gasto_mensual_cliente.mean()
-            ticket_promedio_por_marquilla[marquilla] = ticket_promedio_mensual
+            # Se calcula la media de la columna 'valor_venta' para todas las transacciones de esa marquilla.
+            valor_promedio_transaccion = df_marquilla['valor_venta'].mean()
+            ticket_promedio_por_transaccion[marquilla] = valor_promedio_transaccion
         else:
-            ticket_promedio_por_marquilla[marquilla] = 0.0
+            ticket_promedio_por_transaccion[marquilla] = 0.0
+    # --- FIN DE LA LÓGICA CORREGIDA ---
 
     # 2. Crear la matriz de compra para saber quién compró qué.
     matriz_compra = calcular_matriz_compra(_df_ventas_marquillas)
@@ -134,9 +138,9 @@ def calcular_potencial_venta(_df_ventas_marquillas: pd.DataFrame, _df_clientes_s
             # Revisa si el cliente ha comprado la marquilla (si está en la matriz y el valor es 1).
             ha_comprado = cliente in matriz_compra.index and matriz_compra.loc[cliente, marquilla] == 1
 
-            # Si el cliente NO ha comprado la marquilla, se suma el potencial.
+            # Si el cliente NO ha comprado la marquilla, se suma el potencial basado en el ticket por transacción.
             if not ha_comprado:
-                potencial_cliente_marquilla = ticket_promedio_por_marquilla.get(marquilla, 0)
+                potencial_cliente_marquilla = ticket_promedio_por_transaccion.get(marquilla, 0)
                 venta_potencial_total += potencial_cliente_marquilla
                 potencial_por_marquilla[marquilla] += potencial_cliente_marquilla
 
@@ -344,7 +348,7 @@ def render_pagina_analisis():
     col3.metric(
         label="🚀 POTENCIAL TOTAL (Punto de Quiebre)",
         value=f"${potencial_total:,.0f}",
-        help="Estimación de venta adicional si cada cliente activo comprara las marquillas que le faltan, basado en el ticket de compra promedio MENSUAL."
+        help="Estimación de venta adicional si cada cliente activo comprara las marquillas que le faltan, basado en el ticket de compra promedio POR TRANSACCIÓN."
     )
 
     st.markdown("---")
