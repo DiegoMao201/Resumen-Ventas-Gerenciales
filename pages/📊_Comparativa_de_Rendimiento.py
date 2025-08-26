@@ -201,6 +201,7 @@ def render_pagina_analisis():
     """)
 
     # --- INICIO DE LA CORRECCIÓN: Verificación robusta de datos en la sesión ---
+    # Se comprueba que tanto los datos de ventas como la configuración existan en la sesión.
     if 'df_ventas' not in st.session_state or 'DATA_CONFIG' not in st.session_state:
         st.error("⚠️ No se han cargado los datos o la configuración necesaria.")
         st.warning("Esta página depende de los datos cargados en la aplicación principal. Por favor, ve a la página '🏠 Resumen Mensual', inicia sesión y asegúrate de que los datos se han cargado correctamente.")
@@ -263,7 +264,7 @@ def render_pagina_analisis():
         venta_mes_actual = df_mes_actual['valor_venta'].sum()
 
         # Métricas históricas para comparación
-        promedio_mensual = 0
+        promedio_mensual = 0.0
         if not df_ventas_marquillas.empty:
             total_meses_con_venta = df_ventas_marquillas.groupby(['anio', 'mes']).ngroups
             venta_total_historica = df_ventas_marquillas['valor_venta'].sum()
