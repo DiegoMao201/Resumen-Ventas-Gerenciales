@@ -1,6 +1,6 @@
 # ==============================================================================
 # SCRIPT PARA PÁGINA: 🎯 Análisis de Potencial en Marquillas Clave
-# VERSIÓN: 2.0 (26 de Agosto, 2025)
+# VERSIÓN: 2.1 (26 de Agosto, 2025)
 # AUTOR: Gemini (Basado en el script principal y mejorado profesionalmente)
 #
 # DESCRIPCIÓN:
@@ -8,13 +8,12 @@
 # marquillas de productos más estratégicas. Identifica qué clientes compran
 # qué productos, segmentándolos para descubrir oportunidades de venta.
 #
-# MEJORAS (Versión 2.0):
-# - CORRECCIÓN: Solucionado el 'KeyError: 0' al llamar 'calcular_matriz_compra'.
-# - FEATURE: Añadido filtro por Vendedor/Grupo para un análisis granular.
-# - FEATURE: Implementada la descarga de segmentos de clientes a un archivo Excel.
-# - UI/UX: Mejoradas las visualizaciones con un medidor de rendimiento (gauge).
-# - ROBUSTEZ: Optimizado el manejo del estado de sesión y la carga de datos.
-# - CALIDAD: Código reestructurado, comentado y con type hints para mantenibilidad.
+# MEJORAS (Versión 2.1):
+# - CORRECCIÓN CRÍTICA: Solucionado el 'AttributeError' al acceder a
+#   'st.session_state.DATA_CONFIG'. Se añade una verificación robusta al
+#   inicio para asegurar que la sesión ha sido inicializada por la página principal.
+# - UI/UX: Se muestra un mensaje de guía claro al usuario si los datos no están
+#   cargados, en lugar de un error.
 # ==============================================================================
 
 import streamlit as st
@@ -24,6 +23,7 @@ import plotly.graph_objects as go
 import numpy as np
 import re
 import io
+from typing import Dict, Tuple
 
 # ==============================================================================
 # 1. CONFIGURACIÓN Y ESTILO DE LA PÁGINA
@@ -117,7 +117,7 @@ def calcular_matriz_compra(_df_ventas_marquillas: pd.DataFrame) -> pd.DataFrame:
 
 
 @st.cache_data
-def calcular_potencial_venta(_df_ventas_marquillas: pd.DataFrame, _df_clientes_seleccionados: pd.DataFrame) -> tuple[float, dict]:
+def calcular_potencial_venta(_df_ventas_marquillas: pd.DataFrame, _df_clientes_seleccionados: pd.DataFrame) -> Tuple[float, Dict]:
     """
     Calcula el "punto de quiebre": el potencial de venta si cada cliente
     comprara las marquillas que le faltan, basado en el ticket promedio.
@@ -136,7 +136,7 @@ def calcular_potencial_venta(_df_ventas_marquillas: pd.DataFrame, _df_clientes_s
         else:
             ticket_promedio_por_marquilla[marquilla] = 0
 
-    # 2. Crear la matriz de compra (LÍNEA CORREGIDA: sin el `[0]`).
+    # 2. Crear la matriz de compra.
     matriz_compra = calcular_matriz_compra(_df_ventas_marquillas)
 
     # 3. Calcular el potencial total sumando las oportunidades perdidas.
@@ -156,7 +156,7 @@ def calcular_potencial_venta(_df_ventas_marquillas: pd.DataFrame, _df_clientes_s
 
     return venta_potencial_total, potencial_por_marquilla
 
-def generar_reporte_excel(segmentos: dict) -> bytes:
+def generar_reporte_excel(segmentos: Dict[str, pd.DataFrame]) -> bytes:
     """
     Crea un archivo Excel en memoria con cada segmento de cliente en una hoja separada.
     """
@@ -200,12 +200,13 @@ def render_pagina_analisis():
     para las 5 líneas de productos más importantes. Descubre el potencial oculto en tu cartera de clientes.
     """)
 
-    # --- Verificación de Datos desde la Sesión ---
-    if 'df_ventas' not in st.session_state or st.session_state.df_ventas.empty:
-        st.error("⚠️ No se han cargado los datos de ventas.")
-        st.warning("Esta página depende de los datos cargados en la aplicación principal. Por favor, ve a la página '🏠 Resumen Mensual' y asegúrate de que los datos se han cargado correctamente.")
+    # --- INICIO DE LA CORRECCIÓN: Verificación robusta de datos en la sesión ---
+    if 'df_ventas' not in st.session_state or 'DATA_CONFIG' not in st.session_state:
+        st.error("⚠️ No se han cargado los datos o la configuración necesaria.")
+        st.warning("Esta página depende de los datos cargados en la aplicación principal. Por favor, ve a la página '🏠 Resumen Mensual', inicia sesión y asegúrate de que los datos se han cargado correctamente.")
         st.page_link("Resumen_Mensual.py", label="Ir a la página principal", icon="🏠")
-        return
+        return # Detiene la ejecución para prevenir el error
+    # --- FIN DE LA CORRECCIÓN ---
 
     df_ventas_historicas_completo = st.session_state.df_ventas
     mapeo_meses = st.session_state.DATA_CONFIG.get('mapeo_meses', {i: str(i) for i in range(1, 13)})
@@ -232,12 +233,14 @@ def render_pagina_analisis():
     )
 
     # Filtro de Vendedor/Grupo
-    vendedores_grupos = ["TODOS"] + sorted(grupos_vendedores.keys()) + sorted(
-        df_ventas_historicas_completo[~df_ventas_historicas_completo['nomvendedor'].isin(
-            [v for sublist in grupos_vendedores.values() for v in sublist]
-        )]['nomvendedor'].unique()
-    )
-    seleccion_vendedor = st.sidebar.selectbox("Vendedor / Grupo", options=vendedores_grupos, key="sb_vendedor_analisis")
+    vendedores_en_grupos_flat = [v for sublist in grupos_vendedores.values() for v in sublist]
+    vendedores_individuales = df_ventas_historicas_completo[
+        ~df_ventas_historicas_completo['nomvendedor'].isin(vendedores_en_grupos_flat)
+    ]['nomvendedor'].unique()
+
+    opciones_filtro = ["TODOS"] + sorted(list(grupos_vendedores.keys())) + sorted(list(vendedores_individuales))
+    seleccion_vendedor = st.sidebar.selectbox("Vendedor / Grupo", options=opciones_filtro, key="sb_vendedor_analisis")
+
 
     # --- LÓGICA DE FILTRADO DE DATOS ---
     if seleccion_vendedor == "TODOS":
@@ -260,12 +263,12 @@ def render_pagina_analisis():
         venta_mes_actual = df_mes_actual['valor_venta'].sum()
 
         # Métricas históricas para comparación
+        promedio_mensual = 0
         if not df_ventas_marquillas.empty:
             total_meses_con_venta = df_ventas_marquillas.groupby(['anio', 'mes']).ngroups
             venta_total_historica = df_ventas_marquillas['valor_venta'].sum()
-            promedio_mensual = venta_total_historica / total_meses_con_venta if total_meses_con_venta > 0 else 0
-        else:
-            promedio_mensual = 0
+            if total_meses_con_venta > 0:
+                promedio_mensual = venta_total_historica / total_meses_con_venta
 
         # Cálculo de potencial
         potencial_total, potencial_por_marquilla = calcular_potencial_venta(df_ventas_marquillas, df_ventas_filtrado)
@@ -299,6 +302,7 @@ def render_pagina_analisis():
 
     with col_g1:
         st.subheader("Rendimiento del Mes vs. Promedio")
+        gauge_max_value = max(venta_mes_actual, promedio_mensual) * 1.5 if max(venta_mes_actual, promedio_mensual) > 0 else 1
         fig_gauge = go.Figure(go.Indicator(
             mode="gauge+number+delta",
             value=venta_mes_actual,
@@ -307,13 +311,14 @@ def render_pagina_analisis():
             domain={'x': [0, 1], 'y': [0, 1]},
             title={'text': "Venta del Mes vs. Promedio Histórico"},
             gauge={
-                'axis': {'range': [None, max(venta_mes_actual, promedio_mensual) * 1.5]},
+                'axis': {'range': [None, gauge_max_value]},
                 'steps': [
-                    {'range': [0, promedio_mensual * 0.8], 'color': "lightgray"},
-                    {'range': [promedio_mensual * 0.8, promedio_mensual * 1.1], 'color': "gray"}],
+                    {'range': [0, promedio_mensual * 0.8], 'color': "#FFCBCB"},
+                    {'range': [promedio_mensual * 0.8, promedio_mensual * 1.1], 'color': "#FFF3CB"},
+                    {'range': [promedio_mensual * 1.1, gauge_max_value], 'color': '#D4EDDA'}],
                 'threshold': {
-                    'line': {'color': "red", 'width': 4},
-                    'thickness': 0.75,
+                    'line': {'color': "#6c757d", 'width': 4},
+                    'thickness': 0.85,
                     'value': promedio_mensual}
             }))
         fig_gauge.update_layout(height=400, margin=dict(t=50, b=40))
