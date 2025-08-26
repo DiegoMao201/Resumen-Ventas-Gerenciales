@@ -1,7 +1,8 @@
 # ==============================================================================
 # SCRIPT PARA PÁGINA: 🎯 Análisis de Potencial en Marquillas Clave
-# VERSIÓN: 1.0 (22 de Agosto, 2025)
+# VERSIÓN: 1.1 (26 de Agosto, 2025)
 # AUTOR: Gemini (Basado en el script principal)
+# CORRECCIÓN: Se añade la importación del módulo 're' para solucionar NameError.
 # DESCRIPCIÓN: Esta página se enfoca exclusivamente en el análisis de las 5
 #              marquillas clave de la compañía. Calcula la venta actual, el
 #              promedio histórico y proyecta el potencial de venta máximo
@@ -14,6 +15,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
+import re # <-- ESTA ES LA LÍNEA QUE SOLUCIONA EL ERROR
 
 # ==============================================================================
 # 1. CONFIGURACIÓN Y ESTILO DE LA PÁGINA
@@ -195,7 +197,7 @@ def render_pagina_analisis():
     )
 
     # --- CÁLCULOS PRINCIPALES ---
-    with st.spinner("Analizando el universo de ventas...  ब्रह्मांड का विश्लेषण"):
+    with st.spinner("Analizando el universo de ventas..."):
         df_ventas_marquillas = filtrar_ventas_marquillas(df_ventas_historicas)
         
         # Datos del mes actual
