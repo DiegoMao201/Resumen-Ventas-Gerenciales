@@ -1,6 +1,6 @@
 # ==============================================================================
 # SCRIPT PARA PÁGINA: 🎯 Análisis de Potencial en Marquillas Clave
-# VERSIÓN: 2.1 (26 de Agosto, 2025)
+# VERSIÓN: 2.2 (26 de Agosto, 2025)
 # AUTOR: Gemini (Basado en el script principal y mejorado profesionalmente)
 #
 # DESCRIPCIÓN:
@@ -8,12 +8,9 @@
 # marquillas de productos más estratégicas. Identifica qué clientes compran
 # qué productos, segmentándolos para descubrir oportunidades de venta.
 #
-# MEJORAS (Versión 2.1):
-# - CORRECCIÓN CRÍTICA: Solucionado el 'AttributeError' al acceder a
-#   'st.session_state.DATA_CONFIG'. Se añade una verificación robusta al
-#   inicio para asegurar que la sesión ha sido inicializada por la página principal.
-# - UI/UX: Se muestra un mensaje de guía claro al usuario si los datos no están
-#   cargados, en lugar de un error.
+# MEJORAS (Versión 2.2):
+# - CORRECCIÓN CRÍTICA: Solucionado el 'NameError' al añadir la función
+#   'normalizar_texto' que faltaba en este archivo.
 # ==============================================================================
 
 import streamlit as st
@@ -23,6 +20,7 @@ import plotly.graph_objects as go
 import numpy as np
 import re
 import io
+import unicodedata # Necesario para la función de normalización
 from typing import Dict, Tuple
 
 # ==============================================================================
@@ -65,6 +63,23 @@ MARQUILLAS_CLAVE = sorted(['VINILTEX', 'KORAZA', 'ESTUCOMAS', 'VINILICO', 'PINTU
 # ==============================================================================
 # 2. FUNCIONES DE CÁLCULO Y ANÁLISIS DE DATOS
 # ==============================================================================
+
+# --- FUNCIÓN AÑADIDA PARA CORREGIR EL NameError ---
+# Esta función es necesaria para limpiar los nombres de los vendedores para los filtros.
+def normalizar_texto(texto: str) -> str:
+    """
+    Convierte un texto a mayúsculas, elimina tildes y caracteres especiales.
+    """
+    if not isinstance(texto, str):
+        return texto
+    try:
+        # NFD (Normalization Form D) descompone los caracteres en sus componentes base
+        texto_sin_tildes = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
+        # Convierte a mayúsculas y limpia otros caracteres
+        return texto_sin_tildes.upper().replace('-', ' ').replace('_', ' ').replace('.', ' ').strip().replace('  ', ' ')
+    except (TypeError, AttributeError):
+        return texto
+# --- FIN DE LA FUNCIÓN AÑADIDA ---
 
 @st.cache_data
 def filtrar_ventas_marquillas(_df_ventas_historicas: pd.DataFrame) -> pd.DataFrame:
@@ -167,7 +182,7 @@ def generar_reporte_excel(segmentos: Dict[str, pd.DataFrame]) -> bytes:
             if not df_segmento.empty:
                 df_export = df_segmento.reset_index()[['nombre_cliente', 'conteo_marquillas']].copy()
                 if 'marquillas_faltantes' in df_segmento.columns:
-                       df_export['marquillas_faltantes'] = df_segmento['marquillas_faltantes'].values
+                     df_export['marquillas_faltantes'] = df_segmento['marquillas_faltantes'].values
 
                 df_export.to_excel(writer, sheet_name=nombre_segmento, index=False)
                 worksheet = writer.sheets[nombre_segmento]
@@ -200,14 +215,12 @@ def render_pagina_analisis():
     para las 5 líneas de productos más importantes. Descubre el potencial oculto en tu cartera de clientes.
     """)
 
-    # --- INICIO DE LA CORRECCIÓN: Verificación robusta de datos en la sesión ---
-    # Se comprueba que tanto los datos de ventas como la configuración existan en la sesión.
+    # --- Verificación de Sesión Robusta ---
     if 'df_ventas' not in st.session_state or 'DATA_CONFIG' not in st.session_state:
         st.error("⚠️ No se han cargado los datos o la configuración necesaria.")
         st.warning("Esta página depende de los datos cargados en la aplicación principal. Por favor, ve a la página '🏠 Resumen Mensual', inicia sesión y asegúrate de que los datos se han cargado correctamente.")
-        # st.page_link("Resumen_Mensual.py", label="Ir a la página principal", icon="🏠")
+        st.page_link("Resumen_Mensual.py", label="Ir a la página principal", icon="🏠")
         return # Detiene la ejecución para prevenir el error
-    # --- FIN DE LA CORRECCIÓN ---
 
     df_ventas_historicas_completo = st.session_state.df_ventas
     mapeo_meses = st.session_state.DATA_CONFIG.get('mapeo_meses', {i: str(i) for i in range(1, 13)})
@@ -234,27 +247,38 @@ def render_pagina_analisis():
     )
 
     # Filtro de Vendedor/Grupo
-    vendedores_en_grupos_flat = [item for sublist in grupos_vendedores.values() for item in sublist]
-    vendedores_individuales = df_ventas_historicas_completo[
-        ~df_ventas_historicas_completo['nomvendedor'].isin(vendedores_en_grupos_flat)
-    ]['nomvendedor'].unique()
+    vendedores_en_grupos_flat = [normalizar_texto(v) for sublist in grupos_vendedores.values() for v in sublist]
     
-    # Normalizar los nombres para la visualización y filtrado
-    vendedores_en_grupos_flat_norm = {normalizar_texto(v) for v in vendedores_en_grupos_flat}
-    vendedores_individuales_norm = {normalizar_texto(v) for v in vendedores_individuales}
+    vendedores_individuales = df_ventas_historicas_completo[
+        ~df_ventas_historicas_completo['nomvendedor'].apply(normalizar_texto).isin(vendedores_en_grupos_flat)
+    ]['nomvendedor'].unique()
 
-    # Opciones para el filtro
-    opciones_filtro = ["TODOS"] + sorted(list(grupos_vendedores.keys())) + sorted([v for v in df_ventas_historicas_completo['nomvendedor'].unique() if normalizar_texto(v) not in vendedores_en_grupos_flat_norm])
-    seleccion_vendedor = st.sidebar.selectbox("Vendedor / Grupo", options=opciones_filtro, key="sb_vendedor_analisis")
+    opciones_filtro_orig = ["TODOS"] + sorted(list(grupos_vendedores.keys())) + sorted(list(vendedores_individuales))
+    seleccion_vendedor_orig = st.sidebar.selectbox("Vendedor / Grupo", options=opciones_filtro_orig, key="sb_vendedor_analisis")
+
 
     # --- LÓGICA DE FILTRADO DE DATOS ---
-    df_ventas_filtrado = df_ventas_historicas_completo.copy()
-    if seleccion_vendedor != "TODOS":
-        if seleccion_vendedor in grupos_vendedores:
-            vendedores_en_grupo = [normalizar_texto(v) for v in grupos_vendedores[seleccion_vendedor]]
-            df_ventas_filtrado = df_ventas_filtrado[df_ventas_filtrado['nomvendedor'].isin(vendedores_en_grupo)]
-        else:
-            df_ventas_filtrado = df_ventas_filtrado[df_ventas_filtrado['nomvendedor'] == normalizar_texto(seleccion_vendedor)]
+    seleccion_vendedor_norm = normalizar_texto(seleccion_vendedor_orig)
+    
+    if seleccion_vendedor_orig == "TODOS":
+        df_ventas_filtrado = df_ventas_historicas_completo.copy()
+    else:
+        # Busca si la selección es un grupo
+        es_grupo = False
+        for nombre_grupo_orig, lista_vendedores_orig in grupos_vendedores.items():
+            if normalizar_texto(nombre_grupo_orig) == seleccion_vendedor_norm:
+                vendedores_del_grupo_norm = [normalizar_texto(v) for v in lista_vendedores_orig]
+                df_ventas_filtrado = df_ventas_historicas_completo[
+                    df_ventas_historicas_completo['nomvendedor'].apply(normalizar_texto).isin(vendedores_del_grupo_norm)
+                ]
+                es_grupo = True
+                break
+        
+        # Si no es un grupo, es un vendedor individual
+        if not es_grupo:
+            df_ventas_filtrado = df_ventas_historicas_completo[
+                df_ventas_historicas_completo['nomvendedor'].apply(normalizar_texto) == seleccion_vendedor_norm
+            ]
 
 
     # --- CÁLCULOS PRINCIPALES ---
@@ -280,7 +304,7 @@ def render_pagina_analisis():
         potencial_total, potencial_por_marquilla = calcular_potencial_venta(df_ventas_marquillas, df_ventas_filtrado)
 
     # --- RENDERIZADO DE MÉTRICAS Y VISUALIZACIONES ---
-    st.header(f"Indicadores para {mapeo_meses.get(mes_sel_num, '')} {anio_sel} | Foco: {seleccion_vendedor}")
+    st.header(f"Indicadores para {mapeo_meses.get(mes_sel_num, '')} {anio_sel} | Foco: {seleccion_vendedor_orig}")
     st.markdown("---")
 
     col1, col2, col3 = st.columns(3)
@@ -413,7 +437,7 @@ def render_pagina_analisis():
     st.download_button(
         label="📥 Descargar Reporte de Segmentos (Excel)",
         data=excel_file,
-        file_name=f"Segmentacion_Marquillas_{seleccion_vendedor}_{anio_sel}_{mes_sel_num}.xlsx",
+        file_name=f"Segmentacion_Marquillas_{seleccion_vendedor_orig}_{anio_sel}_{mes_sel_num}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True
     )
@@ -430,7 +454,7 @@ if __name__ == '__main__':
     else:
         # Muestra una página de acceso restringido si no está autenticado.
         st.title("🔒 Acceso Restringido")
-        st.image("https://raw.githubusercontent.com/DiegoMao2021/Resumen-Ventas-Gerenciales/main/LOGO%20FERREINOX%20SAS%20BIC%202024.png", width=300)
+        st.image("https://raw.githubusercontent.com/DiegoMao20121/Resumen-Ventas-Gerenciales/main/LOGO%20FERREINOX%20SAS%20BIC%202024.png", width=300)
         st.warning("Por favor, inicie sesión desde la página principal para acceder a este análisis.")
         st.info("Esta es una página de análisis avanzado que requiere que los datos maestros sean cargados primero en la aplicación principal.")
-        st.page_link("app.py", label="Ir a la página de inicio de sesión", icon="🏠")
+        st.page_link("Resumen_Mensual.py", label="Ir a la página de inicio de sesión", icon="🏠")
