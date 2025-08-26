@@ -23,6 +23,18 @@ import io
 import unicodedata # Necesario para la función de normalización
 from typing import Dict, Tuple
 
+def normalizar_texto(texto: str) -> str:
+    """
+    Convierte un texto a mayúsculas, elimina tildes y caracteres especiales.
+    """
+    if not isinstance(texto, str):
+        return texto
+    try:
+        texto_sin_tildes = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
+        return texto_sin_tildes.upper().replace('-', ' ').replace('_', ' ').replace('.', ' ').strip().replace('  ', ' ')
+    except (TypeError, AttributeError):
+        return texto
+
 # ==============================================================================
 # 1. CONFIGURACIÓN Y ESTILO DE LA PÁGINA
 # ==============================================================================
