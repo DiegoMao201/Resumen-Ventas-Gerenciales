@@ -286,7 +286,7 @@ def render_pagina_analisis():
             ]
 
 
-    # --- CÁLCULOS PRINCIPALES ---
+    # --- CÁLCULOS PRINCIPAIS ---
     with st.spinner("Procesando datos y calculando potencial..."):
         df_ventas_marquillas = filtrar_ventas_marquillas(df_ventas_filtrado)
 
