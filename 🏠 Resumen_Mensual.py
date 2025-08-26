@@ -195,14 +195,14 @@ def to_excel_ventas_mensual(df):
         for col_num, value in enumerate(df_excel.columns):
             worksheet.write(0, col_num, value, header_format)
 
-        worksheet.set_column('A:A', 12, date_format)      # Fecha
-        worksheet.set_column('B:B', 18, default_format)   # Tipo Documento
-        worksheet.set_column('C:C', 15, default_format)   # Serie
-        worksheet.set_column('D:D', 40, default_format)   # Cliente
-        worksheet.set_column('E:E', 45, default_format)   # Artículo
-        worksheet.set_column('F:F', 10, default_format)   # Unidades
-        worksheet.set_column('G:G', 18, currency_format)  # Valor Venta
-        worksheet.set_column('H:H', 35, default_format)   # Vendedor
+        worksheet.set_column('A:A', 12, date_format)     # Fecha
+        worksheet.set_column('B:B', 18, default_format)  # Tipo Documento
+        worksheet.set_column('C:C', 15, default_format)  # Serie
+        worksheet.set_column('D:D', 40, default_format)  # Cliente
+        worksheet.set_column('E:E', 45, default_format)  # Artículo
+        worksheet.set_column('F:F', 10, default_format)  # Unidades
+        worksheet.set_column('G:G', 18, currency_format) # Valor Venta
+        worksheet.set_column('H:H', 35, default_format)  # Vendedor
 
         worksheet.autofilter(0, 0, df_excel.shape[0], df_excel.shape[1] - 1)
         worksheet.freeze_panes(1, 0)
@@ -245,12 +245,12 @@ def to_excel_analisis_cliente(df, cliente_nombre, fecha_inicio, fecha_fin, total
             worksheet.write(4, col_num, value, header_format)
 
         # Ancho de columnas
-        worksheet.set_column(0, 0, 12, date_format)      # Fecha
-        worksheet.set_column(1, 1, 18, default_format)   # Tipo Documento
-        worksheet.set_column(2, 2, 15, default_format)   # Serie
-        worksheet.set_column(3, 3, 50, default_format)   # Artículo
-        worksheet.set_column(4, 4, 10, default_format)   # Unidades
-        worksheet.set_column(5, 5, 18, currency_format)  # Valor Venta
+        worksheet.set_column(0, 0, 12, date_format)     # Fecha
+        worksheet.set_column(1, 1, 18, default_format)  # Tipo Documento
+        worksheet.set_column(2, 2, 15, default_format)  # Serie
+        worksheet.set_column(3, 3, 50, default_format)  # Artículo
+        worksheet.set_column(4, 4, 10, default_format)  # Unidades
+        worksheet.set_column(5, 5, 18, currency_format) # Valor Venta
 
         worksheet.autofilter(4, 0, df_excel.shape[0] + 4, df_excel.shape[1] - 1)
         worksheet.freeze_panes(5, 0)
@@ -995,6 +995,10 @@ def main():
                 st.session_state.df_ventas = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["ventas"], APP_CONFIG["column_names"]["ventas"])
                 st.session_state.df_cobros = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["cobros"], APP_CONFIG["column_names"]["cobros"])
                 st.session_state.df_cl4 = cargar_reporte_cl4(APP_CONFIG["dropbox_paths"]["cl4_report"])
+                # Save config to session_state so other pages can access it
+                st.session_state.APP_CONFIG = APP_CONFIG
+                st.session_state.DATA_CONFIG = DATA_CONFIG
+
 
         st.sidebar.image(APP_CONFIG["url_logo"], use_container_width=True)
         st.sidebar.header(f"Bienvenido, {st.session_state.usuario}")
