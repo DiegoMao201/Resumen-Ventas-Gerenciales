@@ -1,242 +1,348 @@
 # ==============================================================================
-# SCRIPT CORREGIDO PARA: pages/Comparativa de Rendimiento.py
-# VERSIÓN: 16 de Julio, 2025
-# CORRECCIÓN: Se verifica y alinea la lógica de cálculo de KPIs para que sea
-#             100% compatible con los datos pre-procesados por la página principal.
-#             Se añaden docstrings y comentarios para máxima claridad.
+# SCRIPT PARA PÁGINA: 🎯 Análisis de Potencial en Marquillas Clave
+# VERSIÓN: 1.0 (22 de Agosto, 2025)
+# AUTOR: Gemini (Basado en el script principal)
+# DESCRIPCIÓN: Esta página se enfoca exclusivamente en el análisis de las 5
+#              marquillas clave de la compañía. Calcula la venta actual, el
+#              promedio histórico y proyecta el potencial de venta máximo
+#              (punto de quiebre) si todos los clientes compraran el portafolio
+#              completo de marquillas.
 # ==============================================================================
 
 import streamlit as st
 import pandas as pd
-import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-import unicodedata
+import numpy as np
 
 # ==============================================================================
-# SECCIÓN 1: CONFIGURACIÓN DE PÁGINA Y VALIDACIÓN DE ACCESO
+# 1. CONFIGURACIÓN Y ESTILO DE LA PÁGINA
 # ==============================================================================
 
-st.set_page_config(page_title="Comparativa de Rendimiento", page_icon="📊", layout="wide")
+st.set_page_config(
+    page_title="Análisis de Potencial | Marquillas Clave",
+    page_icon="🎯",
+    layout="wide"
+)
 
-def normalizar_texto(texto):
-    """
-    Normaliza un texto a mayúsculas, sin tildes ni caracteres especiales.
-    Función de ayuda para consistencia.
-    """
-    if not isinstance(texto, str):
-        return texto
-    try:
-        texto_sin_tildes = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
-        return texto_sin_tildes.upper().replace('-', ' ').strip().replace('  ', ' ')
-    except (TypeError, AttributeError):
-        return texto
+st.markdown("""
+<style>
+    /* Estilo para los contenedores de métricas */
+    div[data-testid="stMetric"] {
+        background-color: #F0F2F6;
+        border: 1px solid #E0E0E0;
+        padding: 15px;
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    /* Estilo para el valor de la métrica */
+    div[data-testid="stMetricValue"] {
+        font-size: 2.5em;
+        font-weight: bold;
+    }
+    /* Estilo para el delta de la métrica */
+    div[data-testid="stMetricDelta"] {
+        font-size: 1.2em;
+        font-weight: 600;
+        color: #28a745 !important; /* Verde para el delta positivo */
+    }
+</style>
+""", unsafe_allow_html=True)
 
-# --- Validación de Acceso y Datos ---
-
-# Esta página es exclusiva para el perfil de Gerente
-if normalizar_texto(st.session_state.get('usuario', '')) != "GERENTE":
-    st.header("🔒 Acceso Exclusivo para Gerencia")
-    st.warning("Esta sección solo está disponible para el perfil de 'GERENTE'.")
-    st.image("https://raw.githubusercontent.com/DiegoMao201/Resumen-Ventas-Gerenciales/main/LOGO%20FERREINOX%20SAS%20BIC%202024.png", width=300)
-    st.stop()
-
-# Carga de datos PRE-PROCESADOS desde la sesión principal
-df_ventas_historico = st.session_state.get('df_ventas')
-
-# Validar que los datos existen
-if df_ventas_historico is None or df_ventas_historico.empty:
-    st.error("Error crítico: No se pudieron cargar los datos. Por favor, regrese a la página '🏠 Resumen Mensual' y vuelva a intentarlo.")
-    st.stop()
-
+# Las marquillas clave definidas en el script principal
+MARQUILLAS_CLAVE = ['VINILTEX', 'KORAZA', 'ESTUCOMAS', 'VINILICO', 'PINTULUX']
 
 # ==============================================================================
-# SECCIÓN 2: LÓGICA DE ANÁLISIS (El "Cerebro")
+# 2. FUNCIONES DE CÁLCULO Y ANÁLISIS
 # ==============================================================================
 
 @st.cache_data
-def calcular_kpis_globales(_df_ventas):
+def filtrar_ventas_marquillas(_df_ventas_historicas):
     """
-    Calcula un conjunto de KPIs para cada vendedor sobre el histórico completo.
-
-    Args:
-        _df_ventas (pd.DataFrame): El DataFrame de ventas pre-procesado.
-
-    Returns:
-        tuple: Un DataFrame con los KPIs por vendedor y una Serie con los promedios.
+    Filtra el historial de ventas para incluir solo transacciones de las
+    marquillas clave y añade una columna con la marquilla identificada.
     """
-    # Usar una copia para evitar advertencias de cache
-    df_ventas = _df_ventas.copy()
-    df_ventas = df_ventas.dropna(subset=['nomvendedor', 'nombre_articulo'])
-
-    # Identificar descuentos de forma global para usar en el cálculo del margen
-    # Se asume que los nombres de artículo ya están normalizados por el script principal
-    filtro_descuento = (df_ventas['nombre_articulo'].str.contains('DESCUENTO', case=False, na=False)) & \
-                       (df_ventas['nombre_articulo'].str.contains('COMERCIAL', case=False, na=False))
-
-    df_descuentos_global = df_ventas[filtro_descuento]
-    df_productos_global = df_ventas[~filtro_descuento]
-
-    kpis_list = []
-    # Usar la columna 'nomvendedor' que ya viene normalizada del script principal
-    vendedores = df_productos_global['nomvendedor'].unique()
-
-    for vendedor in vendedores:
-        df_vendedor_prods = df_productos_global[df_productos_global['nomvendedor'] == vendedor]
-        df_vendedor_dctos = df_descuentos_global[df_descuentos_global['nomvendedor'] == vendedor]
-
-        if df_vendedor_prods.empty:
-            continue
-
-        # Se calcula la Venta Bruta solo sobre productos, excluyendo descuentos.
-        venta_bruta = df_vendedor_prods['valor_venta'].sum()
-
-        # Se calcula el margen bruto a partir de los productos.
-        # Confía en que costo_unitario y unidades_vendidas son numéricos.
-        margen_bruto = (df_vendedor_prods['valor_venta'] - (df_vendedor_prods['costo_unitario'].fillna(0) * df_vendedor_prods['unidades_vendidas'].fillna(0))).sum()
-        total_descuentos = abs(df_vendedor_dctos['valor_venta'].sum())
-
-        # El margen operativo es el margen bruto de productos menos los descuentos.
-        margen_operativo = margen_bruto - total_descuentos
-        clientes_unicos = df_vendedor_prods['cliente_id'].nunique()
-
-        kpis_list.append({
-            'Vendedor': vendedor,
-            'Ventas Brutas': venta_bruta,
-            'Margen Operativo (%)': (margen_operativo / venta_bruta * 100) if venta_bruta > 0 else 0,
-            'Descuento Concedido (%)': (total_descuentos / venta_bruta * 100) if venta_bruta > 0 else 0,
-            'Clientes Únicos': clientes_unicos,
-            'Ticket Promedio': venta_bruta / clientes_unicos if clientes_unicos > 0 else 0
-        })
-
-    if not kpis_list:
-        return pd.DataFrame(), pd.Series(dtype='float64')
-
-    df_kpis = pd.DataFrame(kpis_list)
-    promedios = df_kpis.select_dtypes(include=np.number).mean()
-    return df_kpis, promedios
-
-
-# ==============================================================================
-# SECCIÓN 3: COMPONENTES DE LA INTERFAZ DE USUARIO (UI)
-# ==============================================================================
-
-def render_radar_chart(df_kpis, vendedor_seleccionado):
-    """Renderiza un gráfico de radar comparando a un vendedor con el promedio."""
-    st.subheader(f"Radar de Competencias: {vendedor_seleccionado} vs. Promedio del Equipo")
+    # Crear una expresión regex para buscar cualquiera de las marquillas
+    regex_marquillas = '|'.join(MARQUILLAS_CLAVE)
     
-    # KPIs a incluir en el radar y si un valor más alto es mejor (True) o peor (False)
-    kpis_radar = {
-        'Ventas Brutas': True,
-        'Margen Operativo (%)': True,
-        'Clientes Únicos': True,
-        'Ticket Promedio': True,
-        'Descuento Concedido (%)': False  # Para descuentos, un valor más bajo es mejor
-    }
-    
-    # Normalizar los datos a percentiles para que sean comparables en la misma escala
-    df_percentiles = df_kpis.copy()
-    for kpi, higher_is_better in kpis_radar.items():
-        if kpi not in df_percentiles.columns:
-            continue
-        # rank(pct=True) convierte cada valor a su percentil (0.0 a 1.0)
-        rank_series = df_percentiles[kpi].rank(pct=True)
-        # Si un valor más bajo es mejor (como en descuentos), invertimos el percentil
-        df_percentiles[kpi] = rank_series if higher_is_better else (1 - rank_series)
+    # Filtrar el DataFrame
+    df_filtrado = _df_ventas_historicas[
+        _df_ventas_historicas['nombre_articulo'].str.contains(regex_marquillas, case=False, na=False)
+    ].copy()
 
-    datos_vendedor = df_percentiles[df_percentiles['Vendedor'] == vendedor_seleccionado].iloc[0]
-    # El "promedio" en un ranking de percentiles es siempre el punto medio (0.5)
-    valores_promedio = [0.5] * len(kpis_radar)
+    # Extraer la marquilla específica para cada venta
+    # Esto asegura que si un nombre de artículo contiene dos (poco probable), se tome la primera
+    df_filtrado['marquilla'] = df_filtrado['nombre_articulo'].str.extract(f'({regex_marquillas})', flags=re.IGNORECASE)[0].str.upper()
+    df_filtrado.dropna(subset=['marquilla'], inplace=True)
     
-    fig = go.Figure()
-    fig.add_trace(go.Scatterpolar(r=valores_promedio, theta=list(kpis_radar.keys()), fill='toself', name='Promedio Equipo'))
-    fig.add_trace(go.Scatterpolar(r=datos_vendedor[list(kpis_radar.keys())].values, theta=list(kpis_radar.keys()), fill='toself', name=vendedor_seleccionado))
-    
-    fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 1])))
-    st.plotly_chart(fig, use_container_width=True)
+    return df_filtrado
 
-def render_ranking_chart(df_kpis, kpi_seleccionado):
-    """Renderiza un gráfico de barras como ranking para un KPI específico."""
-    st.subheader(f"Ranking de Vendedores por: {kpi_seleccionado}")
-    
-    # Ordenar de forma descendente, excepto para descuentos que es ascendente
-    ascending_order = True if kpi_seleccionado == 'Descuento Concedido (%)' else False
-    df_sorted = df_kpis.sort_values(by=kpi_seleccionado, ascending=ascending_order)
-    
-    fig = px.bar(df_sorted, x=kpi_seleccionado, y='Vendedor', orientation='h', text_auto=True, title=f"Ranking por {kpi_seleccionado}")
-    fig.update_layout(yaxis={'categoryorder':'total ascending'})
-    st.plotly_chart(fig, use_container_width=True)
+@st.cache_data
+def calcular_matriz_compra(_df_ventas_marquillas):
+    """
+    Crea una matriz que muestra qué clientes han comprado qué marquillas.
+    Retorna la matriz y el número de marquillas compradas por cliente.
+    """
+    if _df_ventas_marquillas.empty:
+        return pd.DataFrame(), pd.Series(dtype=int)
 
-def render_matriz_equipo(df_kpis, promedios, vendedor_seleccionado):
-    """Renderiza la matriz estratégica y el análisis automático."""
-    st.subheader("Matriz Estratégica del Equipo (Ventas vs. Margen)")
-    
-    avg_ventas = promedios['Ventas Brutas']
-    avg_margen = promedios['Margen Operativo (%)']
+    matriz = pd.crosstab(
+        index=_df_ventas_marquillas['nombre_cliente'],
+        columns=_df_ventas_marquillas['marquilla'],
+        values=_df_ventas_marquillas['valor_venta'],
+        aggfunc='sum'
+    ).fillna(0)
 
-    fig = px.scatter(df_kpis, x='Ventas Brutas', y='Margen Operativo (%)',
-                     size='Clientes Únicos', color='Vendedor', hover_name='Vendedor',
-                     hover_data={'Vendedor': False, 'Clientes Únicos': True, 'Ticket Promedio': ':.2f'})
+    # Convertir a binario (1 si compró, 0 si no)
+    matriz_binaria = (matriz > 0).astype(int)
     
-    fig.update_traces(marker=dict(sizemin=5))
-    fig.add_vline(x=avg_ventas, line_width=1.5, line_dash="dash", line_color="grey", annotation_text="Promedio Ventas")
-    fig.add_hline(y=avg_margen, line_width=1.5, line_dash="dash", line_color="grey", annotation_text="Promedio Margen")
+    # Asegurarse de que todas las marquillas clave estén como columnas
+    for marquilla in MARQUILLAS_CLAVE:
+        if marquilla not in matriz_binaria.columns:
+            matriz_binaria[marquilla] = 0
+            
+    # Contar cuántas marquillas ha comprado cada cliente
+    matriz_binaria['conteo_marquillas'] = matriz_binaria[MARQUILLAS_CLAVE].sum(axis=1)
     
-    st.plotly_chart(fig, use_container_width=True)
+    return matriz_binaria.sort_values('conteo_marquillas', ascending=False)
 
-    # --- ANÁLISIS AUTOMÁTICO Y CONCLUSIONES ---
-    st.subheader(f"Análisis Estratégico para: {vendedor_seleccionado}")
-    with st.container(border=True):
-        datos_vendedor = df_kpis[df_kpis['Vendedor'] == vendedor_seleccionado].iloc[0]
-        ventas_vendedor = datos_vendedor['Ventas Brutas']
-        margen_vendedor = datos_vendedor['Margen Operativo (%)']
 
-        # Lógica para determinar el cuadrante y la recomendación
-        if ventas_vendedor >= avg_ventas and margen_vendedor >= avg_margen:
-            cuadrante = "⭐ Líderes (Rockstars)"
-            analisis = "Este vendedor es un pilar del equipo, generando alto volumen con alta rentabilidad. **Estrategia:** Proteger, invertir en su desarrollo y utilizarlo como mentor para replicar sus buenas prácticas."
-        elif ventas_vendedor >= avg_ventas and margen_vendedor < avg_margen:
-            cuadrante = "🐄 Constructores de Volumen"
-            analisis = "Este vendedor es excelente moviendo producto y generando flujo de caja, pero a costa de la rentabilidad. **Estrategia:** Coaching enfocado en técnicas de negociación, defensa de precios y venta de mix de productos con mayor margen."
-        elif ventas_vendedor < avg_ventas and margen_vendedor >= avg_margen:
-            cuadrante = "❓ Especialistas de Nicho"
-            analisis = "Este vendedor es muy eficiente en rentabilidad, pero con un alcance de ventas limitado. **Estrategia:** Identificar si su éxito se puede escalar. Coaching para aumentar su base de clientes y volumen sin sacrificar su buen margen."
+@st.cache_data
+def calcular_potencial_venta(_df_ventas_marquillas, _df_todos_los_clientes):
+    """
+    Calcula el "punto de quiebre": el potencial de venta si cada cliente
+    comprara las marquillas que le faltan.
+    """
+    if _df_ventas_marquillas.empty or _df_todos_los_clientes.empty:
+        return 0, {}
+
+    # 1. Calcular el valor de compra promedio por marquilla para los clientes que SÍ la compran
+    ticket_promedio_por_marquilla = {}
+    for marquilla in MARQUILLAS_CLAVE:
+        df_marquilla_especifica = _df_ventas_marquillas[_df_ventas_marquillas['marquilla'] == marquilla]
+        if not df_marquilla_especifica.empty:
+            # Agrupar por cliente para obtener el total que cada uno ha gastado en la marquilla
+            gasto_por_cliente = df_marquilla_especifica.groupby('nombre_cliente')['valor_venta'].sum()
+            ticket_promedio = gasto_por_cliente.mean()
+            ticket_promedio_por_marquilla[marquilla] = ticket_promedio
         else:
-            cuadrante = "🌱 En Desarrollo"
-            analisis = "Este vendedor necesita un plan de desarrollo integral en ambos frentes. **Estrategia:** Establecer metas claras y semanales, acompañamiento en campo y formación intensiva en producto y técnicas de venta."
+            ticket_promedio_por_marquilla[marquilla] = 0 # Si una marquilla nunca se ha vendido
 
-        st.markdown(f"**Posición:** `{vendedor_seleccionado}` se encuentra en el cuadrante de **{cuadrante}**.")
-        st.markdown(f"**Análisis y Recomendación:** {analisis}")
+    # 2. Crear la matriz de compra
+    matriz_compra = calcular_matriz_compra(_df_ventas_marquillas)[0]
 
+    # 3. Calcular el potencial
+    venta_potencial_total = 0
+    potencial_por_marquilla = {m: 0 for m in MARQUILLAS_CLAVE}
+    
+    # Iterar sobre todos los clientes únicos de la empresa
+    for cliente in _df_todos_los_clientes['nombre_cliente'].unique():
+        for marquilla in MARQUILLAS_CLAVE:
+            # Verificar si el cliente ha comprado esta marquilla
+            compro = False
+            if cliente in matriz_compra.index and matriz_compra.loc[cliente, marquilla] == 1:
+                compro = True
+            
+            # Si no la ha comprado, es una oportunidad
+            if not compro:
+                potencial = ticket_promedio_por_marquilla.get(marquilla, 0)
+                venta_potencial_total += potencial
+                potencial_por_marquilla[marquilla] += potencial
+
+    return venta_potencial_total, potencial_por_marquilla
 
 # ==============================================================================
-# SECCIÓN 4: EJECUCIÓN PRINCIPAL DE LA PÁGINA
+# 3. RENDERIZADO DE LA PÁGINA
 # ==============================================================================
 
-st.title("📊 Comparativa de Rendimiento de Vendedores")
-st.markdown("Analiza y compara el desempeño del equipo para identificar líderes y oportunidades de coaching. Todos los datos corresponden al histórico completo.")
-st.markdown("---")
+def render_pagina_analisis():
+    """Función principal que dibuja todos los componentes de la página."""
+    
+    st.title("🎯 Análisis de Potencial en Marquillas Clave")
+    st.markdown("Esta sección ofrece una visión profunda del rendimiento y las oportunidades de venta cruzada para las **5 líneas de productos más importantes**. Descubre el potencial oculto en tu cartera de clientes.")
+    
+    # --- VERIFICACIÓN DE DATOS ---
+    if 'df_ventas' not in st.session_state or st.session_state.df_ventas.empty:
+        st.error("No se han cargado los datos de ventas. Por favor, ve a la página principal 'Resumen Mensual' y carga los datos primero.")
+        st.warning("Esta página depende de los datos cargados en la sesión principal de la aplicación.")
+        return
 
-# 1. Calcular los KPIs para todos los vendedores
-df_kpis, promedios = calcular_kpis_globales(df_ventas_historico)
+    df_ventas_historicas = st.session_state.df_ventas
 
-if df_kpis.empty:
-    st.warning("No hay suficientes datos de vendedores con ventas para generar una comparativa.")
-    st.stop()
+    # --- FILTROS DE PERIODO ---
+    st.sidebar.header("Filtros de Periodo")
+    lista_anios = sorted(df_ventas_historicas['anio'].unique(), reverse=True)
+    anio_sel = st.sidebar.selectbox(
+        "Elija el Año", 
+        lista_anios, 
+        index=0, 
+        key="sb_anio_analisis"
+    )
+    
+    lista_meses_num = sorted(df_ventas_historicas[df_ventas_historicas['anio'] == anio_sel]['mes'].unique())
+    if not lista_meses_num:
+        st.warning(f"No hay datos de ventas para el año {anio_sel}.")
+        return
 
-# 2. Crear los selectores para la interactividad
-col1, col2 = st.columns(2)
-with col1:
-    vendedores_options = sorted(df_kpis['Vendedor'].unique())
-    vendedor_seleccionado = st.selectbox("Seleccione un Vendedor para analizar:", options=vendedores_options)
-with col2:
-    kpi_options = sorted(promedios.index)
-    kpi_ranking = st.selectbox("Seleccione una Métrica para el Ranking:", options=kpi_options)
+    # Usar el mapeo de meses desde el session_state si existe, si no, un fallback
+    mapeo_meses = st.session_state.get('DATA_CONFIG', {}).get('mapeo_meses', {i: str(i) for i in range(1, 13)})
+    mes_sel_num = st.sidebar.selectbox(
+        "Elija el Mes", 
+        options=lista_meses_num, 
+        format_func=lambda x: mapeo_meses.get(x, 'N/A'), 
+        index=len(lista_meses_num) - 1, 
+        key="sb_mes_analisis"
+    )
 
-# 3. Renderizar los componentes de la UI basados en la selección
-if vendedor_seleccionado:
-    render_radar_chart(df_kpis, vendedor_seleccionado)
+    # --- CÁLCULOS PRINCIPALES ---
+    with st.spinner("Analizando el universo de ventas...  ब्रह्मांड का विश्लेषण"):
+        df_ventas_marquillas = filtrar_ventas_marquillas(df_ventas_historicas)
+        
+        # Datos del mes actual
+        df_mes_actual = df_ventas_marquillas[
+            (df_ventas_marquillas['anio'] == anio_sel) & 
+            (df_ventas_marquillas['mes'] == mes_sel_num)
+        ]
+        venta_mes_actual = df_mes_actual['valor_venta'].sum()
+        
+        # Promedio mensual histórico (incluyendo mes actual)
+        total_meses_con_venta = df_ventas_marquillas.groupby(['anio', 'mes']).ngroups
+        venta_total_historica = df_ventas_marquillas['valor_venta'].sum()
+        promedio_mensual = venta_total_historica / total_meses_con_venta if total_meses_con_venta > 0 else 0
+
+        # Potencial de Venta (Punto de Quiebre)
+        potencial_total, potencial_por_marquilla = calcular_potencial_venta(df_ventas_marquillas, df_ventas_historicas)
+        
+    # --- VISUALIZACIÓN DE MÉTRICAS CLAVE ---
+    st.header(f"Indicadores para {mapeo_meses.get(mes_sel_num, '')} {anio_sel}")
     st.markdown("---")
-    render_matriz_equipo(df_kpis, promedios, vendedor_seleccionado)
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric(
+            label="📈 Venta del Mes Actual (Marquillas)",
+            value=f"${venta_mes_actual:,.0f}",
+            help="Suma de las ventas netas de las 5 marquillas clave en el periodo seleccionado."
+        )
+    with col2:
+        st.metric(
+            label="📊 Promedio Mensual Histórico",
+            value=f"${promedio_mensual:,.0f}",
+            delta=f"{(venta_mes_actual - promedio_mensual):,.0f} vs Promedio",
+            help="Venta promedio mensual de las marquillas clave, calculado sobre todo el historial de datos."
+        )
+    with col3:
+        st.metric(
+            label="🚀 POTENCIAL TOTAL (Punto de Quiebre)",
+            value=f"${potencial_total:,.0f}",
+            help="Estimación de la venta adicional si cada cliente activo comprara las marquillas que le faltan, basado en el ticket promedio por marquilla."
+        )
+
     st.markdown("---")
-    render_ranking_chart(df_kpis, kpi_ranking)
+    
+    # --- GRÁFICOS DE ANÁLISIS ---
+    
+    st.header("Análisis Visual del Potencial")
+    
+    col_g1, col_g2 = st.columns([0.6, 0.4])
+    
+    with col_g1:
+        st.subheader("Comparativa: Realidad vs. Potencial")
+        
+        fig_comparativa = go.Figure(data=[
+            go.Bar(name='Venta Mes Actual', x=['Análisis'], y=[venta_mes_actual], text=f"${venta_mes_actual/1e6:.1f}M", textposition='auto'),
+            go.Bar(name='Promedio Mensual', x=['Análisis'], y=[promedio_mensual], text=f"${promedio_mensual/1e6:.1f}M", textposition='auto'),
+            go.Bar(name='Potencial Adicional', x=['Análisis'], y=[potencial_total], text=f"${potencial_total/1e6:.1f}M", textposition='auto')
+        ])
+        fig_comparativa.update_layout(
+            barmode='group',
+            title_text='Venta Actual vs. Oportunidad de Crecimiento',
+            yaxis_title='Valor (COP)',
+            legend_title_text='Métricas',
+            height=400
+        )
+        st.plotly_chart(fig_comparativa, use_container_width=True)
+
+    with col_g2:
+        st.subheader("Oportunidad por Marquilla")
+        df_potencial = pd.DataFrame(list(potencial_por_marquilla.items()), columns=['Marquilla', 'Potencial'])
+        df_potencial = df_potencial.sort_values('Potencial', ascending=False)
+        
+        fig_pie_potencial = px.pie(
+            df_potencial, 
+            names='Marquilla', 
+            values='Potencial', 
+            title="Distribución del Potencial de Venta",
+            hole=0.4
+        )
+        fig_pie_potencial.update_traces(textinfo='percent+label', textposition='outside')
+        fig_pie_potencial.update_layout(height=400, showlegend=False)
+        st.plotly_chart(fig_pie_potencial, use_container_width=True)
+
+    # --- ANÁLISIS Y SEGMENTACIÓN DE CLIENTES ---
+    st.markdown("---")
+    st.header("Segmentación de Clientes por Portafolio de Marquillas")
+    st.info("Utilice estas listas para enfocar sus esfuerzos de venta cruzada en los clientes con mayor potencial.")
+
+    matriz_clientes, _ = calcular_matriz_compra(df_ventas_marquillas)
+
+    # Definir los segmentos
+    campeones = matriz_clientes[matriz_clientes['conteo_marquillas'] == 5]
+    alto_potencial = matriz_clientes[matriz_clientes['conteo_marquillas'] == 4]
+    oportunidades = matriz_clientes[matriz_clientes['conteo_marquillas'] == 3]
+    bajo_penetracion = matriz_clientes[matriz_clientes['conteo_marquillas'] < 3]
+
+    # Función para identificar las marquillas faltantes
+    def get_faltantes(row):
+        return ", ".join([m for m in MARQUILLAS_CLAVE if row[m] == 0])
+
+    tab1, tab2, tab3, tab4 = st.tabs([
+        f"🏆 Campeones ({len(campeones)})",
+        f"🥇 Alto Potencial ({len(alto_potencial)})",
+        f"🥈 Oportunidades Claras ({len(oportunidades)})",
+        f"🥉 Baja Penetración ({len(bajo_penetracion)})"
+    ])
+
+    with tab1:
+        st.subheader("Clientes que ya compran todo el portafolio clave.")
+        if campeones.empty:
+            st.info("Aún no hay clientes que hayan comprado las 5 marquillas clave.")
+        else:
+            st.dataframe(campeones.reset_index()[['nombre_cliente', 'conteo_marquillas']], use_container_width=True, hide_index=True)
+
+    with tab2:
+        st.subheader("Clientes a punto de completar el portafolio (Falta 1 marquilla).")
+        if alto_potencial.empty:
+            st.info("No hay clientes en este segmento.")
+        else:
+            alto_potencial['marquilla_faltante'] = alto_potencial.apply(get_faltantes, axis=1)
+            st.dataframe(alto_potencial.reset_index()[['nombre_cliente', 'conteo_marquillas', 'marquilla_faltante']], use_container_width=True, hide_index=True)
+
+    with tab3:
+        st.subheader("Clientes con potencial claro de crecimiento (Faltan 2 marquillas).")
+        if oportunidades.empty:
+            st.info("No hay clientes en este segmento.")
+        else:
+            oportunidades['marquillas_faltantes'] = oportunidades.apply(get_faltantes, axis=1)
+            st.dataframe(oportunidades.reset_index()[['nombre_cliente', 'conteo_marquillas', 'marquillas_faltantes']], use_container_width=True, hide_index=True)
+            
+    with tab4:
+        st.subheader("Clientes con la mayor oportunidad de venta cruzada (Faltan 3 o más).")
+        if bajo_penetracion.empty:
+            st.info("No hay clientes en este segmento.")
+        else:
+            bajo_penetracion['marquillas_faltantes'] = bajo_penetracion.apply(get_faltantes, axis=1)
+            st.dataframe(bajo_penetracion.reset_index()[['nombre_cliente', 'conteo_marquillas', 'marquillas_faltantes']], use_container_width=True, hide_index=True)
+
+
+# --- Punto de entrada del script ---
+if __name__ == '__main__':
+    # Verificar autenticación
+    if 'autenticado' in st.session_state and st.session_state.autenticado:
+        render_pagina_analisis()
+    else:
+        st.title("Acceso Restringido")
+        st.image("https://raw.githubusercontent.com/DiegoMao2021/Resumen-Ventas-Gerenciales/main/LOGO%20FERREINOX%20SAS%20BIC%202024.png", width=300)
+        st.warning("🔒 Por favor, inicie sesión desde la página principal para acceder a este análisis.")
+        st.info("Esta es una página de análisis avanzado que requiere que los datos maestros sean cargados primero.")
+        st.page_link("Resumen_Mensual.py", label="Ir a la página de inicio de sesión", icon="🏠")
