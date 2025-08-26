@@ -1,13 +1,10 @@
 # ==============================================================================
 # SCRIPT PARA PÁGINA: 🎯 Análisis de Potencial en Marquillas Clave
-# VERSIÓN: 1.1 (26 de Agosto, 2025)
+# VERSIÓN: 1.2 (26 de Agosto, 2025)
 # AUTOR: Gemini (Basado en el script principal)
-# CORRECCIÓN: Se añade la importación del módulo 're' para solucionar NameError.
-# DESCRIPCIÓN: Esta página se enfoca exclusivamente en el análisis de las 5
-#              marquillas clave de la compañía. Calcula la venta actual, el
-#              promedio histórico y proyecta el potencial de venta máximo
-#              (punto de quiebre) si todos los clientes compraran el portafolio
-#              completo de marquillas.
+# CORRECCIÓN: Se soluciona el error 'KeyError: 0' al corregir la llamada a la
+#              función 'calcular_matriz_compra'. Se unifica la lógica para
+#              evitar inconsistencias en el retorno de la función.
 # ==============================================================================
 
 import streamlit as st
@@ -15,7 +12,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
-import re # <-- ESTA ES LA LÍNEA QUE SOLUCIONA EL ERROR
+import re
 
 # ==============================================================================
 # 1. CONFIGURACIÓN Y ESTILO DE LA PÁGINA
@@ -64,29 +61,22 @@ def filtrar_ventas_marquillas(_df_ventas_historicas):
     Filtra el historial de ventas para incluir solo transacciones de las
     marquillas clave y añade una columna con la marquilla identificada.
     """
-    # Crear una expresión regex para buscar cualquiera de las marquillas
     regex_marquillas = '|'.join(MARQUILLAS_CLAVE)
-    
-    # Filtrar el DataFrame
     df_filtrado = _df_ventas_historicas[
         _df_ventas_historicas['nombre_articulo'].str.contains(regex_marquillas, case=False, na=False)
     ].copy()
-
-    # Extraer la marquilla específica para cada venta
-    # Esto asegura que si un nombre de artículo contiene dos (poco probable), se tome la primera
     df_filtrado['marquilla'] = df_filtrado['nombre_articulo'].str.extract(f'({regex_marquillas})', flags=re.IGNORECASE)[0].str.upper()
     df_filtrado.dropna(subset=['marquilla'], inplace=True)
-    
     return df_filtrado
 
 @st.cache_data
 def calcular_matriz_compra(_df_ventas_marquillas):
     """
-    Crea una matriz que muestra qué clientes han comprado qué marquillas.
-    Retorna la matriz y el número de marquillas compradas por cliente.
+    Crea una matriz que muestra qué clientes (filas) han comprado
+    qué marquillas (columnas), marcada con 1 si hubo compra y 0 si no.
     """
     if _df_ventas_marquillas.empty:
-        return pd.DataFrame(), pd.Series(dtype=int)
+        return pd.DataFrame()
 
     matriz = pd.crosstab(
         index=_df_ventas_marquillas['nombre_cliente'],
@@ -95,15 +85,12 @@ def calcular_matriz_compra(_df_ventas_marquillas):
         aggfunc='sum'
     ).fillna(0)
 
-    # Convertir a binario (1 si compró, 0 si no)
     matriz_binaria = (matriz > 0).astype(int)
     
-    # Asegurarse de que todas las marquillas clave estén como columnas
     for marquilla in MARQUILLAS_CLAVE:
         if marquilla not in matriz_binaria.columns:
             matriz_binaria[marquilla] = 0
             
-    # Contar cuántas marquillas ha comprado cada cliente
     matriz_binaria['conteo_marquillas'] = matriz_binaria[MARQUILLAS_CLAVE].sum(axis=1)
     
     return matriz_binaria.sort_values('conteo_marquillas', ascending=False)
@@ -118,34 +105,30 @@ def calcular_potencial_venta(_df_ventas_marquillas, _df_todos_los_clientes):
     if _df_ventas_marquillas.empty or _df_todos_los_clientes.empty:
         return 0, {}
 
-    # 1. Calcular el valor de compra promedio por marquilla para los clientes que SÍ la compran
+    # 1. Calcular el valor de compra promedio por marquilla
     ticket_promedio_por_marquilla = {}
     for marquilla in MARQUILLAS_CLAVE:
         df_marquilla_especifica = _df_ventas_marquillas[_df_ventas_marquillas['marquilla'] == marquilla]
         if not df_marquilla_especifica.empty:
-            # Agrupar por cliente para obtener el total que cada uno ha gastado en la marquilla
             gasto_por_cliente = df_marquilla_especifica.groupby('nombre_cliente')['valor_venta'].sum()
-            ticket_promedio = gasto_por_cliente.mean()
-            ticket_promedio_por_marquilla[marquilla] = ticket_promedio
+            ticket_promedio_por_marquilla[marquilla] = gasto_por_cliente.mean()
         else:
-            ticket_promedio_por_marquilla[marquilla] = 0 # Si una marquilla nunca se ha vendido
+            ticket_promedio_por_marquilla[marquilla] = 0
 
-    # 2. Crear la matriz de compra
-    matriz_compra = calcular_matriz_compra(_df_ventas_marquillas)[0]
+    # 2. Crear la matriz de compra (LÍNEA CORREGIDA)
+    # Se remueve el `[0]` que causaba el KeyError
+    matriz_compra = calcular_matriz_compra(_df_ventas_marquillas)
 
     # 3. Calcular el potencial
     venta_potencial_total = 0
     potencial_por_marquilla = {m: 0 for m in MARQUILLAS_CLAVE}
     
-    # Iterar sobre todos los clientes únicos de la empresa
     for cliente in _df_todos_los_clientes['nombre_cliente'].unique():
         for marquilla in MARQUILLAS_CLAVE:
-            # Verificar si el cliente ha comprado esta marquilla
             compro = False
             if cliente in matriz_compra.index and matriz_compra.loc[cliente, marquilla] == 1:
                 compro = True
             
-            # Si no la ha comprado, es una oportunidad
             if not compro:
                 potencial = ticket_promedio_por_marquilla.get(marquilla, 0)
                 venta_potencial_total += potencial
@@ -163,7 +146,6 @@ def render_pagina_analisis():
     st.title("🎯 Análisis de Potencial en Marquillas Clave")
     st.markdown("Esta sección ofrece una visión profunda del rendimiento y las oportunidades de venta cruzada para las **5 líneas de productos más importantes**. Descubre el potencial oculto en tu cartera de clientes.")
     
-    # --- VERIFICACIÓN DE DATOS ---
     if 'df_ventas' not in st.session_state or st.session_state.df_ventas.empty:
         st.error("No se han cargado los datos de ventas. Por favor, ve a la página principal 'Resumen Mensual' y carga los datos primero.")
         st.warning("Esta página depende de los datos cargados en la sesión principal de la aplicación.")
@@ -171,7 +153,6 @@ def render_pagina_analisis():
 
     df_ventas_historicas = st.session_state.df_ventas
 
-    # --- FILTROS DE PERIODO ---
     st.sidebar.header("Filtros de Periodo")
     lista_anios = sorted(df_ventas_historicas['anio'].unique(), reverse=True)
     anio_sel = st.sidebar.selectbox(
@@ -186,7 +167,6 @@ def render_pagina_analisis():
         st.warning(f"No hay datos de ventas para el año {anio_sel}.")
         return
 
-    # Usar el mapeo de meses desde el session_state si existe, si no, un fallback
     mapeo_meses = st.session_state.get('DATA_CONFIG', {}).get('mapeo_meses', {i: str(i) for i in range(1, 13)})
     mes_sel_num = st.sidebar.selectbox(
         "Elija el Mes", 
@@ -196,26 +176,21 @@ def render_pagina_analisis():
         key="sb_mes_analisis"
     )
 
-    # --- CÁLCULOS PRINCIPALES ---
     with st.spinner("Analizando el universo de ventas..."):
         df_ventas_marquillas = filtrar_ventas_marquillas(df_ventas_historicas)
         
-        # Datos del mes actual
         df_mes_actual = df_ventas_marquillas[
             (df_ventas_marquillas['anio'] == anio_sel) & 
             (df_ventas_marquillas['mes'] == mes_sel_num)
         ]
         venta_mes_actual = df_mes_actual['valor_venta'].sum()
         
-        # Promedio mensual histórico (incluyendo mes actual)
         total_meses_con_venta = df_ventas_marquillas.groupby(['anio', 'mes']).ngroups
         venta_total_historica = df_ventas_marquillas['valor_venta'].sum()
         promedio_mensual = venta_total_historica / total_meses_con_venta if total_meses_con_venta > 0 else 0
 
-        # Potencial de Venta (Punto de Quiebre)
         potencial_total, potencial_por_marquilla = calcular_potencial_venta(df_ventas_marquillas, df_ventas_historicas)
         
-    # --- VISUALIZACIÓN DE MÉTRICAS CLAVE ---
     st.header(f"Indicadores para {mapeo_meses.get(mes_sel_num, '')} {anio_sel}")
     st.markdown("---")
 
@@ -241,9 +216,6 @@ def render_pagina_analisis():
         )
 
     st.markdown("---")
-    
-    # --- GRÁFICOS DE ANÁLISIS ---
-    
     st.header("Análisis Visual del Potencial")
     
     col_g1, col_g2 = st.columns([0.6, 0.4])
@@ -281,20 +253,18 @@ def render_pagina_analisis():
         fig_pie_potencial.update_layout(height=400, showlegend=False)
         st.plotly_chart(fig_pie_potencial, use_container_width=True)
 
-    # --- ANÁLISIS Y SEGMENTACIÓN DE CLIENTES ---
     st.markdown("---")
     st.header("Segmentación de Clientes por Portafolio de Marquillas")
     st.info("Utilice estas listas para enfocar sus esfuerzos de venta cruzada en los clientes con mayor potencial.")
 
-    matriz_clientes, _ = calcular_matriz_compra(df_ventas_marquillas)
+    # LÍNEA CORREGIDA: Se remueve la desestructuración `_,` que causaría un error.
+    matriz_clientes = calcular_matriz_compra(df_ventas_marquillas)
 
-    # Definir los segmentos
     campeones = matriz_clientes[matriz_clientes['conteo_marquillas'] == 5]
     alto_potencial = matriz_clientes[matriz_clientes['conteo_marquillas'] == 4]
     oportunidades = matriz_clientes[matriz_clientes['conteo_marquillas'] == 3]
     bajo_penetracion = matriz_clientes[matriz_clientes['conteo_marquillas'] < 3]
 
-    # Función para identificar las marquillas faltantes
     def get_faltantes(row):
         return ", ".join([m for m in MARQUILLAS_CLAVE if row[m] == 0])
 
@@ -337,9 +307,7 @@ def render_pagina_analisis():
             st.dataframe(bajo_penetracion.reset_index()[['nombre_cliente', 'conteo_marquillas', 'marquillas_faltantes']], use_container_width=True, hide_index=True)
 
 
-# --- Punto de entrada del script ---
 if __name__ == '__main__':
-    # Verificar autenticación
     if 'autenticado' in st.session_state and st.session_state.autenticado:
         render_pagina_analisis()
     else:
