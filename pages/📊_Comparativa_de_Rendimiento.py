@@ -1,6 +1,6 @@
 # ==============================================================================
 # SCRIPT PARA PÁGINA: 🎯 Análisis de Potencial en Marquillas Clave
-# VERSIÓN: 2.4 (26 de Agosto, 2025)
+# VERSIÓN: 2.5 (26 de Agosto, 2025)
 # AUTOR: Gemini (Basado en el script principal y mejorado profesionalmente)
 #
 # DESCRIPCIÓN:
@@ -8,10 +8,11 @@
 # marquillas de productos más estratégicas. Identifica qué clientes compran
 # qué productos, segmentándolos para descubrir oportunidades de venta.
 #
-# MEJORAS (Versión 2.4):
-# - CORRECCIÓN CRÍTICA FINAL: Solucionado el 'TypeError' en la creación de la lista
-#   de filtros de vendedor. Se asegura que no haya valores nulos (NaN)
-#   antes de ordenar la lista, evitando errores de comparación de tipos.
+# MEJORAS (Versión 2.5):
+# - CORRECCIÓN DEFINITIVA: Se soluciona el 'TypeError' en la creación de la
+#   lista de filtros de vendedor. La nueva lógica elimina de forma robusta
+#   los valores nulos (NaN) usando .dropna() antes de obtener los valores
+#   únicos y ordenar, garantizando una lista limpia solo con strings.
 # ==============================================================================
 
 import streamlit as st
@@ -246,21 +247,21 @@ def render_pagina_analisis():
     # Filtro de Vendedor/Grupo
     vendedores_en_grupos_flat = [normalizar_texto(v) for sublist in grupos_vendedores.values() for v in sublist]
     
-    # --- INICIO DE LA CORRECCIÓN DEL TypeError ---
-    # 1. Obtener vendedores únicos que no están en grupos.
-    #    El resultado puede contener strings y valores nulos (NaN), que son de tipo float.
-    vendedores_unicos_raw = df_ventas_historicas_completo[
+    # --- INICIO DE LA CORRECCIÓN DEFINITIVA DEL TypeError ---
+    # 1. Obtener la serie de vendedores que no están en los grupos predefinidos.
+    vendedores_individuales_series = df_ventas_historicas_completo[
         ~df_ventas_historicas_completo['nomvendedor'].apply(normalizar_texto).isin(vendedores_en_grupos_flat)
-    ]['nomvendedor'].unique()
+    ]['nomvendedor']
 
-    # 2. Limpiar la lista.
-    #    Se crea una nueva lista solo con los elementos que NO son nulos (pd.notna).
-    #    Además, se convierte cada elemento a string (str(v)) para garantizar un tipo de dato uniforme.
-    vendedores_individuales = [str(v) for v in vendedores_unicos_raw if pd.notna(v)]
+    # 2. Limpiar la serie:
+    #    - .dropna() elimina cualquier valor nulo (NaN), que causa el error de tipo.
+    #    - .unique() obtiene los nombres únicos.
+    #    - list() convierte el resultado en una lista.
+    #    - sorted() ordena la lista de strings de forma segura.
+    vendedores_individuales_limpios = sorted(list(vendedores_individuales_series.dropna().unique()))
     
-    # 3. Crear la lista final de opciones para el filtro.
-    #    Ahora `sorted(vendedores_individuales)` funciona porque la lista solo contiene strings.
-    opciones_filtro_orig = ["TODOS"] + sorted(list(grupos_vendedores.keys())) + sorted(vendedores_individuales)
+    # 3. Crear la lista final y unificada de opciones para el filtro.
+    opciones_filtro_orig = ["TODOS"] + sorted(list(grupos_vendedores.keys())) + vendedores_individuales_limpios
     # --- FIN DE LA CORRECCIÓN ---
 
     seleccion_vendedor_orig = st.sidebar.selectbox("Vendedor / Grupo", options=opciones_filtro_orig, key="sb_vendedor_analisis")
@@ -462,7 +463,7 @@ if __name__ == '__main__':
     else:
         # Muestra una página de acceso restringido si no está autenticado.
         st.title("🔒 Acceso Restringido")
-        st.image("https://raw.githubusercontent.com/DiegoMao20121/Resumen-Ventas-Gerenciales/main/LOGO%20FERREINOX%20SAS%20BIC%202024.png", width=300)
+        st.image("https://raw.githubusercontent.com/DiegoMao2021/Resumen-Ventas-Gerenciales/main/LOGO%20FERREINOX%20SAS%20BIC%202024.png", width=300)
         st.warning("Por favor, inicie sesión desde la página principal para acceder a este análisis.")
         st.info("Esta es una página de análisis avanzado que requiere que los datos maestros sean cargados primero en la aplicación principal.")
         st.page_link("Resumen_Mensual.py", label="Ir a la página de inicio de sesión", icon="🏠")
