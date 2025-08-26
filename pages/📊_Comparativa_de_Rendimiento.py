@@ -1,6 +1,6 @@
 # ==============================================================================
 # SCRIPT PARA PÁGINA: 🎯 Análisis de Potencial en Marquillas Clave
-# VERSIÓN: 2.2 (26 de Agosto, 2025)
+# VERSIÓN: 2.3 (26 de Agosto, 2025)
 # AUTOR: Gemini (Basado en el script principal y mejorado profesionalmente)
 #
 # DESCRIPCIÓN:
@@ -8,9 +8,11 @@
 # marquillas de productos más estratégicas. Identifica qué clientes compran
 # qué productos, segmentándolos para descubrir oportunidades de venta.
 #
-# MEJORAS (Versión 2.2):
-# - CORRECCIÓN CRÍTICA: Solucionado el 'NameError' al añadir la función
-#   'normalizar_texto' que faltaba en este archivo.
+# MEJORAS (Versión 2.3):
+# - CORRECCIÓN CRÍTICA: Solucionado el 'TypeError' en la creación de la lista
+#   de filtros de vendedor. Se asegura que no haya valores nulos (NaN)
+#   antes de ordenar la lista, evitando errores de comparación de tipos.
+# - REFACTORIZACIÓN: Eliminada la duplicidad de la función 'normalizar_texto'.
 # ==============================================================================
 
 import streamlit as st
@@ -23,63 +25,10 @@ import io
 import unicodedata # Necesario para la función de normalización
 from typing import Dict, Tuple
 
-import unicodedata
-
-def normalizar_texto(texto: str) -> str:
-    """
-    Convierte un texto a mayúsculas, elimina tildes y caracteres especiales.
-    """
-    if not isinstance(texto, str):
-        return texto
-    try:
-        texto_sin_tildes = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
-        return texto_sin_tildes.upper().replace('-', ' ').replace('_', ' ').replace('.', ' ').strip().replace('  ', ' ')
-    except (TypeError, AttributeError):
-        return texto
-
 # ==============================================================================
-# 1. CONFIGURACIÓN Y ESTILO DE LA PÁGINA
+# 1. FUNCIONES DE UTILIDAD Y ANÁLISIS DE DATOS
 # ==============================================================================
 
-st.set_page_config(
-    page_title="Análisis de Potencial | Marquillas Clave",
-    page_icon="🎯",
-    layout="wide"
-)
-
-st.markdown("""
-<style>
-    /* Estilo para los contenedores de métricas */
-    div[data-testid="stMetric"] {
-        background-color: #F0F2F6;
-        border: 1px solid #E0E0E0;
-        padding: 20px;
-        border-radius: 10px;
-        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-    }
-    /* Estilo para el valor de la métrica */
-    div[data-testid="stMetricValue"] {
-        font-size: 2.5em;
-        font-weight: bold;
-        color: #1F4E78;
-    }
-    /* Estilo para el delta de la métrica */
-    div[data-testid="stMetricDelta"] {
-        font-size: 1.2em;
-        font-weight: 600;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# Las marquillas clave se definen aquí para ser consistentes en todo el script.
-MARQUILLAS_CLAVE = sorted(['VINILTEX', 'KORAZA', 'ESTUCOMAS', 'VINILICO', 'PINTULUX'])
-
-# ==============================================================================
-# 2. FUNCIONES DE CÁLCULO Y ANÁLISIS DE DATOS
-# ==============================================================================
-
-# --- FUNCIÓN AÑADIDA PARA CORREGIR EL NameError ---
-# Esta función es necesaria para limpiar los nombres de los vendedores para los filtros.
 def normalizar_texto(texto: str) -> str:
     """
     Convierte un texto a mayúsculas, elimina tildes y caracteres especiales.
@@ -93,7 +42,6 @@ def normalizar_texto(texto: str) -> str:
         return texto_sin_tildes.upper().replace('-', ' ').replace('_', ' ').replace('.', ' ').strip().replace('  ', ' ')
     except (TypeError, AttributeError):
         return texto
-# --- FIN DE LA FUNCIÓN AÑADIDA ---
 
 @st.cache_data
 def filtrar_ventas_marquillas(_df_ventas_historicas: pd.DataFrame) -> pd.DataFrame:
@@ -196,7 +144,7 @@ def generar_reporte_excel(segmentos: Dict[str, pd.DataFrame]) -> bytes:
             if not df_segmento.empty:
                 df_export = df_segmento.reset_index()[['nombre_cliente', 'conteo_marquillas']].copy()
                 if 'marquillas_faltantes' in df_segmento.columns:
-                     df_export['marquillas_faltantes'] = df_segmento['marquillas_faltantes'].values
+                    df_export['marquillas_faltantes'] = df_segmento['marquillas_faltantes'].values
 
                 df_export.to_excel(writer, sheet_name=nombre_segmento, index=False)
                 worksheet = writer.sheets[nombre_segmento]
@@ -215,6 +163,42 @@ def generar_reporte_excel(segmentos: Dict[str, pd.DataFrame]) -> bytes:
 
     return output.getvalue()
 
+# ==============================================================================
+# 2. CONFIGURACIÓN Y ESTILO DE LA PÁGINA
+# ==============================================================================
+
+st.set_page_config(
+    page_title="Análisis de Potencial | Marquillas Clave",
+    page_icon="🎯",
+    layout="wide"
+)
+
+st.markdown("""
+<style>
+    /* Estilo para los contenedores de métricas */
+    div[data-testid="stMetric"] {
+        background-color: #F0F2F6;
+        border: 1px solid #E0E0E0;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    }
+    /* Estilo para el valor de la métrica */
+    div[data-testid="stMetricValue"] {
+        font-size: 2.5em;
+        font-weight: bold;
+        color: #1F4E78;
+    }
+    /* Estilo para el delta de la métrica */
+    div[data-testid="stMetricDelta"] {
+        font-size: 1.2em;
+        font-weight: 600;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Las marquillas clave se definen aquí para ser consistentes en todo el script.
+MARQUILLAS_CLAVE = sorted(['VINILTEX', 'KORAZA', 'ESTUCOMAS', 'VINILICO', 'PINTULUX'])
 
 # ==============================================================================
 # 3. RENDERIZADO DE LA PÁGINA Y COMPONENTES DE UI
@@ -263,11 +247,18 @@ def render_pagina_analisis():
     # Filtro de Vendedor/Grupo
     vendedores_en_grupos_flat = [normalizar_texto(v) for sublist in grupos_vendedores.values() for v in sublist]
     
-    vendedores_individuales = df_ventas_historicas_completo[
+    # --- CORRECCIÓN DEL TypeError ---
+    # 1. Obtener vendedores únicos que no están en grupos.
+    vendedores_unicos_raw = df_ventas_historicas_completo[
         ~df_ventas_historicas_completo['nomvendedor'].apply(normalizar_texto).isin(vendedores_en_grupos_flat)
     ]['nomvendedor'].unique()
 
-    opciones_filtro_orig = ["TODOS"] + sorted(list(grupos_vendedores.keys())) + sorted(list(vendedores_individuales))
+    # 2. Limpiar la lista de valores nulos (NaN) y asegurarse de que todos sean strings.
+    #    Esto evita el TypeError al intentar ordenar una lista con tipos mixtos (str y float/None).
+    vendedores_individuales = [str(v) for v in vendedores_unicos_raw if pd.notna(v)]
+    
+    # 3. Crear la lista final de opciones para el filtro.
+    opciones_filtro_orig = ["TODOS"] + sorted(list(grupos_vendedores.keys())) + sorted(vendedores_individuales)
     seleccion_vendedor_orig = st.sidebar.selectbox("Vendedor / Grupo", options=opciones_filtro_orig, key="sb_vendedor_analisis")
 
 
@@ -455,7 +446,6 @@ def render_pagina_analisis():
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True
     )
-
 
 # ==============================================================================
 # 4. PUNTO DE ENTRADA DE LA APLICACIÓN
