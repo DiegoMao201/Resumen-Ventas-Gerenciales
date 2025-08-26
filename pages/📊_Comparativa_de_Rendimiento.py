@@ -167,7 +167,7 @@ def generar_reporte_excel(segmentos: Dict[str, pd.DataFrame]) -> bytes:
             if not df_segmento.empty:
                 df_export = df_segmento.reset_index()[['nombre_cliente', 'conteo_marquillas']].copy()
                 if 'marquillas_faltantes' in df_segmento.columns:
-                     df_export['marquillas_faltantes'] = df_segmento['marquillas_faltantes'].values
+                       df_export['marquillas_faltantes'] = df_segmento['marquillas_faltantes'].values
 
                 df_export.to_excel(writer, sheet_name=nombre_segmento, index=False)
                 worksheet = writer.sheets[nombre_segmento]
@@ -205,7 +205,7 @@ def render_pagina_analisis():
     if 'df_ventas' not in st.session_state or 'DATA_CONFIG' not in st.session_state:
         st.error("⚠️ No se han cargado los datos o la configuración necesaria.")
         st.warning("Esta página depende de los datos cargados en la aplicación principal. Por favor, ve a la página '🏠 Resumen Mensual', inicia sesión y asegúrate de que los datos se han cargado correctamente.")
-        st.page_link("Resumen_Mensual.py", label="Ir a la página principal", icon="🏠")
+        # st.page_link("Resumen_Mensual.py", label="Ir a la página principal", icon="🏠")
         return # Detiene la ejecución para prevenir el error
     # --- FIN DE LA CORRECCIÓN ---
 
@@ -234,23 +234,28 @@ def render_pagina_analisis():
     )
 
     # Filtro de Vendedor/Grupo
-    vendedores_en_grupos_flat = [v for sublist in grupos_vendedores.values() for v in sublist]
+    vendedores_en_grupos_flat = [item for sublist in grupos_vendedores.values() for item in sublist]
     vendedores_individuales = df_ventas_historicas_completo[
         ~df_ventas_historicas_completo['nomvendedor'].isin(vendedores_en_grupos_flat)
     ]['nomvendedor'].unique()
+    
+    # Normalizar los nombres para la visualización y filtrado
+    vendedores_en_grupos_flat_norm = {normalizar_texto(v) for v in vendedores_en_grupos_flat}
+    vendedores_individuales_norm = {normalizar_texto(v) for v in vendedores_individuales}
 
-    opciones_filtro = ["TODOS"] + sorted(list(grupos_vendedores.keys())) + sorted(list(vendedores_individuales))
+    # Opciones para el filtro
+    opciones_filtro = ["TODOS"] + sorted(list(grupos_vendedores.keys())) + sorted([v for v in df_ventas_historicas_completo['nomvendedor'].unique() if normalizar_texto(v) not in vendedores_en_grupos_flat_norm])
     seleccion_vendedor = st.sidebar.selectbox("Vendedor / Grupo", options=opciones_filtro, key="sb_vendedor_analisis")
 
-
     # --- LÓGICA DE FILTRADO DE DATOS ---
-    if seleccion_vendedor == "TODOS":
-        df_ventas_filtrado = df_ventas_historicas_completo.copy()
-    elif seleccion_vendedor in grupos_vendedores:
-        vendedores_en_grupo = grupos_vendedores[seleccion_vendedor]
-        df_ventas_filtrado = df_ventas_historicas_completo[df_ventas_historicas_completo['nomvendedor'].isin(vendedores_en_grupo)]
-    else:
-        df_ventas_filtrado = df_ventas_historicas_completo[df_ventas_historicas_completo['nomvendedor'] == seleccion_vendedor]
+    df_ventas_filtrado = df_ventas_historicas_completo.copy()
+    if seleccion_vendedor != "TODOS":
+        if seleccion_vendedor in grupos_vendedores:
+            vendedores_en_grupo = [normalizar_texto(v) for v in grupos_vendedores[seleccion_vendedor]]
+            df_ventas_filtrado = df_ventas_filtrado[df_ventas_filtrado['nomvendedor'].isin(vendedores_en_grupo)]
+        else:
+            df_ventas_filtrado = df_ventas_filtrado[df_ventas_filtrado['nomvendedor'] == normalizar_texto(seleccion_vendedor)]
+
 
     # --- CÁLCULOS PRINCIPALES ---
     with st.spinner("Procesando datos y calculando potencial..."):
@@ -428,4 +433,4 @@ if __name__ == '__main__':
         st.image("https://raw.githubusercontent.com/DiegoMao2021/Resumen-Ventas-Gerenciales/main/LOGO%20FERREINOX%20SAS%20BIC%202024.png", width=300)
         st.warning("Por favor, inicie sesión desde la página principal para acceder a este análisis.")
         st.info("Esta es una página de análisis avanzado que requiere que los datos maestros sean cargados primero en la aplicación principal.")
-        st.page_link("Resumen_Mensual.py", label="Ir a la página de inicio de sesión", icon="🏠")
+        st.page_link("app.py", label="Ir a la página de inicio de sesión", icon="🏠")
