@@ -2,35 +2,39 @@
 # SCRIPT COMPLETO Y DEFINITIVO PARA: 🏠 Resumen Mensual.py
 # VERSIÓN FINAL: 10 de Agosto, 2025 (CORRECCIÓN DE ERRORES Y MEJORA DE LÓGICA)
 # DESCRIPCIÓN: Se ajusta la lógica de agrupación para la descarga de albaranes.
-#              Un albarán único se define por la combinación de Fecha, Cliente,
-#              Serie y Vendedor, solucionando el problema de series repetidas.
+#              Un albarán único se define por la combinación de Fecha, Cliente,
+#              Serie y Vendedor, solucionando el problema de series repetidas.
 #
 # MODIFICACIÓN (07 de Agosto, 2025): Se reemplaza el cálculo de Marquilla por
-#              el nuevo análisis de oportunidades basado en el reporte CL4.
+#              el nuevo análisis de oportunidades basado en el reporte CL4.
 #
 # MODIFICACIÓN (08 de Agosto, 2025): Se añade la columna NIT a la vista de
-#              oportunidades y se crea una función para descargar un reporte
-#              de oportunidades en Excel con formato condicional.
+#              oportunidades y se crea una función para descargar un reporte
+#              de oportunidades en Excel con formato condicional.
 #
 # MODIFICACIÓN (10 de Agosto, 2025 - IA v1): Se implementan metas CL4 individuales,
-#              se corrige la palabra clave 'ESTUCOMAS' y se añade una lógica de
-#              actualización trimestral (Q3) para las oportunidades CL4.
+#              se corrige la palabra clave 'ESTUCOMAS' y se añade una lógica de
+#              actualización trimestral (Q3) para las oportunidades CL4.
 #
 # MODIFICACIÓN (10 de Agosto, 2025 - IA v2): Se corrige el error `KeyError` al cargar
-#              `reporte_cl4.xlsx` haciendo la detección de 'id_cliente' más robusta.
-#              Se modifica la lógica de la meta CL4 para que sea por trimestre
-#              dinámico basado en el mes seleccionado.
+#              `reporte_cl4.xlsx` haciendo la detección de 'id_cliente' más robusta.
+#              Se modifica la lógica de la meta CL4 para que sea por trimestre
+#              dinámico basado en el mes seleccionado.
 #
 # MODIFICACIÓN (22 de Agosto, 2025 - Gemini): Se añade funcionalidad en la pestaña
-#              'Clientes Clave' para descargar el detalle de ventas del mes por
-#              cliente y se crea una nueva sección para analizar y descargar
-#              ventas de un cliente específico en un rango de fechas.
+#              'Clientes Clave' para descargar el detalle de ventas del mes por
+#              cliente y se crea una nueva sección para analizar y descargar
+#              ventas de un cliente específico en un rango de fechas.
 #
 # MODIFICACIÓN (22 de Agosto, 2025 - CORRECCIÓN FILTRO FECHAS): Se corrige la
-#              lógica del filtro de fechas en la sección 'Análisis Específico por
-#              Cliente' para que utilice el historial completo de ventas y no se
-#              limite al mes seleccionado en el filtro general. Se asegura que
-#              el número de factura (Serie) se muestre correctamente.
+#              lógica del filtro de fechas en la sección 'Análisis Específico por
+#              Cliente' para que utilice el historial completo de ventas y no se
+#              limite al mes seleccionado en el filtro general. Se asegura que
+#              el número de factura (Serie) se muestre correctamente.
+#
+# MODIFICACIÓN (26 de Agosto, 2025 - CORRECCIÓN SESIÓN): Se añade la carga
+#             del diccionario DATA_CONFIG al st.session_state para que las
+#             páginas secundarias puedan acceder a él.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -195,14 +199,14 @@ def to_excel_ventas_mensual(df):
         for col_num, value in enumerate(df_excel.columns):
             worksheet.write(0, col_num, value, header_format)
 
-        worksheet.set_column('A:A', 12, date_format)      # Fecha
-        worksheet.set_column('B:B', 18, default_format)   # Tipo Documento
-        worksheet.set_column('C:C', 15, default_format)   # Serie
-        worksheet.set_column('D:D', 40, default_format)   # Cliente
-        worksheet.set_column('E:E', 45, default_format)   # Artículo
-        worksheet.set_column('F:F', 10, default_format)   # Unidades
+        worksheet.set_column('A:A', 12, date_format)     # Fecha
+        worksheet.set_column('B:B', 18, default_format)    # Tipo Documento
+        worksheet.set_column('C:C', 15, default_format)    # Serie
+        worksheet.set_column('D:D', 40, default_format)    # Cliente
+        worksheet.set_column('E:E', 45, default_format)    # Artículo
+        worksheet.set_column('F:F', 10, default_format)    # Unidades
         worksheet.set_column('G:G', 18, currency_format)  # Valor Venta
-        worksheet.set_column('H:H', 35, default_format)   # Vendedor
+        worksheet.set_column('H:H', 35, default_format)    # Vendedor
 
         worksheet.autofilter(0, 0, df_excel.shape[0], df_excel.shape[1] - 1)
         worksheet.freeze_panes(1, 0)
@@ -245,11 +249,11 @@ def to_excel_analisis_cliente(df, cliente_nombre, fecha_inicio, fecha_fin, total
             worksheet.write(4, col_num, value, header_format)
 
         # Ancho de columnas
-        worksheet.set_column(0, 0, 12, date_format)      # Fecha
-        worksheet.set_column(1, 1, 18, default_format)   # Tipo Documento
-        worksheet.set_column(2, 2, 15, default_format)   # Serie
-        worksheet.set_column(3, 3, 50, default_format)   # Artículo
-        worksheet.set_column(4, 4, 10, default_format)   # Unidades
+        worksheet.set_column(0, 0, 12, date_format)     # Fecha
+        worksheet.set_column(1, 1, 18, default_format)    # Tipo Documento
+        worksheet.set_column(2, 2, 15, default_format)    # Serie
+        worksheet.set_column(3, 3, 50, default_format)    # Artículo
+        worksheet.set_column(4, 4, 10, default_format)    # Unidades
         worksheet.set_column(5, 5, 18, currency_format)  # Valor Venta
 
         worksheet.autofilter(4, 0, df_excel.shape[0] + 4, df_excel.shape[1] - 1)
@@ -995,13 +999,8 @@ def main():
                 st.session_state.df_ventas = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["ventas"], APP_CONFIG["column_names"]["ventas"])
                 st.session_state.df_cobros = cargar_y_limpiar_datos(APP_CONFIG["dropbox_paths"]["cobros"], APP_CONFIG["column_names"]["cobros"])
                 st.session_state.df_cl4 = cargar_reporte_cl4(APP_CONFIG["dropbox_paths"]["cl4_report"])
-
-        st.sidebar.image(APP_CONFIG["url_logo"], use_container_width=True)
-        st.sidebar.header(f"Bienvenido, {st.session_state.usuario}")
-        render_dashboard()
-        if st.sidebar.button("Salir", key="btn_logout"):
-            st.session_state.clear()
-            st.rerun()
-
-if __name__ == '__main__':
-    main()
+                
+                # ==============================================================================
+                # INICIO DE LA LÍNEA CORREGIDA: Guardar DATA_CONFIG en la sesión
+                # ==============================================================================
+                st.session_
