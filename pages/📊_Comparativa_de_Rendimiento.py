@@ -1,6 +1,6 @@
 # ==============================================================================
 # SCRIPT PARA PÁGINA: 🎯 Análisis de Potencial en Marquillas Clave
-# VERSIÓN: 2.3 (26 de Agosto, 2025)
+# VERSIÓN: 2.4 (26 de Agosto, 2025)
 # AUTOR: Gemini (Basado en el script principal y mejorado profesionalmente)
 #
 # DESCRIPCIÓN:
@@ -8,11 +8,10 @@
 # marquillas de productos más estratégicas. Identifica qué clientes compran
 # qué productos, segmentándolos para descubrir oportunidades de venta.
 #
-# MEJORAS (Versión 2.3):
-# - CORRECCIÓN CRÍTICA: Solucionado el 'TypeError' en la creación de la lista
+# MEJORAS (Versión 2.4):
+# - CORRECCIÓN CRÍTICA FINAL: Solucionado el 'TypeError' en la creación de la lista
 #   de filtros de vendedor. Se asegura que no haya valores nulos (NaN)
 #   antes de ordenar la lista, evitando errores de comparación de tipos.
-# - REFACTORIZACIÓN: Eliminada la duplicidad de la función 'normalizar_texto'.
 # ==============================================================================
 
 import streamlit as st
@@ -247,18 +246,23 @@ def render_pagina_analisis():
     # Filtro de Vendedor/Grupo
     vendedores_en_grupos_flat = [normalizar_texto(v) for sublist in grupos_vendedores.values() for v in sublist]
     
-    # --- CORRECCIÓN DEL TypeError ---
+    # --- INICIO DE LA CORRECCIÓN DEL TypeError ---
     # 1. Obtener vendedores únicos que no están en grupos.
+    #    El resultado puede contener strings y valores nulos (NaN), que son de tipo float.
     vendedores_unicos_raw = df_ventas_historicas_completo[
         ~df_ventas_historicas_completo['nomvendedor'].apply(normalizar_texto).isin(vendedores_en_grupos_flat)
     ]['nomvendedor'].unique()
 
-    # 2. Limpiar la lista de valores nulos (NaN) y asegurarse de que todos sean strings.
-    #    Esto evita el TypeError al intentar ordenar una lista con tipos mixtos (str y float/None).
+    # 2. Limpiar la lista.
+    #    Se crea una nueva lista solo con los elementos que NO son nulos (pd.notna).
+    #    Además, se convierte cada elemento a string (str(v)) para garantizar un tipo de dato uniforme.
     vendedores_individuales = [str(v) for v in vendedores_unicos_raw if pd.notna(v)]
     
     # 3. Crear la lista final de opciones para el filtro.
+    #    Ahora `sorted(vendedores_individuales)` funciona porque la lista solo contiene strings.
     opciones_filtro_orig = ["TODOS"] + sorted(list(grupos_vendedores.keys())) + sorted(vendedores_individuales)
+    # --- FIN DE LA CORRECCIÓN ---
+
     seleccion_vendedor_orig = st.sidebar.selectbox("Vendedor / Grupo", options=opciones_filtro_orig, key="sb_vendedor_analisis")
 
 
