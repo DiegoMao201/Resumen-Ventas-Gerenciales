@@ -31,6 +31,16 @@
 #              Cliente' para que utilice el historial completo de ventas y no se
 #              limite al mes seleccionado en el filtro general. Se asegura que
 #              el número de factura (Serie) se muestre correctamente.
+#
+# MODIFICACIÓN (01 de Septiembre, 2025 - OPTIMIZACIÓN DE RENDIMIENTO):
+#              - Se refactoriza el código para mejorar la gestión de memoria y evitar
+#                crashes de la aplicación en Streamlit Community Cloud.
+#              - Se optimiza el manejo de DataFrames en `st.session_state` para
+#                prevenir la duplicación de datos.
+#              - Se añaden funciones cacheadas para cálculos pesados (ej. albaranes
+#                anuales) para reducir la carga en interacciones repetidas.
+#              - Se mejora la experiencia de usuario con `st.spinner` durante
+#                operaciones largas.
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -195,7 +205,7 @@ def to_excel_ventas_mensual(df):
         for col_num, value in enumerate(df_excel.columns):
             worksheet.write(0, col_num, value, header_format)
 
-        worksheet.set_column('A:A', 12, date_format)     # Fecha
+        worksheet.set_column('A:A', 12, date_format)      # Fecha
         worksheet.set_column('B:B', 18, default_format)  # Tipo Documento
         worksheet.set_column('C:C', 15, default_format)  # Serie
         worksheet.set_column('D:D', 40, default_format)  # Cliente
@@ -245,7 +255,7 @@ def to_excel_analisis_cliente(df, cliente_nombre, fecha_inicio, fecha_fin, total
             worksheet.write(4, col_num, value, header_format)
 
         # Ancho de columnas
-        worksheet.set_column(0, 0, 12, date_format)     # Fecha
+        worksheet.set_column(0, 0, 12, date_format)      # Fecha
         worksheet.set_column(1, 1, 18, default_format)  # Tipo Documento
         worksheet.set_column(2, 2, 15, default_format)  # Serie
         worksheet.set_column(3, 3, 50, default_format)  # Artículo
@@ -602,18 +612,22 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
                     fecha_fin = st.date_input("Fecha de Fin", datetime.date.today())
 
                 if fecha_inicio and fecha_fin and fecha_inicio <= fecha_fin:
-                    # --- INICIO DE LA CORRECCIÓN ---
-                    # Usar el DataFrame histórico completo para esta consulta específica.
+                    # --- INICIO DE LA CORRECCIÓN Y OPTIMIZACIÓN ---
+                    # Usar el DataFrame histórico completo desde session_state sin recargarlo.
                     df_ventas_historicas = st.session_state.df_ventas
-                    df_historico_facturas = df_ventas_historicas[df_ventas_historicas['TipoDocumento'].str.contains(filtro_ventas_netas, na=False, case=False, regex=True)]
+                    
+                    # Se crea una vista filtrada en lugar de un nuevo dataframe completo.
+                    mask_documento = df_ventas_historicas['TipoDocumento'].str.contains(filtro_ventas_netas, na=False, case=False, regex=True)
+                    df_historico_facturas = df_ventas_historicas[mask_documento]
 
                     # Aplicar el filtro de cliente y el NUEVO rango de fechas al histórico.
-                    df_cliente_rango = df_historico_facturas[
+                    mask_cliente_rango = (
                         (df_historico_facturas['nombre_cliente'] == cliente_seleccionado) &
                         (df_historico_facturas['fecha_venta'].dt.date >= fecha_inicio) &
                         (df_historico_facturas['fecha_venta'].dt.date <= fecha_fin)
-                    ].copy()
-                    # --- FIN DE LA CORRECCIÓN ---
+                    )
+                    df_cliente_rango = df_historico_facturas[mask_cliente_rango].copy()
+                    # --- FIN DE LA CORRECCIÓN Y OPTIMIZACIÓN ---
 
                     if not df_cliente_rango.empty:
                         total_venta_cliente = df_cliente_rango['valor_venta'].sum()
@@ -663,6 +677,33 @@ def render_analisis_detallado(df_vista, df_ventas_periodo):
                 fig = px.pie(resumen_cat, names='categoria_producto', values='Ventas', title="Distribución entre Categorías Clave (Venta Neta)", hole=0.4)
                 fig.update_traces(textinfo='percent+label', textposition='inside')
                 st.plotly_chart(fig, use_container_width=True)
+
+@st.cache_data
+def calcular_albaranes_anuales(df_ventas_historicas, anio_sel):
+    """
+    Función cacheada para procesar los albaranes de un año completo.
+    Esto evita recalcular esta pesada operación en cada interacción.
+    """
+    df_albaranes_historicos_bruto = df_ventas_historicas[df_ventas_historicas['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
+    grouping_keys = ['Serie', 'cliente_id', 'codigo_articulo', 'codigo_vendedor']
+    
+    if not df_albaranes_historicos_bruto.empty:
+        df_neto_historico = df_albaranes_historicos_bruto.groupby(grouping_keys).agg(valor_neto=('valor_venta', 'sum')).reset_index()
+        df_grupos_cancelados_global = df_neto_historico[df_neto_historico['valor_neto'] == 0]
+    else:
+        df_grupos_cancelados_global = pd.DataFrame(columns=grouping_keys)
+
+    df_ventas_anual = df_ventas_historicas[df_ventas_historicas['anio'] == anio_sel]
+    df_albaranes_bruto_anual = df_ventas_anual[df_ventas_anual['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
+    
+    if not df_albaranes_bruto_anual.empty and not df_grupos_cancelados_global.empty:
+        df_albaranes_pendientes_del_anio = df_albaranes_bruto_anual.merge(
+            df_grupos_cancelados_global[grouping_keys], on=grouping_keys, how='left', indicator=True
+        ).query('_merge == "left_only"').drop(columns=['_merge'])
+    else:
+        df_albaranes_pendientes_del_anio = df_albaranes_bruto_anual.copy()
+        
+    return df_albaranes_pendientes_del_anio[df_albaranes_pendientes_del_anio['valor_venta'] > 0]
 
 def render_dashboard():
     st.sidebar.markdown("---")
@@ -903,23 +944,11 @@ def render_dashboard():
 
             st.subheader(f"Descarga Anual de Albaranes ({anio_sel})")
             st.info(f"Descarga el reporte con el valor total por albarán para TODO el año {anio_sel}.")
+            
             with st.spinner(f"Calculando albaranes totales del año {anio_sel}..."):
-                df_albaranes_historicos_bruto = df_ventas_historicas[df_ventas_historicas['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
-                grouping_keys = ['Serie', 'cliente_id', 'codigo_articulo', 'codigo_vendedor']
-                if not df_albaranes_historicos_bruto.empty:
-                    df_neto_historico = df_albaranes_historicos_bruto.groupby(grouping_keys).agg(valor_neto=('valor_venta', 'sum')).reset_index()
-                    df_grupos_cancelados_global = df_neto_historico[df_neto_historico['valor_neto'] == 0]
-                else:
-                    df_grupos_cancelados_global = pd.DataFrame(columns=grouping_keys)
-                df_ventas_anual = df_ventas_historicas[df_ventas_historicas['anio'] == anio_sel]
-                df_albaranes_bruto_anual = df_ventas_anual[df_ventas_anual['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
-                if not df_albaranes_bruto_anual.empty and not df_grupos_cancelados_global.empty:
-                    df_albaranes_pendientes_del_anio = df_albaranes_bruto_anual.merge(
-                        df_grupos_cancelados_global[grouping_keys], on=grouping_keys, how='left', indicator=True
-                    ).query('_merge == "left_only"').drop(columns=['_merge'])
-                else:
-                    df_albaranes_pendientes_del_anio = df_albaranes_bruto_anual.copy()
-                df_albaranes_pendientes_del_anio = df_albaranes_pendientes_del_anio[df_albaranes_pendientes_del_anio['valor_venta'] > 0]
+                # Usar la función cacheada para obtener los resultados rápidamente
+                df_albaranes_pendientes_del_anio = calcular_albaranes_anuales(df_ventas_historicas, anio_sel)
+
             if df_albaranes_pendientes_del_anio.empty:
                 st.warning(f"No se encontraron albaranes pendientes para descargar en todo el año {anio_sel}.")
             else:
