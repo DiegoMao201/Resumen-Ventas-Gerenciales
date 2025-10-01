@@ -409,6 +409,9 @@ def actualizar_oportunidades_con_ventas_del_trimestre(df_cl4_original, df_ventas
 
     return df_cl4_actualizado
 
+# =======================================================================================
+# ====== FUNCIÓN CORREGIDA PARA EL CÁLCULO DE PRESUPUESTOS DE MOSTRADORES (OPALO) =======
+# =======================================================================================
 def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel):
     filtro_ventas_netas = 'FACTURA|NOTA.*CREDITO'
     df_ventas_reales = df_ventas_periodo[df_ventas_periodo['TipoDocumento'].str.contains(filtro_ventas_netas, na=False, case=False, regex=True)].copy()
@@ -457,29 +460,41 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
 
     registros_agrupados = []
     incremento_mostradores = 1 + APP_CONFIG['presupuesto_mostradores']['incremento_anual_pct']
+    
+    # --- INICIO DE LA LÓGICA CORREGIDA ---
+    # Se itera sobre todos los grupos definidos, sin importar si tienen ventas en el mes actual.
     for grupo, lista_vendedores in DATA_CONFIG['grupos_vendedores'].items():
         lista_vendedores_norm = [normalizar_texto(v) for v in lista_vendedores]
+        
+        # 1. Calcular el presupuesto dinámico INCONDICIONALMENTE basado en el año anterior.
+        anio_anterior = anio_sel - 1
+        df_grupo_historico_facturas = df_ventas_historicas[
+            (df_ventas_historicas['TipoDocumento'].str.contains(filtro_ventas_netas, na=False, case=False, regex=True)) &
+            (df_ventas_historicas['anio'] == anio_anterior) & (df_ventas_historicas['mes'] == mes_sel) &
+            (df_ventas_historicas['nomvendedor'].isin(lista_vendedores_norm))
+        ]
+        ventas_anio_anterior = df_grupo_historico_facturas['valor_venta'].sum() if not df_grupo_historico_facturas.empty else 0
+        presupuesto_dinamico = ventas_anio_anterior * incremento_mostradores
+
+        # 2. Filtrar los datos del mes actual para este grupo.
         df_grupo_actual = df_resumen[df_resumen['nomvendedor'].isin(lista_vendedores_norm)]
-        if not df_grupo_actual.empty:
-            anio_anterior = anio_sel - 1
-            df_grupo_historico_facturas = df_ventas_historicas[
-                (df_ventas_historicas['TipoDocumento'].str.contains(filtro_ventas_netas, na=False, case=False, regex=True)) &
-                (df_ventas_historicas['anio'] == anio_anterior) & (df_ventas_historicas['mes'] == mes_sel) &
-                (df_ventas_historicas['nomvendedor'].isin(lista_vendedores_norm))
-            ]
-            ventas_anio_anterior = df_grupo_historico_facturas['valor_venta'].sum() if not df_grupo_historico_facturas.empty else 0
-            presupuesto_dinamico = ventas_anio_anterior * incremento_mostradores
 
-            cols_a_sumar = ['ventas_totales', 'cobros_totales', 'impactos', 'presupuestocartera', 'ventas_complementarios', 'ventas_sub_meta', 'albaranes_pendientes']
-            suma_grupo = df_grupo_actual[cols_a_sumar].sum().to_dict()
-            suma_grupo['presupuesto'] = df_grupo_actual['presupuesto'].sum()
-            codigo_grupo_norm = normalizar_texto(grupo)
-            registro = {'nomvendedor': codigo_grupo_norm, 'codigo_vendedor': codigo_grupo_norm, **suma_grupo}
+        # 3. Sumar los valores del mes actual. Si df_grupo_actual está vacío (0 ventas), la suma dará 0.
+        cols_a_sumar = ['ventas_totales', 'cobros_totales', 'impactos', 'presupuestocartera', 'ventas_complementarios', 'ventas_sub_meta', 'albaranes_pendientes']
+        suma_grupo = df_grupo_actual[cols_a_sumar].sum().to_dict()
+        
+        # El presupuesto base del grupo se suma (aunque usualmente será 0 para grupos).
+        suma_grupo['presupuesto'] = df_grupo_actual['presupuesto'].sum() 
+        
+        codigo_grupo_norm = normalizar_texto(grupo)
+        registro = {'nomvendedor': codigo_grupo_norm, 'codigo_vendedor': codigo_grupo_norm, **suma_grupo}
 
-            if presupuesto_dinamico > 0:
-                registro['presupuesto'] = presupuesto_dinamico
+        # 4. Asignar el presupuesto dinámico calculado. Si es mayor que 0, sobrescribe el presupuesto base.
+        if presupuesto_dinamico > 0:
+            registro['presupuesto'] = presupuesto_dinamico
 
-            registros_agrupados.append(registro)
+        registros_agrupados.append(registro)
+    # --- FIN DE LA LÓGICA CORREGIDA ---
 
     df_agrupado = pd.DataFrame(registros_agrupados)
     vendedores_en_grupos = [v for lista in DATA_CONFIG['grupos_vendedores'].values() for v in [normalizar_texto(i) for i in lista]]
