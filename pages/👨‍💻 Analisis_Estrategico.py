@@ -9,47 +9,61 @@ import dropbox
 import re
 
 # ==============================================================================
-# 1. CONFIGURACIÓN PROFESIONAL DE LA PÁGINA
+# 1. CONFIGURACIÓN ULTRA (UI/UX)
 # ==============================================================================
 st.set_page_config(
-    page_title="Master Brain Ultra - Intelligence & Growth", 
+    page_title="Master Brain Ultra | Strategic Intelligence", 
     page_icon="🧠", 
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
-# Estilos CSS para interfaz ejecutiva
+# CSS Ejecutivo y Limpio
 st.markdown("""
 <style>
-    .metric-container {
-        background-color: #f8f9fa;
-        border-left: 5px solid #003865;
-        padding: 15px;
-        border-radius: 5px;
-        box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
+    /* Colores Corporativos: Azul Profundo y Gris Acero */
+    :root { --primary: #0f172a; --accent: #3b82f6; --bg-light: #f1f5f9; }
+    
+    .main { background-color: #ffffff; }
+    h1, h2, h3 { color: var(--primary); font-family: 'Segoe UI', sans-serif; font-weight: 700; }
+    
+    /* Tarjetas de Métricas */
+    .metric-card {
+        background: white;
+        border-left: 4px solid var(--accent);
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        margin-bottom: 10px;
     }
-    h1, h2, h3 { color: #003865; font-family: 'Helvetica Neue', sans-serif; font-weight: 800; }
-    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
+    .metric-val { font-size: 2rem; font-weight: 800; color: var(--primary); }
+    .metric-lbl { font-size: 0.9rem; color: #64748b; text-transform: uppercase; letter-spacing: 1px; }
+    .metric-delta { font-size: 1rem; font-weight: 600; }
+    .pos { color: #10b981; }
+    .neg { color: #ef4444; }
+
+    /* Tabs Personalizados */
+    .stTabs [data-baseweb="tab-list"] { gap: 10px; background-color: transparent; }
     .stTabs [data-baseweb="tab"] {
-        height: 45px;
-        background-color: #eef;
-        border-radius: 5px 5px 0px 0px;
-        font-weight: 600;
+        background-color: white;
+        border-radius: 6px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        padding: 10px 20px;
+        border: 1px solid #e2e8f0;
     }
     .stTabs [aria-selected="true"] {
-        background-color: #003865;
+        background-color: var(--primary);
         color: white;
     }
-    div[data-testid="stMetricValue"] { color: #0058A7; font-size: 26px; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. MOTORES DE INTELIGENCIA (LIMPIEZA Y CLASIFICACIÓN)
+# 2. MOTORES DE LIMPIEZA E INTELIGENCIA
 # ==============================================================================
 
 def normalizar_texto(texto):
-    """Estandariza texto a mayúsculas sin tildes."""
+    """Normalización estricta para cruces de bases de datos."""
     if not isinstance(texto, str): 
         return str(texto) if pd.notnull(texto) else "SIN INFO"
     texto = str(texto)
@@ -57,414 +71,369 @@ def normalizar_texto(texto):
     return texto_sin_tildes.upper().strip()
 
 def limpiar_nit(nit):
-    """Limpia NIT/NIF para asegurar cruces perfectos (solo números)."""
+    """Limpia NIT manejando errores de Excel (floats, notación científica)."""
     if pd.isna(nit): return "0"
-    s_nit = str(nit).split('-')[0] # Quitar dígito verificación
+    s_nit = str(nit)
+    if '.' in s_nit: # Manejo de 900123.0
+        s_nit = s_nit.split('.')[0]
+    s_nit = s_nit.split('-')[0] # Quitar DV
     s_limpio = re.sub(r'[^0-9]', '', s_nit)
-    s_limpio = s_limpio.lstrip('0') # Quitar ceros a la izquierda
-    return s_limpio if s_limpio else "0"
+    return s_limpio.lstrip('0') if s_limpio else "0"
 
 def obtener_nombre_marca_por_codigo(codigo):
-    """
-    Diccionario Maestro basado en la IMAGEN del árbol de decisión.
-    Entrada: Código numérico (str). Salida: Nombre de Marca limpio.
-    """
-    # Mapeo exacto de tu imagen
+    # Mapa extendido basado en tu lógica
     mapa = {
-        '33': 'OCEANIC PAINTS',
-        '34': 'PROTECTO',
-        '35': 'OTROS',
-        '37': 'INTERNATIONAL PAINT',
-        '40': 'ICO',
-        '41': 'TERINSA',
-        '50': 'PINTUCO (MEGA)',       # P8-ASC-MEGA
-        '54': 'INTERNATIONAL PAINT',  # MPY-International
-        '55': 'COLORANTS LATAM',      # DPP-AN COLORANTS...
-        '56': 'PINTUCO PROFESIONAL',  # DPP-Pintuco Profesional
-        '57': 'PINTUCO (MEGA)',       # ASC-Mega
-        '58': 'PINTUCO',              # DPP-Pintuco (La marca madre)
-        '59': 'MADETEC',              # DPP-Madetec
-        '60': 'INTERPON',             # POW-Interpon
-        '61': 'VARIOUS',
-        '62': 'ICO',                  # DPP-ICO
-        '63': 'TERINSA',              # DPP-Terinsa
-        '64': 'PINTUCO',              # MPY-Pintuco
-        '65': 'TERCEROS (NON-AN)',
-        '66': 'ICO PACKAGING',
-        '67': 'AUTOMOTIVE OEM',
-        '68': 'RESICOAT',
-        '73': 'CORAL',                # DPP-Coral
-        '87': 'SIKKENS',
-        '89': 'WANDA',
-        '90': 'SIKKENS AUTOCOAT',
-        '91': 'SIKKENS',
-        '94': 'PROTECTO PROFESIONAL'
+        '33': 'OCEANIC PAINTS', '34': 'PROTECTO', '35': 'OTROS',
+        '37': 'INTERNATIONAL PAINT', '40': 'ICO', '41': 'TERINSA',
+        '50': 'PINTUCO (MEGA)', '54': 'INTERNATIONAL PAINT', '55': 'COLORANTS LATAM',
+        '56': 'PINTUCO PROFESIONAL', '57': 'PINTUCO (MEGA)', '58': 'PINTUCO',
+        '59': 'MADETEC', '60': 'INTERPON', '61': 'VARIOUS', '62': 'ICO',
+        '63': 'TERINSA', '64': 'PINTUCO', '65': 'TERCEROS (NON-AN)',
+        '66': 'ICO PACKAGING', '67': 'AUTOMOTIVE OEM', '68': 'RESICOAT',
+        '73': 'CORAL', '87': 'SIKKENS', '89': 'WANDA', '90': 'SIKKENS AUTOCOAT',
+        '91': 'SIKKENS', '94': 'PROTECTO PROFESIONAL'
     }
     return mapa.get(codigo, None)
 
 def clasificar_estrategia_master(row):
-    """
-    ALGORITMO DE CLASIFICACIÓN DE 3 NIVELES:
-    1. Lista Blanca (Aliados Estratégicos) -> Prioridad Máxima.
-    2. Código de Marca (Columna N) -> Prioridad Media.
-    3. OTROS -> Todo lo demás.
-    """
-    # 1. Preparar datos
-    # Mapeo de columnas basado en índices renombrados previamente
+    # 1. Lista Blanca (Aliados)
     prod_name = normalizar_texto(row.get('NOMBRE_PRODUCTO_K', ''))
     cat_name = normalizar_texto(row.get('CATEGORIA_L', ''))
-    
-    # Obtener código de marca (Columna N), limpiando decimales (.0)
-    raw_code = str(row.get('CODIGO_MARCA_N', '0'))
-    code_clean = raw_code.split('.')[0].strip()
-    
+    aliados = ['ABRACOL', 'INDUMA', 'YALE', 'ARTECOLA', 'GOYA', 'ATLAS', '3M', 'SISTA', 'SINTESOLDA']
     texto_busqueda = f"{prod_name} {cat_name}"
-
-    # --- NIVEL 1: LISTA BLANCA (ALIADOS) ---
-    # Si el producto contiene alguno de estos nombres, se clasifica aquí ignorando el código N.
-    aliados = [
-        'ABRACOL', 'INDUMA', 'YALE', 'ARTECOLA', 'GOYA', 'ATLAS', 
-        'SAINT GOBAIN', 'ALLEGION', 'SEGUREX', 'POLVOS', 'DELTA', 
-        'MASTERD', 'GLOBAL', 'SANTENO', 'BELLOTA', '3M', 'SISTA', 'SINTESOLDA'
-    ]
+    
     for aliado in aliados:
-        if aliado in texto_busqueda:
-            return aliado
+        if aliado in texto_busqueda: return aliado
 
-    # --- NIVEL 2: LÓGICA DE CÓDIGO (COLUMNA N) ---
-    nombre_marca = obtener_nombre_marca_por_codigo(code_clean)
-    if nombre_marca:
-        return nombre_marca
+    # 2. Código Marca
+    raw_code = str(row.get('CODIGO_MARCA_N', '0')).split('.')[0].strip()
+    nombre_marca = obtener_nombre_marca_por_codigo(raw_code)
+    if nombre_marca: return nombre_marca
 
-    # --- NIVEL 3: FALLBACK ---
-    # Si no es aliado y el código N no está en el mapa o es 0
     return 'OTROS'
 
 # ==============================================================================
-# 3. CONEXIÓN DROPBOX (ROBUSTA)
+# 3. CONEXIÓN DROPBOX (SOPORTE EXCEL .XLSX)
 # ==============================================================================
 @st.cache_data(ttl=3600)
-def cargar_poblaciones_dropbox():
-    """
-    Intenta cargar 'clientes_detalle.csv' desde la raíz de la App de Dropbox.
-    Maneja errores para no romper la app si el archivo falta.
-    """
+def cargar_poblaciones_dropbox_excel():
+    """Lee Excel (.xlsx) desde Dropbox usando openpyxl."""
     try:
-        # 1. Obtener credenciales
         try:
             APP_KEY = st.secrets["dropbox"]["app_key"]
             APP_SECRET = st.secrets["dropbox"]["app_secret"]
             REFRESH_TOKEN = st.secrets["dropbox"]["refresh_token"]
         except:
-            st.error("⚠️ No se encontraron las credenciales de Dropbox en st.secrets.")
+            st.warning("⚠️ Configura st.secrets para Dropbox.")
             return pd.DataFrame()
 
-        # 2. Conectar y Descargar
         with dropbox.Dropbox(app_key=APP_KEY, app_secret=APP_SECRET, oauth2_refresh_token=REFRESH_TOKEN) as dbx:
-            # Intentamos en la raíz, que es lo más común
-            ruta = '/clientes_detalle.csv' 
+            # Intentar ruta raíz
+            ruta = '/clientes_detalle.xlsx' 
             try:
                 metadata, res = dbx.files_download(path=ruta)
-            except dropbox.exceptions.ApiError as e:
-                # Si falla, intentamos con /data/ por si acaso, o retornamos error claro
+            except:
                 try:
-                    ruta = '/data/clientes_detalle.csv'
+                    ruta = '/data/clientes_detalle.xlsx'
                     metadata, res = dbx.files_download(path=ruta)
                 except:
-                    st.warning(f"⚠️ **Archivo no encontrado en Dropbox.**\nBusqué: `/clientes_detalle.csv`.\nPor favor verifica que el archivo esté en la carpeta de la App.")
+                    st.error("❌ No encontré 'clientes_detalle.xlsx' en Dropbox.")
                     return pd.DataFrame()
 
-            # 3. Leer contenido
-            contenido = res.content.decode('latin-1', errors='ignore')
+            # LEER EXCEL BINARIO
+            with io.BytesIO(res.content) as stream:
+                df_drop = pd.read_excel(stream, engine='openpyxl')
             
-            # Detectar separador (comas, punto y coma o pipes)
-            separador = None 
-            if '|' in contenido.split('\n')[0]: separador = '|'
-            elif ';' in contenido.split('\n')[0]: separador = ';'
-            else: separador = ','
-            
-            df_drop = pd.read_csv(io.StringIO(contenido), sep=separador, engine='python')
-            
-            # 4. Limpieza y Estandarización
+            # Limpieza
             df_drop.columns = [c.strip().upper() for c in df_drop.columns]
             
-            # Buscar columna NIT y CIUDAD
+            # Buscar columnas clave
             col_nit = next((c for c in df_drop.columns if 'NIF' in c or 'NIT' in c), None)
             col_ciudad = next((c for c in df_drop.columns if 'CIUDAD' in c or 'POBLACION' in c), None)
+            col_canal = next((c for c in df_drop.columns if 'CANAL' in c or 'SECTOR' in c), None) # Opcional: Canal
+
+            if not col_nit: return pd.DataFrame()
             
-            if not col_nit:
-                st.warning("El archivo de Dropbox no tiene una columna NIT o NIF20 identificable.")
-                return pd.DataFrame()
-                
             df_drop['Key_Nit'] = df_drop[col_nit].apply(limpiar_nit)
+            
+            cols_to_keep = ['Key_Nit']
             
             if col_ciudad:
                 df_drop['Poblacion_Real'] = df_drop[col_ciudad].apply(normalizar_texto)
+                cols_to_keep.append('Poblacion_Real')
             else:
                 df_drop['Poblacion_Real'] = 'SIN ASIGNAR'
+                cols_to_keep.append('Poblacion_Real')
 
-            # Eliminar duplicados (tomar el primero)
-            return df_drop.drop_duplicates(subset=['Key_Nit'])[['Key_Nit', 'Poblacion_Real']]
+            # Si quieres añadir el Canal/Sector para análisis de margen (proxy)
+            if col_canal:
+                df_drop['Canal_Cliente'] = df_drop[col_canal].apply(normalizar_texto)
+                cols_to_keep.append('Canal_Cliente')
+
+            return df_drop.drop_duplicates(subset=['Key_Nit'])[cols_to_keep]
 
     except Exception as e:
-        st.error(f"Error de conexión con Dropbox: {str(e)}")
+        st.error(f"Error Dropbox: {str(e)}")
         return pd.DataFrame()
 
 # ==============================================================================
-# 4. PROCESAMIENTO CENTRAL (EL CEREBRO)
+# 4. PROCESAMIENTO Y DATOS
 # ==============================================================================
-
-# Validar si hay datos cargados
 if 'df_ventas' not in st.session_state:
-    st.info("👋 **Bienvenido a Master Brain Ultra.** Por favor carga tu archivo de ventas en la pantalla de inicio.")
+    st.info("👋 Por favor carga el archivo maestro de ventas en el Home.")
     st.stop()
 
 df_raw = st.session_state.df_ventas.copy()
 
-# --- 4.1. MAPEO DE COLUMNAS POR POSICIÓN (H, K, L, N, O) ---
-# Esto asegura que leamos las columnas correctas sin importar el nombre del encabezado
-if df_raw.shape[1] > 14:
-    col_map = {
-        df_raw.columns[0]: 'anio',
-        df_raw.columns[1]: 'mes',
-        df_raw.columns[7]: 'CODIGO_CLIENTE_H', # NIT/Cliente
-        df_raw.columns[10]: 'NOMBRE_PRODUCTO_K',
-        df_raw.columns[11]: 'CATEGORIA_L',
-        df_raw.columns[13]: 'CODIGO_MARCA_N',  # El código numérico clave
-        df_raw.columns[14]: 'VALOR_VENTA_O'
-    }
-    # Renombrar solo las existentes
-    final_map = {k: v for k, v in col_map.items() if k in df_raw.columns}
-    df_raw = df_raw.rename(columns=final_map)
-    
-    # Convertir numéricos
-    df_raw['VALOR_VENTA_O'] = pd.to_numeric(df_raw['VALOR_VENTA_O'], errors='coerce').fillna(0)
-    
-    # Crear Fecha para análisis temporal
-    try:
-        df_raw['anio_num'] = pd.to_numeric(df_raw['anio'], errors='coerce').fillna(2024).astype(int)
-        # Mapeo simple de meses si vienen en texto
-        meses = {'enero':1, 'febrero':2, 'marzo':3, 'abril':4, 'mayo':5, 'junio':6, 'julio':7, 'agosto':8, 'septiembre':9, 'octubre':10, 'noviembre':11, 'diciembre':12}
-        
-        if df_raw['mes'].dtype == object:
-            df_raw['mes_lower'] = df_raw['mes'].astype(str).str.lower().str.strip()
-            df_raw['mes_num'] = df_raw['mes_lower'].map(meses).fillna(1).astype(int)
-        else:
-            df_raw['mes_num'] = pd.to_numeric(df_raw['mes'], errors='coerce').fillna(1).astype(int)
-            
-        df_raw['Fecha_Dt'] = pd.to_datetime(dict(year=df_raw['anio_num'], month=df_raw['mes_num'], day=1))
-    except:
-        df_raw['Fecha_Dt'] = pd.to_datetime('today')
+# Mapeo Inteligente
+col_map = {
+    df_raw.columns[0]: 'anio',
+    df_raw.columns[1]: 'mes',
+    df_raw.columns[7]: 'CODIGO_CLIENTE_H', 
+    df_raw.columns[8]: 'NOMBRE_CLIENTE_I', # Agregamos Nombre Cliente
+    df_raw.columns[10]: 'NOMBRE_PRODUCTO_K',
+    df_raw.columns[11]: 'CATEGORIA_L',
+    df_raw.columns[13]: 'CODIGO_MARCA_N',
+    df_raw.columns[14]: 'VALOR_VENTA_O'
+}
+final_map = {k: v for k, v in col_map.items() if k in df_raw.columns}
+df_raw = df_raw.rename(columns=final_map)
 
-else:
-    st.error("❌ El archivo cargado no tiene la estructura esperada (Mínimo columna O). Revisa el formato.")
-    st.stop()
-
-# --- 4.2. APLICAR LA CLASIFICACIÓN MAESTRA ---
-with st.spinner("🧠 Ejecutando algoritmo de clasificación de marcas..."):
-    df_raw['Marca_Master'] = df_raw.apply(clasificar_estrategia_master, axis=1)
-
-# --- 4.3. CRUCE CON DROPBOX (POBLACIONES) ---
+# Conversiones
+df_raw['VALOR_VENTA_O'] = pd.to_numeric(df_raw['VALOR_VENTA_O'], errors='coerce').fillna(0)
+df_raw['anio'] = pd.to_numeric(df_raw['anio'], errors='coerce').fillna(2024).astype(int)
 df_raw['Key_Nit'] = df_raw['CODIGO_CLIENTE_H'].apply(limpiar_nit)
 
-with st.spinner("🌍 Georeferenciando clientes desde la nube..."):
-    df_clientes = cargar_poblaciones_dropbox()
-
-if not df_clientes.empty:
-    # Left Join para no perder ventas aunque no tengan ciudad
-    df_full = pd.merge(df_raw, df_clientes, on='Key_Nit', how='left')
-    df_full['Poblacion_Real'] = df_full['Poblacion_Real'].fillna('SIN ASIGNAR')
-else:
-    # Si falla Dropbox, usamos fallback
-    df_full = df_raw.copy()
-    df_full['Poblacion_Real'] = 'SIN CONEXIÓN DB'
+# Clasificación
+with st.spinner("⚙️ Procesando lógica de negocio..."):
+    df_raw['Marca_Master'] = df_raw.apply(clasificar_estrategia_master, axis=1)
+    
+    # Cargar Geo
+    df_clientes = cargar_poblaciones_dropbox_excel()
+    
+    if not df_clientes.empty:
+        df_full = pd.merge(df_raw, df_clientes, on='Key_Nit', how='left')
+        df_full['Poblacion_Real'] = df_full['Poblacion_Real'].fillna('OTROS')
+        if 'Canal_Cliente' not in df_full.columns: df_full['Canal_Cliente'] = 'GENERAL'
+    else:
+        df_full = df_raw.copy()
+        df_full['Poblacion_Real'] = 'SIN DATA'
+        df_full['Canal_Cliente'] = 'GENERAL'
 
 # ==============================================================================
-# 5. DASHBOARD ANALÍTICO (UI)
+# 5. DASHBOARD "ULTRA"
 # ==============================================================================
 
-st.title("🧠 Master Brain Ultra: Estrategia Comercial 360º")
-st.markdown("### Análisis de Crecimiento, Rentabilidad y Logística")
-
-# --- SIDEBAR & FILTROS ---
-with st.sidebar:
-    st.header("🎛️ Panel de Control")
-    
-    # Filtro Año
-    lista_anios = sorted(df_full['anio'].unique(), reverse=True)
-    anio_act = st.selectbox("Año Objetivo", lista_anios, index=0)
-    anio_ant = st.selectbox("Año Base (Comparar)", [a for a in lista_anios if a != anio_act] + ["Ninguno"], index=0)
-    
-    st.markdown("---")
-    
-    # Filtro Marca
-    lista_marcas = sorted(df_full['Marca_Master'].unique())
-    # Mover OTROS al final
-    if 'OTROS' in lista_marcas: 
-        lista_marcas.remove('OTROS')
-        lista_marcas.append('OTROS')
-        
-    sel_marcas = st.multiselect("Filtrar Marcas", lista_marcas, default=lista_marcas)
-    
-    # Filtro Población
-    lista_pobs = ["TODAS"] + sorted(df_full['Poblacion_Real'].unique())
-    sel_pob = st.selectbox("Filtrar Población", lista_pobs)
-
-# --- APLICACIÓN DE FILTROS ---
-df_filtered = df_full[df_full['Marca_Master'].isin(sel_marcas)].copy()
-if sel_pob != "TODAS":
-    df_filtered = df_filtered[df_filtered['Poblacion_Real'] == sel_pob]
-
-# Dataframes por periodo
-df_now = df_filtered[df_filtered['anio'] == anio_act]
-df_prev = df_filtered[df_filtered['anio'] == anio_ant] if anio_ant != "Ninguno" else pd.DataFrame()
-
-# --- KPIs PRINCIPALES ---
-tot_venta_act = df_now['VALOR_VENTA_O'].sum()
-tot_venta_ant = df_prev['VALOR_VENTA_O'].sum() if not df_prev.empty else 0
-
-diff = tot_venta_act - tot_venta_ant
-crec_pct = (diff / tot_venta_ant * 100) if tot_venta_ant > 0 else 0
-
-# Ticket Promedio (Venta Total / Registros o Clientes Únicos)
-# Usaremos registros como proxy de líneas facturadas
-ticket_prom = tot_venta_act / len(df_now) if len(df_now) > 0 else 0
-clientes_unicos = df_now['Key_Nit'].nunique()
-
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Venta Total", f"${tot_venta_act/1e6:,.1f} M", f"{crec_pct:+.1f}%")
-col2.metric("Crecimiento Neto", f"${diff/1e6:+.1f} M", "Vs Año Base")
-col3.metric("Clientes Activos", f"{clientes_unicos}", "En periodo")
-col4.metric("Ticket Promedio (Línea)", f"${ticket_prom:,.0f}", "Eficiencia")
-
+st.title("🧠 Master Brain Ultra")
+st.markdown("Sistema Avanzado de Análisis de Crecimiento y Rentabilidad")
 st.divider()
 
-# --- TABS DE ANÁLISIS PROFUNDO ---
-tab_growth, tab_logistics, tab_share = st.tabs([
-    "🚀 Drivers de Crecimiento", 
-    "📦 Costo por Servir (Logística)", 
-    "🎯 Estructura de Portafolio"
+# --- SIDEBAR GLOBAL ---
+with st.sidebar:
+    st.header("🎛️ Filtros Maestros")
+    anios = sorted(df_full['anio'].unique(), reverse=True)
+    anio_obj = st.selectbox("Año Objetivo (Actual)", anios, index=0)
+    anio_base = st.selectbox("Año Base (Comparativo)", [a for a in anios if a != anio_obj], index=0)
+    
+    st.markdown("---")
+    # Multiselect inteligente
+    all_brands = sorted(df_full['Marca_Master'].unique())
+    sel_brands = st.multiselect("Marcas", all_brands, default=all_brands)
+    
+    all_cities = sorted(df_full['Poblacion_Real'].unique())
+    sel_city = st.multiselect("Poblaciones", all_cities) # Ahora multiselect para comparar varias
+
+# --- FILTRADO DE DATOS ---
+df_f = df_full[df_full['Marca_Master'].isin(sel_brands)]
+if sel_city:
+    df_f = df_f[df_f['Poblacion_Real'].isin(sel_city)]
+
+# Separar periodos para cálculos Delta
+df_act = df_f[df_f['anio'] == anio_obj]
+df_ant = df_f[df_f['anio'] == anio_base]
+
+# --- KPI HEADER (Diseño Personalizado) ---
+vta_act = df_act['VALOR_VENTA_O'].sum()
+vta_ant = df_ant['VALOR_VENTA_O'].sum()
+diff_abs = vta_act - vta_ant
+diff_pct = (diff_abs / vta_ant * 100) if vta_ant > 0 else 100
+
+# Clientes con compra > 0
+cli_act = df_act[df_act['VALOR_VENTA_O']>0]['Key_Nit'].nunique()
+cli_ant = df_ant[df_ant['VALOR_VENTA_O']>0]['Key_Nit'].nunique()
+diff_cli = cli_act - cli_ant
+
+c1, c2, c3, c4 = st.columns(4)
+
+def kpi_card(col, title, val, delta, prefix="$"):
+    color = "pos" if delta >= 0 else "neg"
+    delta_str = f"{delta:,.1f}%" if prefix=="$" else f"{delta:,.0f}"
+    symbol = "▲" if delta >= 0 else "▼"
+    col.markdown(f"""
+    <div class="metric-card">
+        <div class="metric-lbl">{title}</div>
+        <div class="metric-val">{prefix}{val:,.0f}</div>
+        <div class="metric-delta {color}">{symbol} {delta_str} vs AA</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+kpi_card(c1, "Venta Total", vta_act/1e6, diff_pct, "$") # En Millones
+kpi_card(c2, "Gap de Crecimiento", diff_abs/1e6, diff_pct, "$")
+kpi_card(c3, "Clientes Activos", cli_act, diff_cli, "#")
+# Ticket Promedio Anual
+ticket = vta_act / cli_act if cli_act > 0 else 0
+kpi_card(c4, "Ticket Promedio/Cliente", ticket, 0, "$")
+
+# --- TABS ANALÍTICOS ---
+tab1, tab2, tab3, tab4 = st.tabs([
+    "🚀 Drivers de Crecimiento (Waterfall)", 
+    "🌍 Geo-Rentabilidad", 
+    "📦 Mix & Pareto (80/20)",
+    "🔎 Explorador de Datos"
 ])
 
-# --- TAB 1: CRECIMIENTO (WATERFALL) ---
-with tab_growth:
-    st.subheader(f"¿Qué marcas movieron la aguja entre {anio_ant} y {anio_act}?")
-    
-    if not df_prev.empty:
-        # Agrupar datos
-        g_act = df_now.groupby('Marca_Master')['VALOR_VENTA_O'].sum()
-        g_ant = df_prev.groupby('Marca_Master')['VALOR_VENTA_O'].sum()
-        
-        df_var = pd.DataFrame({'Actual': g_act, 'Base': g_ant}).fillna(0)
-        df_var['Variacion'] = df_var['Actual'] - df_var['Base']
-        df_var['Tipo'] = df_var['Variacion'].apply(lambda x: 'Crecimiento' if x >=0 else 'Decrecimiento')
-        
-        # Ordenar para el gráfico
-        df_var = df_var.sort_values('Variacion', ascending=False)
-        
-        col_g1, col_g2 = st.columns([2, 1])
-        
-        with col_g1:
-            # Waterfall Chart
-            fig_water = go.Figure(go.Waterfall(
-                name="Variación", orientation="v",
-                measure=["relative"] * len(df_var),
-                x=df_var.index,
-                y=df_var['Variacion'],
-                connector={"line":{"color":"rgb(63, 63, 63)"}},
-                decreasing={"marker":{"color":"#D32F2F"}}, # Rojo
-                increasing={"marker":{"color":"#388E3C"}}, # Verde
-            ))
-            fig_water.update_layout(title="Cascada de Crecimiento por Marca ($)", height=500)
-            st.plotly_chart(fig_water, use_container_width=True)
-            
-        with col_g2:
-            st.markdown("#### 🏆 Top Impulsores vs Frenos")
-            st.dataframe(
-                df_var[['Actual', 'Base', 'Variacion']]
-                .style.format("${:,.0f}")
-                .background_gradient(subset=['Variacion'], cmap='RdYlGn')
-            )
-    else:
-        st.info("⚠️ Selecciona un 'Año Base' en el menú lateral para ver el análisis comparativo.")
+# --- TAB 1: WATERFALL DE CRECIMIENTO (EL ANÁLISIS REAL) ---
+with tab1:
+    st.subheader(f"Desglose de la Variación: {anio_base} vs {anio_obj}")
+    st.markdown("Este gráfico muestra **exactamente** qué Marcas o Categorías construyeron (o destruyeron) valor.")
 
-# --- TAB 2: LOGÍSTICA (MATRIZ DE COSTO) ---
-with tab_logistics:
-    st.subheader("Matriz de Costo por Servir (Poblaciones)")
-    st.markdown("""
-    **Análisis de Rentabilidad Logística:**
-    * **Eje Y (Drop Size):** Valor promedio por pedido/línea. Queremos estar arriba (pedidos grandes).
-    * **Eje X (Frecuencia):** Cantidad de meses con compra. Queremos estar a la derecha (compra constante).
-    * **Burbujas Rojas:** Zonas de alerta (Alta visita, bajo pedido).
-    """)
+    dim_view = st.radio("Ver crecimiento por:", ["Marca_Master", "CATEGORIA_L", "Canal_Cliente"], horizontal=True)
+
+    # Preparar datos para Waterfall
+    g_act = df_act.groupby(dim_view)['VALOR_VENTA_O'].sum()
+    g_ant = df_ant.groupby(dim_view)['VALOR_VENTA_O'].sum()
     
-    # Calcular métricas por Población
-    df_log = df_now.groupby('Poblacion_Real').agg(
-        Venta=('VALOR_VENTA_O', 'sum'),
-        Lineas=('VALOR_VENTA_O', 'count'),
-        Frecuencia_Meses=('Fecha_Dt', 'nunique')
-    ).reset_index()
+    df_w = pd.DataFrame({'Actual': g_act, 'Anterior': g_ant}).fillna(0)
+    df_w['Variacion'] = df_w['Actual'] - df_w['Anterior']
+    df_w['Contribucion_Pct'] = (df_w['Variacion'] / vta_ant) * 100 # KPI CLAVE
     
-    df_log = df_log[df_log['Venta'] > 0]
-    df_log['Drop_Size'] = df_log['Venta'] / df_log['Lineas']
+    # Filtrar ruidito (variaciones muy pequeñas)
+    df_w = df_w.sort_values('Variacion', ascending=False)
     
-    # Scatter Plot
-    avg_drop = df_log['Drop_Size'].median()
-    avg_freq = df_log['Frecuencia_Meses'].median()
+    # Top 15 movers para el gráfico
+    df_chart = df_w.head(15)
     
-    fig_scat = px.scatter(
-        df_log,
-        x="Frecuencia_Meses",
-        y="Drop_Size",
-        size="Venta",
-        color="Drop_Size",
-        hover_name="Poblacion_Real",
-        title="Eficiencia Logística por Población",
-        color_continuous_scale="RdYlGn",
-        height=550
+    fig_water = go.Figure(go.Waterfall(
+        name="20", orientation="v",
+        measure=["relative"] * len(df_chart),
+        x=df_chart.index,
+        y=df_chart['Variacion'],
+        text=df_chart['Variacion'].apply(lambda x: f'{x/1e6:+.1f}M'),
+        textposition="outside",
+        connector={"line":{"color":"rgb(63, 63, 63)"}},
+        decreasing={"marker":{"color":"#ef4444"}},
+        increasing={"marker":{"color":"#10b981"}}
+    ))
+    fig_water.update_layout(title=f"Puente de Ventas por {dim_view}", height=500)
+    st.plotly_chart(fig_water, use_container_width=True)
+
+    st.markdown("#### 📊 Tabla de Impacto al Crecimiento")
+    st.markdown("La columna **Contribución** indica cuántos puntos porcentuales de crecimiento total aportó esa línea.")
+    
+    # Formato condicional
+    st.dataframe(
+        df_w.style.format({
+            'Actual': '${:,.0f}', 
+            'Anterior': '${:,.0f}', 
+            'Variacion': '${:,.0f}',
+            'Contribucion_Pct': '{:+.2f}%'
+        }).background_gradient(subset=['Variacion'], cmap='RdYlGn'),
+        use_container_width=True
     )
-    
-    # Cuadrantes
-    fig_scat.add_hline(y=avg_drop, line_dash="dash", annotation_text="Drop Medio")
-    fig_scat.add_vline(x=avg_freq, line_dash="dash", annotation_text="Frec. Media")
-    
-    st.plotly_chart(fig_scat, use_container_width=True)
-    
-    st.markdown("#### 🚨 Alerta: Poblaciones Ineficientes (Mucha visita, poca venta)")
-    df_inef = df_log[
-        (df_log['Frecuencia_Meses'] > avg_freq) & 
-        (df_log['Drop_Size'] < avg_drop)
-    ].sort_values('Venta', ascending=False).head(10)
-    
-    st.dataframe(df_inef.style.format({'Venta': '${:,.0f}', 'Drop_Size': '${:,.0f}'}))
 
-# --- TAB 3: SHARE & ESTRUCTURA ---
-with tab_share:
-    st.subheader("Distribución del Portafolio (Sunburst)")
-    st.markdown("Explora la jerarquía: **Marca -> Categoría -> Producto**")
+# --- TAB 2: GEO-RENTABILIDAD ---
+with tab2:
+    st.subheader("Matriz de Eficiencia Geográfica")
     
-    # Limpiar datos para el gráfico
-    df_sun = df_now.groupby(['Marca_Master', 'CATEGORIA_L'])['VALOR_VENTA_O'].sum().reset_index()
-    df_sun = df_sun[df_sun['VALOR_VENTA_O'] > 0] # Quitar ceros
+    col_geo1, col_geo2 = st.columns([3, 1])
     
-    col_s1, col_s2 = st.columns([2, 1])
+    with col_geo1:
+        # Agrupar por Población
+        df_geo = df_act.groupby('Poblacion_Real').agg(
+            Venta=('VALOR_VENTA_O', 'sum'),
+            Clientes=('Key_Nit', 'nunique'),
+            Transacciones=('VALOR_VENTA_O', 'count')
+        ).reset_index()
+        
+        df_geo = df_geo[df_geo['Venta'] > 0]
+        df_geo['Venta_por_Cliente'] = df_geo['Venta'] / df_geo['Clientes']
+        
+        # Scatter Plot Mejorado
+        fig_geo = px.scatter(
+            df_geo,
+            x="Clientes", y="Venta_por_Cliente",
+            size="Venta", color="Venta_por_Cliente",
+            hover_name="Poblacion_Real",
+            title="Potencial por Población (Tamaño burbuja = Venta Total)",
+            labels={"Venta_por_Cliente": "Venta Promedio x Cliente ($)", "Clientes": "# Clientes Activos"},
+            color_continuous_scale="Viridis",
+            log_x=True, log_y=True # Logarítmico para ver mejor los datos dispersos
+        )
+        st.plotly_chart(fig_geo, use_container_width=True)
+
+    with col_geo2:
+        st.markdown("**Top Poblaciones (Crecimiento)**")
+        # Calcular crecimiento por ciudad
+        g_geo_act = df_act.groupby('Poblacion_Real')['VALOR_VENTA_O'].sum()
+        g_geo_ant = df_ant.groupby('Poblacion_Real')['VALOR_VENTA_O'].sum()
+        df_ggeo = pd.DataFrame({'Act': g_geo_act, 'Ant': g_geo_ant}).fillna(0)
+        df_ggeo['Var'] = df_ggeo['Act'] - df_ggeo['Ant']
+        
+        st.dataframe(
+            df_ggeo.sort_values('Var', ascending=False).head(10)[['Var']]
+            .style.format("${:,.0f}").background_gradient(cmap="Greens"),
+            height=400
+        )
+
+# --- TAB 3: PARETO Y MIX ---
+with tab3:
+    c_p1, c_p2 = st.columns(2)
     
-    with col_s1:
-        fig_sun = px.sunburst(
-            df_sun,
-            path=['Marca_Master', 'CATEGORIA_L'],
+    with c_p1:
+        st.subheader("Ley de Pareto (80/20) - Productos")
+        # Calcular Pareto de Productos
+        df_prod = df_act.groupby('NOMBRE_PRODUCTO_K')['VALOR_VENTA_O'].sum().sort_values(ascending=False).reset_index()
+        df_prod['Acumulado'] = df_prod['VALOR_VENTA_O'].cumsum()
+        df_prod['Porcentaje_Acum'] = (df_prod['Acumulado'] / df_prod['VALOR_VENTA_O'].sum()) * 100
+        
+        # Cortar donde sea < 80%
+        top_80 = df_prod[df_prod['Porcentaje_Acum'] <= 80]
+        count_80 = len(top_80)
+        total_skus = len(df_prod)
+        
+        st.metric("SKUs que hacen el 80% de la venta", f"{count_80} / {total_skus}", 
+                  f"Son el {(count_80/total_skus*100):.1f}% del portafolio")
+        
+        fig_pareto = px.area(df_prod, x=df_prod.index, y='Porcentaje_Acum', title="Curva de Concentración de Venta")
+        fig_pareto.add_hline(y=80, line_dash="dash", line_color="red")
+        st.plotly_chart(fig_pareto, use_container_width=True)
+
+    with c_p2:
+        st.subheader("Mix de Categorías (Treemap)")
+        fig_tree = px.treemap(
+            df_act, 
+            path=['Marca_Master', 'CATEGORIA_L'], 
             values='VALOR_VENTA_O',
             color='VALOR_VENTA_O',
             color_continuous_scale='Blues',
-            title="Peso Visual de Marcas y Categorías"
+            title="Distribución Jerárquica del Portafolio"
         )
-        st.plotly_chart(fig_sun, use_container_width=True)
-        
-    with col_s2:
-        st.markdown("#### Top Categorías Globales")
-        df_top = df_now.groupby('CATEGORIA_L')['VALOR_VENTA_O'].sum().reset_index().sort_values('VALOR_VENTA_O', ascending=False).head(10)
-        df_top['Share'] = (df_top['VALOR_VENTA_O'] / tot_venta_act) * 100
-        
-        st.dataframe(df_top.style.format({'VALOR_VENTA_O': '${:,.0f}', 'Share': '{:.2f}%'}))
+        st.plotly_chart(fig_tree, use_container_width=True)
 
-st.success(f"✅ Análisis completado. {len(df_now):,.0f} registros procesados. {df_now['Poblacion_Real'].nunique()} poblaciones identificadas.")
+# --- TAB 4: EXPLORADOR DE DATOS (DETALLE) ---
+with tab4:
+    st.subheader("🔎 Data Drill-Down")
+    
+    # Filtros locales
+    txt_search = st.text_input("Buscar Cliente o Producto Específico:", "")
+    
+    df_show = df_act[['Fecha_Dt', 'Key_Nit', 'NOMBRE_CLIENTE_I', 'Poblacion_Real', 'Marca_Master', 'NOMBRE_PRODUCTO_K', 'VALOR_VENTA_O']].copy()
+    
+    if txt_search:
+        mask = df_show.astype(str).apply(lambda x: x.str.contains(txt_search, case=False)).any(axis=1)
+        df_show = df_show[mask]
+        
+    st.dataframe(
+        df_show.sort_values('VALOR_VENTA_O', ascending=False).head(1000).style.format({'VALOR_VENTA_O': '${:,.2f}'}), 
+        use_container_width=True
+    )
