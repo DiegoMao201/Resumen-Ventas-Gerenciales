@@ -73,7 +73,6 @@ def clasificar_marca_ultra(fila):
         if m in texto_completo: return m
 
     # 2. FAMILIA PINTUCO (DESGLOSE SEGÚN TU FOTO DE ÁRBOL)
-    # Buscamos estas marcas específicas para sacarlas de "Pintuco General"
     familia_pintuco = {
         'TERINSA': 'TERINSA',
         'ICO': 'ICO',
@@ -83,14 +82,14 @@ def clasificar_marca_ultra(fila):
         'PROTECTO': 'PROTECTO',
         'OCEANIC': 'OCEANIC PAINTS',
         'CORAL': 'CORAL',
-        'SIKKEN': 'SIKKENS', # Catch sikkens variations
+        'SIKKEN': 'SIKKENS', 
         'WANDA': 'WANDA'
     }
     
     for clave, valor in familia_pintuco.items():
         if clave in texto_completo: return valor
 
-    # 3. PINTUCO GENERAL (Si dice Pintuco, Viniltex, Koraza pero no es de las anteriores)
+    # 3. PINTUCO GENERAL
     claves_pintuco_gen = ['PINTUCO', 'VINILTEX', 'KORAZA', 'DOMESTICO', 'CONSTRUCCION']
     for k in claves_pintuco_gen:
         if k in texto_completo: return 'PINTUCO ARQUITECTONICO'
@@ -114,7 +113,7 @@ def cargar_datos_dropbox():
 
         with dropbox.Dropbox(app_key=APP_KEY, app_secret=APP_SECRET, oauth2_refresh_token=REFRESH_TOKEN) as dbx:
             ruta = '/data/cartera_detalle.csv'
-            _, res = dbx.files_download(path=ruta)
+            metadata, res = dbx.files_download(path=ruta)
             contenido = res.content.decode('latin-1')
             
             cols = [
@@ -131,16 +130,17 @@ def cargar_datos_dropbox():
             df_drop['Importe'] = pd.to_numeric(df_drop['Importe'], errors='coerce').fillna(0)
             df_drop['DiasVencido'] = pd.to_numeric(df_drop['DiasVencido'], errors='coerce').fillna(0)
 
-            # Agrupación Inteligente: Obtenemos la población real y datos de riesgo por cliente
+            # Agrupación Inteligente
             def moda_poblacion(series):
+                if series.empty: return "SIN POBLACION"
                 m = series.mode()
                 return m[0] if not m.empty else "SIN POBLACION"
 
             df_maestro = df_drop.groupby('Key_Nit').agg({
                 'Poblacion': moda_poblacion,
-                'DiasVencido': 'max',       # Peor mora actual
-                'Importe': 'sum',           # Deuda Total
-                'NombreCliente': 'first'    # Nombre oficial
+                'DiasVencido': 'max',       
+                'Importe': 'sum',           
+                'NombreCliente': 'first'    
             }).reset_index()
             
             df_maestro.rename(columns={
@@ -159,7 +159,7 @@ def cargar_datos_dropbox():
 # 4. PROCESAMIENTO Y FUSIÓN DE DATOS
 # ==============================================================================
 
-# Verificación de carga inicial (Archivo de Ventas)
+# Verificación de carga inicial
 if 'df_ventas' not in st.session_state:
     st.warning("⚠️ Por favor carga el archivo de ventas en la pantalla de inicio.")
     st.stop()
@@ -168,16 +168,24 @@ df_raw = st.session_state.df_ventas.copy()
 
 # --- 1. Pre-procesamiento de Ventas ---
 filtro_docs = 'FACTURA|NOTA.*CREDITO'
-df_raw['TipoDocumento'] = df_raw['TipoDocumento'].astype(str)
-df = df_raw[df_raw['TipoDocumento'].str.contains(filtro_docs, case=False, regex=True)].copy()
+# Aseguramos que TipoDocumento sea string
+if 'TipoDocumento' in df_raw.columns:
+    df_raw['TipoDocumento'] = df_raw['TipoDocumento'].astype(str)
+    df = df_raw[df_raw['TipoDocumento'].str.contains(filtro_docs, case=False, regex=True)].copy()
+else:
+    df = df_raw.copy()
 
-# Convertir numéricos
+# --- CORRECCIÓN DEL ERROR NUMÉRICO AQUÍ ---
 cols_num = ['valor_venta', 'unidades_vendidas', 'costo_unitario', 'rentabilidad']
 for col in cols_num:
-    df[col] = pd.to_numeric(df.get(col, 0), errors='coerce').fillna(0)
+    if col in df.columns:
+        # Si la columna existe, convertimos y rellenamos
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    else:
+        # Si no existe, creamos la columna con ceros
+        df[col] = 0.0
 
 # Calcular Margen en Pesos ($)
-# Si existe 'costo_unitario', lo usamos. Si no, usamos 'rentabilidad' si viene en %
 if 'Margen_Pesos' not in df.columns:
     df['Margen_Pesos'] = df['valor_venta'] - (df['unidades_vendidas'] * df['costo_unitario'])
 
@@ -200,8 +208,13 @@ if not df_logistica.empty:
     df_full['Deuda_Total_Cartera'] = df_full['Deuda_Total_Cartera'].fillna(0)
 else:
     df_full = df.copy()
-    df_full['Poblacion'] = df_full.get('ciudad_cliente', 'SIN INFO').apply(normalizar_texto) # Fallback si falla dropbox
+    if 'ciudad_cliente' in df_full.columns:
+        df_full['Poblacion'] = df_full['ciudad_cliente'].apply(normalizar_texto)
+    else:
+        df_full['Poblacion'] = 'SIN INFO'
+    
     df_full['Max_Dias_Mora_Cartera'] = 0
+    df_full['Deuda_Total_Cartera'] = 0
 
 # ==============================================================================
 # 5. INTERFAZ DE ANÁLISIS SUPERIOR
@@ -214,7 +227,11 @@ st.markdown("### Visión de Crecimiento, Rentabilidad y Logística")
 st.sidebar.header("🎛️ Panel de Control")
 
 # Años
-anios = sorted(df_full['anio'].unique(), reverse=True)
+if 'anio' in df_full.columns:
+    anios = sorted(df_full['anio'].unique(), reverse=True)
+else:
+    anios = [2024]
+
 col_a1, col_a2 = st.sidebar.columns(2)
 anio_act = col_a1.selectbox("Año Actual", anios, index=0)
 anio_base = col_a2.selectbox("Año Base", [a for a in anios if a != anio_act] + ["Ninguno"], index=0)
@@ -223,7 +240,6 @@ st.sidebar.markdown("---")
 
 # Marcas (Usando la nueva clasificación)
 marcas_ordenadas = sorted(df_full['Marca_Master'].unique())
-# Ponemos 'OTROS' al final
 if 'OTROS' in marcas_ordenadas:
     marcas_ordenadas.remove('OTROS')
     marcas_ordenadas.append('OTROS')
@@ -231,7 +247,7 @@ if 'OTROS' in marcas_ordenadas:
 sel_marcas = st.sidebar.multiselect("Filtrar Marcas", marcas_ordenadas, default=marcas_ordenadas)
 
 # Poblaciones
-zonas_ordenadas = ["TODAS"] + sorted(df_full['Poblacion'].unique())
+zonas_ordenadas = ["TODAS"] + sorted(df_full['Poblacion'].astype(str).unique())
 sel_zona = st.sidebar.selectbox("Filtrar Población", zonas_ordenadas)
 
 # --- APLICACIÓN DE FILTROS ---
@@ -288,8 +304,6 @@ with tab1:
         df_var['Crecimiento_Pct'] = (df_var['Variacion_Dinero'] / df_var['Venta_Anterior']).replace([np.inf, -np.inf], 0) * 100
         
         # Cálculo de CONTRIBUCIÓN AL CRECIMIENTO TOTAL
-        # Fórmula: (Variación de la Marca / Venta Total Año Anterior) * 100
-        # Esto nos dice: Del 10% que creció la empresa, cuánto puso esta marca.
         total_venta_anterior = df_prev['valor_venta'].sum()
         df_var['Contribucion_Puntos'] = (df_var['Variacion_Dinero'] / total_venta_anterior) * 100
         
@@ -340,13 +354,18 @@ with tab2:
     """)
     
     # Agrupamos por Población (Limpiada con Dropbox)
+    if 'numero_documento' in df_now.columns:
+        col_pedido = 'numero_documento'
+    else:
+        col_pedido = 'cliente_id' # Fallback si no hay numero documento
+
     df_log_kpi = df_now.groupby('Poblacion').agg(
         Venta_Total=('valor_venta', 'sum'),
         Margen_Total=('Margen_Pesos', 'sum'),
-        Cant_Facturas=('numero_documento', 'nunique') # Usamos numero_documento o serie para contar pedidos
+        Cant_Facturas=(col_pedido, 'nunique') 
     ).reset_index()
     
-    # Filtramos poblaciones basura o muy pequeñas para limpiar el gráfico
+    # Filtramos poblaciones muy pequeñas
     df_log_kpi = df_log_kpi[df_log_kpi['Venta_Total'] > 0]
     
     df_log_kpi['Ticket_Promedio'] = df_log_kpi['Venta_Total'] / df_log_kpi['Cant_Facturas']
@@ -375,7 +394,7 @@ with tab2:
     fig_scat.update_traces(textposition='top center')
     st.plotly_chart(fig_scat, use_container_width=True)
     
-    # Tabla de "Destructores de Valor" (Bajo Ticket, Baja Rentabilidad)
+    # Tabla de "Destructores de Valor"
     st.markdown("#### ⚠️ Zonas de Atención (Bajo Ticket o Baja Rentabilidad)")
     df_alerta = df_log_kpi[
         (df_log_kpi['Ticket_Promedio'] < prom_ticket) | 
@@ -395,15 +414,15 @@ with tab3:
     col_share1, col_share2 = st.columns(2)
     
     with col_share1:
-        # Treemap: Mejor visualización para jerarquías
-        # Agrupamos: Marca Master -> Categoria
-        df_tree = df_now.groupby(['Marca_Master', 'categoria_producto'])['valor_venta'].sum().reset_index()
-        # Filtramos negativos o ceros
+        # Verificamos si existe columna categoria
+        cat_col = 'categoria_producto' if 'categoria_producto' in df_now.columns else 'Marca_Master'
+        
+        df_tree = df_now.groupby(['Marca_Master', cat_col])['valor_venta'].sum().reset_index()
         df_tree = df_tree[df_tree['valor_venta'] > 0]
         
         fig_tree = px.treemap(
             df_tree,
-            path=[px.Constant("Mercado Total"), 'Marca_Master', 'categoria_producto'],
+            path=[px.Constant("Mercado Total"), 'Marca_Master', cat_col],
             values='valor_venta',
             color='Marca_Master',
             title="Composición del Mercado (Click para profundizar)"
@@ -412,11 +431,10 @@ with tab3:
         
     with col_share2:
         # Tabla resumen de Share
-        total_mkt = df_tree['valor_venta'].sum()
+        total_mkt = df_now['valor_venta'].sum()
         df_share_tbl = df_now.groupby('Marca_Master')['valor_venta'].sum().reset_index().sort_values('valor_venta', ascending=False)
         df_share_tbl['Share %'] = (df_share_tbl['valor_venta'] / total_mkt * 100)
         
-        # Gráfico de Donut simple
         fig_pie = px.pie(df_share_tbl, values='valor_venta', names='Marca_Master', hole=0.4, title="Share por Marca")
         st.plotly_chart(fig_pie, use_container_width=True)
 
@@ -428,27 +446,24 @@ with tab4:
     # Agrupamos por Cliente
     df_risk = df_now.groupby(['nombre_cliente', 'Key_Nit', 'Poblacion']).agg(
         Compra_Anio=('valor_venta', 'sum'),
-        # Tomamos max porque un cliente tiene un solo registro maestro de mora en df_full
         Dias_Mora_Max=('Max_Dias_Mora_Cartera', 'max'),
         Deuda_Total=('Deuda_Total_Cartera', 'max')
     ).reset_index()
     
-    # Filtramos clientes relevantes (> $1M compra o con deuda)
+    # Filtramos clientes relevantes
     df_risk = df_risk[(df_risk['Compra_Anio'] > 1000000) | (df_risk['Deuda_Total'] > 0)]
     
-    # Scatter Plot: Eje X = Días Mora, Eje Y = Compra, Tamaño = Deuda Total
     fig_risk = px.scatter(
         df_risk,
         x="Dias_Mora_Max",
         y="Compra_Anio",
-        size="Deuda_Total", # El tamaño de la burbuja es la deuda
-        color="Poblacion", # Agrupamos por zona para ver riesgo geográfico
+        size="Deuda_Total", 
+        color="Poblacion", 
         hover_name="nombre_cliente",
         title="Clientes Críticos: Alta Compra pero Alta Mora",
         labels={"Dias_Mora_Max": "Días Máximos de Mora", "Compra_Anio": f"Ventas {anio_act}"}
     )
     
-    # Línea de peligro (60 días)
     fig_risk.add_vline(x=60, line_color="red", line_dash="dash", annotation_text="Zona Crítica (>60 días)")
     st.plotly_chart(fig_risk, use_container_width=True)
     
