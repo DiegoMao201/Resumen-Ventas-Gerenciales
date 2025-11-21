@@ -45,7 +45,6 @@ st.markdown("""
         color: #0c4a6e; font-size: 0.95rem;
     }
     .analysis-title { font-weight: 800; display: block; margin-bottom: 5px; text-transform: uppercase; }
-    .action-item { font-weight: 600; color: #b91c1c; }
     
     /* Tabs */
     .stTabs [data-baseweb="tab-list"] { gap: 10px; }
@@ -73,18 +72,67 @@ def limpiar_codigo_master(codigo):
     except: pass
     return s_cod
 
-def clasificar_estrategia_master(row):
+def clasificar_marca_unificada(row):
+    """
+    Unifica Marca y Categoría.
+    Prioridad: 
+    1. Excluir 3M.
+    2. Identificar Aliados (Abracol, Yale, Induma, etc.) -> Marca=Aliado, Cat=Aliado.
+    3. Identificar por Código (Imagen del usuario) -> Marca=NombreCodigo, Cat=NombreCodigo.
+    4. Resto -> Otras Marcas.
+    """
+    # Extraer datos crudos
     prod_name = normalizar_texto(row.get('NOMBRE_PRODUCTO_K', ''))
-    cat_name = normalizar_texto(row.get('CATEGORIA_L', ''))
-    aliados = ['ABRACOL', 'INDUMA', 'YALE', 'ARTECOLA', 'GOYA', 'ATLAS', '3M', 'SISTA', 'SINTESOLDA']
-    
-    texto = f"{prod_name} {cat_name}"
-    for aliado in aliados:
-        if aliado in texto: return aliado
-        
+    cat_raw = normalizar_texto(row.get('CATEGORIA_L', ''))
     raw_code = str(row.get('CODIGO_MARCA_N', '0')).split('.')[0].strip()
-    mapa = {'33': 'OCEANIC', '34': 'PROTECTO', '58': 'PINTUCO', '60': 'INTERPON', '40': 'ICO', '41': 'TERINSA', '50':'PINTUCO MEGA'}
-    return mapa.get(raw_code, 'OTRAS MARCAS')
+    
+    texto_analisis = f"{prod_name} {cat_raw}"
+
+    # 1. FILTRO DE EXCLUSIÓN: 3M
+    if '3M' in texto_analisis:
+        return 'OTROS', 'OTROS'
+
+    # 2. ALIADOS ESTRATÉGICOS (Busqueda en texto)
+    # Se define la lista de aliados que deben renombrar tanto Marca como Categoría
+    aliados = ['ABRACOL', 'INDUMA', 'YALE', 'ARTECOLA', 'GOYA', 'ATLAS', 'SISTA', 'SINTESOLDA']
+    
+    for aliado in aliados:
+        if aliado in texto_analisis:
+            return aliado, aliado # Retorna (Marca, Categoria) iguales
+
+    # 3. MAPEO POR CÓDIGOS (Basado en tu imagen)
+    mapa_codigos = {
+        '33': 'OCEANIC',
+        '34': 'PROTECTO',
+        '37': 'INTERNATIONAL',
+        '40': 'ICO',
+        '41': 'TERINSA',
+        '50': 'PINTUCO MEGA',
+        '54': 'INTERNATIONAL',
+        '55': 'COLORANTS',
+        '56': 'PINTUCO PROFESIONAL',
+        '57': 'PINTUCO MEGA',
+        '58': 'PINTUCO',
+        '59': 'MADETEC',
+        '60': 'INTERPON',
+        '62': 'ICO',
+        '63': 'TERINSA',
+        '64': 'PINTUCO',
+        '68': 'RESICOAT',
+        '73': 'CORAL',
+        '87': 'SIKKENS',
+        '89': 'WANDA',
+        '90': 'SIKKENS',
+        '91': 'SIKKENS',
+        '94': 'PROTECTO'
+    }
+
+    if raw_code in mapa_codigos:
+        nombre_marca = mapa_codigos[raw_code]
+        return nombre_marca, nombre_marca
+
+    # 4. DEFAULT
+    return 'OTRAS MARCAS', 'OTROS'
 
 def asignar_hub_logistico(ciudad):
     c = normalizar_texto(ciudad)
@@ -156,34 +204,51 @@ if 'df_ventas' not in st.session_state:
 df_raw = st.session_state.df_ventas.copy()
 
 try:
-    # Mapeo de columnas según estructura usual
-    cols_map = {0: 'anio', 1: 'mes', 7: 'COD', 8: 'CLIENTE', 10: 'PROD', 11: 'CATEGORIA', 13: 'MARCA', 14: 'VALOR'}
-    df_raw = df_raw.rename(columns={df_raw.columns[i]: n for i,n in cols_map.items() if i < len(df_raw.columns)})
+    # Mapeo de columnas según índices esperados
+    cols_map = {
+        0: 'anio', 1: 'mes', 2: 'dia', 7: 'COD', 8: 'CLIENTE', 
+        10: 'NOMBRE_PRODUCTO_K', 11: 'CATEGORIA_L', 13: 'CODIGO_MARCA_N', 14: 'VALOR'
+    }
+    # Renombrar columnas existentes
+    current_cols = df_raw.columns
+    rename_dict = {}
+    for idx, new_name in cols_map.items():
+        if idx < len(current_cols):
+            rename_dict[current_cols[idx]] = new_name
     
-    if len(df_raw.columns) > 2 and str(df_raw.iloc[0,2]).isnumeric():
-        df_raw['dia'] = df_raw.iloc[:, 2].astype(int)
-    else: df_raw['dia'] = 15
-except: st.stop()
+    df_raw = df_raw.rename(columns=rename_dict)
+    
+    # Manejo de columna Día si no existe o falló
+    if 'dia' not in df_raw.columns:
+        df_raw['dia'] = 15
+    else:
+         df_raw['dia'] = pd.to_numeric(df_raw['dia'], errors='coerce').fillna(15).astype(int)
 
+except Exception as e:
+    st.error(f"Error procesando columnas: {e}")
+    st.stop()
+
+# Limpieza de tipos básicos
 df_raw['VALOR'] = pd.to_numeric(df_raw['VALOR'], errors='coerce').fillna(0)
 df_raw['anio'] = pd.to_numeric(df_raw['anio'], errors='coerce').fillna(date.today().year).astype(int)
 df_raw['mes'] = pd.to_numeric(df_raw['mes'], errors='coerce').fillna(1).astype(int)
 df_raw['Key_Nit'] = df_raw['COD'].apply(limpiar_codigo_master)
 
-# Normalización de categorías para evitar errores en gráficos
-if 'CATEGORIA' in df_raw.columns:
-    df_raw['CATEGORIA'] = df_raw['CATEGORIA'].fillna('SIN CATEGORIA').astype(str)
-if 'MARCA' in df_raw.columns:
-    df_raw['MARCA'] = df_raw['MARCA'].fillna('GENERICO').astype(str)
-if 'PROD' in df_raw.columns:
-    df_raw['PROD'] = df_raw['PROD'].fillna('SIN PRODUCTO').astype(str)
-
-with st.spinner("🧠 Analizando Operación..."):
-    df_raw['Marca_Master'] = df_raw.apply(clasificar_estrategia_master, axis=1)
+with st.spinner("🧠 Analizando Operación y Unificando Marcas..."):
+    # --- APLICACIÓN DE LOGICA DE UNIFICACIÓN ---
+    # Aplicamos la función que devuelve una tupla (Marca, Categoria)
+    df_raw[['Marca_Master', 'Categoria_Master']] = df_raw.apply(
+        lambda x: pd.Series(clasificar_marca_unificada(x)), axis=1
+    )
+    
+    # Cruzar con base de Dropbox (Geografía)
     df_cli = cargar_poblaciones_dropbox_excel()
+    
     if not df_cli.empty:
         df_full = pd.merge(df_raw, df_cli, on='Key_Nit', how='left')
         df_full['Poblacion_Real'] = df_full['Poblacion_Real'].fillna('NO IDENTIFICADO')
+        
+        # Lógica Hubs si quedó nulo
         mask_null = df_full['Hub_Logistico'].isna()
         df_full.loc[mask_null, 'Hub_Logistico'] = df_full.loc[mask_null, 'Poblacion_Real'].apply(asignar_hub_logistico)
         df_full['Vendedor'] = df_full['Vendedor'].fillna('GENERAL')
@@ -193,11 +258,13 @@ with st.spinner("🧠 Analizando Operación..."):
         df_full['Hub_Logistico'] = 'MOSTRADOR / SIN LOGISTICA'
         df_full['Vendedor'] = 'GENERAL'
 
+# Filtro YTD (Year to Date)
 hoy = date.today()
 def ytd(row):
     if row['mes'] < hoy.month: return True
     if row['mes'] == hoy.month: return row['dia'] <= hoy.day
     return False
+
 df_master = df_full[df_full.apply(ytd, axis=1)].copy()
 
 # ==============================================================================
@@ -222,17 +289,23 @@ with st.sidebar:
     anio_obj = st.selectbox("Año Objetivo", anios, 0)
     anio_base = st.selectbox("Año Base", [a for a in anios if a!=anio_obj], 0)
     
+    # Filtros dinámicos
     sel_hubs = st.multiselect("Hubs Logísticos", sorted(df_master['Hub_Logistico'].unique()), default=sorted(df_master['Hub_Logistico'].unique()))
     sel_city = st.multiselect("Poblaciones", sorted(df_master['Poblacion_Real'].unique()))
-    sel_brand = st.multiselect("Marcas", sorted(df_master['Marca_Master'].unique()))
-    sel_cat = st.multiselect("Categorías", sorted(df_master['CATEGORIA'].astype(str).unique()))
+    
+    # Filtros de Marca y Categoría (Ahora unificados)
+    sel_brand = st.multiselect("Marcas (Unificadas)", sorted(df_master['Marca_Master'].unique()))
+    # Filtrar categorías disponibles basado en marca si se selecciona, o mostrar todas
+    cats_avail = df_master[df_master['Marca_Master'].isin(sel_brand)]['Categoria_Master'].unique() if sel_brand else df_master['Categoria_Master'].unique()
+    sel_cat = st.multiselect("Categorías (Unificadas)", sorted(cats_avail))
 
-# --- FILTRADO DINÁMICO ---
+# --- FILTRADO DEL DATAFRAME ---
 df_f = df_master[df_master['Hub_Logistico'].isin(sel_hubs)].copy()
 if sel_city: df_f = df_f[df_f['Poblacion_Real'].isin(sel_city)]
 if sel_brand: df_f = df_f[df_f['Marca_Master'].isin(sel_brand)]
-if sel_cat: df_f = df_f[df_f['CATEGORIA'].isin(sel_cat)]
+if sel_cat: df_f = df_f[df_f['Categoria_Master'].isin(sel_cat)]
 
+# Separación Año Actual vs Año Anterior
 df_act = df_f[df_f['anio'] == anio_obj].copy()
 df_ant = df_f[df_f['anio'] == anio_base].copy()
 
@@ -243,13 +316,11 @@ venta = df_act['VALOR'].sum()
 
 def calc_costo(row):
     hub = row['Hub_Logistico']
-    if 'MOSTRADOR' in hub:
-        return 0
-    if 'RISARALDA' in hub: 
-        return costo_local
-    else: 
-        return costo_nal
+    if 'MOSTRADOR' in hub: return 0 # Sin costo logístico
+    if 'RISARALDA' in hub: return costo_local
+    return costo_nal
 
+# Cálculo de costos agregados por pedido único para no duplicar costo por línea
 df_pedidos_unicos = df_act[['Pedido_ID', 'Hub_Logistico']].drop_duplicates()
 df_pedidos_unicos['Costo'] = df_pedidos_unicos.apply(calc_costo, axis=1)
 costo_total = df_pedidos_unicos['Costo'].sum()
@@ -275,7 +346,7 @@ card(c5, "Ticket Promedio", f"${(venta/n_pedidos if n_pedidos else 0):,.0f}", "-
 # ==============================================================================
 # 6. TABS CON ANÁLISIS
 # ==============================================================================
-tabs = st.tabs(["🚚 Rentabilidad", "⚖️ Peso Categorías", "🧬 ADN Portafolio", "🔄 Batching (Ahorro)", "📈 Drivers", "👥 Retención", "🌍 Geo-Estrategia", "🤖 Conclusión"])
+tabs = st.tabs(["🚚 Rentabilidad", "⚖️ Peso Categorías", "🔄 Batching (Ahorro)", "📈 Drivers", "👥 Retención", "🌍 Geo-Estrategia", "🤖 Conclusión"])
 
 # --- TAB 1: RENTABILIDAD ---
 with tabs[0]:
@@ -317,17 +388,18 @@ with tabs[0]:
                      .style.format(format_dict).background_gradient(cmap='RdYlGn', subset=['Utilidad']), 
                      use_container_width=True)
 
-# --- TAB 2: PESO CATEGORÍAS ---
+# --- TAB 2: PESO CATEGORÍAS (UNIFICADAS) ---
 with tabs[1]:
     st.markdown("""
     <div class="analysis-box">
-    <span class="analysis-title">ANÁLISIS DE IMPACTO POR CATEGORÍA</span>
-    Aquí analizamos minuciosamente si una categoría está "poniendo" o "quitando" valor al crecimiento global.
+    <span class="analysis-title">ANÁLISIS DE IMPACTO (CATEGORÍAS UNIFICADAS)</span>
+    Visualiza qué marcas/categorías están aportando o restando al crecimiento real.
     </div>
     """, unsafe_allow_html=True)
 
-    cat_act = df_act.groupby('CATEGORIA')['VALOR'].sum()
-    cat_ant = df_ant.groupby('CATEGORIA')['VALOR'].sum()
+    # Usamos Categoria_Master que ya está unificada con Marca
+    cat_act = df_act.groupby('Categoria_Master')['VALOR'].sum()
+    cat_ant = df_ant.groupby('Categoria_Master')['VALOR'].sum()
     
     df_cat_analysis = pd.DataFrame({'Venta_Actual': cat_act, 'Venta_Anterior': cat_ant}).fillna(0)
     df_cat_analysis['Var_Pesos'] = df_cat_analysis['Venta_Actual'] - df_cat_analysis['Venta_Anterior']
@@ -349,7 +421,7 @@ with tabs[1]:
         decreasing={"marker": {"color": "#ef4444"}}, 
         increasing={"marker": {"color": "#10b981"}}, 
     ))
-    fig_cat.update_layout(title="Contribution Chart: ¿Quién aporta y quién resta al crecimiento?", height=450)
+    fig_cat.update_layout(title="Contribution Chart: Impacto Real", height=450)
     st.plotly_chart(fig_cat, use_container_width=True)
 
     st.markdown("### 📋 Detalle Minucioso de Aporte")
@@ -365,52 +437,8 @@ with tabs[1]:
         use_container_width=True
     )
 
-# --- TAB 3: ADN PORTAFOLIO (EL FIX DEL ERROR) ---
+# --- TAB 3: BATCHING ---
 with tabs[2]:
-    st.markdown("""
-    <div class="analysis-box">
-    <span class="analysis-title">🧬 JERARQUÍA DE VENTAS (SUNBURST)</span>
-    Visualización profunda de la composición del portafolio.
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # --- FIX CRÍTICO PARA EL ERROR DE PLOTLY ---
-    # El error original ocurría porque df_act (crudo) puede tener conflictos jerárquicos.
-    # Solución: Agrupar (aggregate) los datos explícitamente antes de graficar.
-    
-    try:
-        # 1. Seleccionar columnas y asegurar strings
-        df_sun = df_act[['CATEGORIA', 'Marca_Master', 'PROD', 'VALOR']].copy()
-        df_sun['CATEGORIA'] = df_sun['CATEGORIA'].astype(str)
-        df_sun['Marca_Master'] = df_sun['Marca_Master'].astype(str)
-        df_sun['PROD'] = df_sun['PROD'].astype(str)
-        
-        # 2. Agrupar para eliminar duplicados de hojas y sumar valores
-        df_sun_grouped = df_sun.groupby(['CATEGORIA', 'Marca_Master', 'PROD'], as_index=False)['VALOR'].sum()
-        
-        # 3. Filtrar valores <= 0 para que el gráfico no rompa
-        df_sun_grouped = df_sun_grouped[df_sun_grouped['VALOR'] > 0]
-
-        if not df_sun_grouped.empty:
-            fig_sun = px.sunburst(
-                df_sun_grouped,
-                path=['CATEGORIA', 'Marca_Master', 'PROD'],
-                values='VALOR',
-                color='VALOR',
-                color_continuous_scale='Viridis',
-                title='Radiografía del Portafolio (Click para profundizar)',
-                height=700
-            )
-            st.plotly_chart(fig_sun, use_container_width=True)
-        else:
-            st.warning("No hay datos positivos para mostrar en la jerarquía.")
-            
-    except Exception as e:
-        st.error(f"Error controlando la jerarquía: {e}")
-        st.info("Intenta limpiar los datos de Categoría o Marca en el archivo original.")
-
-# --- TAB 4: BATCHING ---
-with tabs[3]:
     st.markdown(f"""<div class="analysis-box"><span class="analysis-title">SIMULADOR DE EFICIENCIA</span>
     Promedio actual: **{n_pedidos/df_act['Key_Nit'].nunique():.1f} despachos por cliente**.
     <br>Agrupar pedidos reduce costos y aumenta utilidad directa.
@@ -435,8 +463,8 @@ with tabs[3]:
         st.markdown("**Top Clientes Candidatos a Batching**")
         st.table(top_freq.rename(columns={'Pedido_ID':'# Despachos'}))
 
-# --- TAB 5: DRIVERS ---
-with tabs[4]:
+# --- TAB 4: DRIVERS ---
+with tabs[3]:
     col_d1, col_d2 = st.columns([3,1])
     with col_d1:
         dim = st.radio("Ver impacto por:", ["Marca_Master", "Hub_Logistico"], horizontal=True)
@@ -451,14 +479,14 @@ with tabs[4]:
         st.markdown(f"<div class='analysis-box'>Mayor impulsor: **{best}** (+${val_best/1e6:,.1f}M).</div>", unsafe_allow_html=True)
 
         fig_d = go.Figure(go.Waterfall(orientation="v", measure=["relative"]*len(df_diff), x=df_diff.index, y=df_diff['Diff'],
-                                     decreasing={"marker":{"color":"#ef4444"}}, increasing={"marker":{"color":"#10b981"}}))
+                                       decreasing={"marker":{"color":"#ef4444"}}, increasing={"marker":{"color":"#10b981"}}))
         st.plotly_chart(fig_d, use_container_width=True)
     
     with col_d2:
         st.dataframe(df_diff[['Diff']].style.format({"Diff": "${:,.0f}"}).background_gradient(cmap='RdYlGn'), use_container_width=True)
 
-# --- TAB 6: RETENCIÓN ---
-with tabs[5]:
+# --- TAB 5: RETENCIÓN ---
+with tabs[4]:
     c_act = set(df_act['Key_Nit']); c_ant = set(df_ant['Key_Nit'])
     lost = c_ant - c_act; new = c_act - c_ant
     
@@ -475,31 +503,45 @@ with tabs[5]:
         df_lost = df_ant[df_ant['Key_Nit'].isin(lost)].groupby(['CLIENTE','Poblacion_Real'])['VALOR'].sum().sort_values(ascending=False).head(10).to_frame()
         st.dataframe(df_lost.style.format({"VALOR": "${:,.0f}"}), use_container_width=True)
 
-# --- TAB 7: GEO ESTRATEGIA ---
-with tabs[6]:
+# --- TAB 6: GEO ESTRATEGIA (CORREGIDO TYPE ERROR & VALUE ERROR) ---
+with tabs[5]:
     st.markdown(f"""<div class="analysis-box">
     <strong>Volumen (Tamaño)</strong> vs <strong>Rentabilidad (Color)</strong>.
     <br>• <strong style='color:green'>VERDE:</strong> Ganancia. <strong style='color:red'>ROJO:</strong> Pérdida operativa.
-    <br>ℹ️ Nota: Las zonas en <strong>'MOSTRADOR'</strong> tendrán $0 costo y alta utilidad (verde intenso).
+    <br>ℹ️ Nota: Las zonas en <strong>'MOSTRADOR'</strong> tendrán $0 costo y alta utilidad.
     </div>""", unsafe_allow_html=True)
     
-    # Preparación segura de datos para Treemap
+    # 1. Preparación de datos segura
     df_tree = df_city.copy()
-    df_tree = df_tree[df_tree['Venta'] > 0]
     
+    # 2. Solución TypeError: Convertir explícitamente columnas path a string y manejar nulos
     df_tree['Hub_Logistico'] = df_tree['Hub_Logistico'].fillna('SIN DEFINIR').astype(str)
     df_tree['Poblacion_Real'] = df_tree['Poblacion_Real'].fillna('SIN DEFINIR').astype(str)
+    
+    # 3. Asegurar valores numéricos limpios
+    df_tree['Venta'] = pd.to_numeric(df_tree['Venta'], errors='coerce').fillna(0)
     df_tree['Utilidad'] = pd.to_numeric(df_tree['Utilidad'], errors='coerce').fillna(0)
     
+    # 4. Filtrar ceros para evitar errores de Plotly en tamaños vacíos
+    df_tree = df_tree[df_tree['Venta'] > 0]
+    
     if not df_tree.empty:
-        fig_t = px.treemap(df_tree, path=[px.Constant("Colombia"), 'Hub_Logistico', 'Poblacion_Real'], 
-                           values='Venta', color='Utilidad', color_continuous_scale='RdYlGn', midpoint=0)
-        st.plotly_chart(fig_t, use_container_width=True)
+        try:
+            fig_t = px.treemap(df_tree, 
+                               path=[px.Constant("Colombia"), 'Hub_Logistico', 'Poblacion_Real'], 
+                               values='Venta', 
+                               color='Utilidad', 
+                               color_continuous_scale='RdYlGn', 
+                               midpoint=0)
+            fig_t.update_traces(root_color="lightgrey")
+            st.plotly_chart(fig_t, use_container_width=True)
+        except Exception as e:
+            st.error(f"Error generando mapa: {e}. Revisa los datos de origen.")
     else:
-        st.warning("No hay datos suficientes para generar el mapa geográfico.")
+        st.warning("No hay datos suficientes para generar el mapa geográfico con los filtros actuales.")
 
-# --- TAB 8: CONCLUSIÓN ---
-with tabs[7]:
+# --- TAB 7: CONCLUSIÓN ---
+with tabs[6]:
     st.subheader("🤖 Master Brain Diagnosis")
     status = "CRECIMIENTO" if delta_v > 0 else "CONTRACCIÓN"
     color_st = "green" if delta_v > 0 else "red"
@@ -513,8 +555,7 @@ with tabs[7]:
     Margen Neto Real: **{margen_real:.1f}%**.
     
     ### 3. Recomendaciones:
-    1.  **Análisis de Categorías:** Revisa la pestaña "Peso Categorías" para ver qué líneas están destruyendo valor.
-    2.  **Jerarquía de Producto:** Usa la nueva pestaña **ADN Portafolio** para ver qué referencias específicas impulsan la venta.
-    3.  **Optimización:** Implementar *Batching* en **{top_freq.iloc[0]['CLIENTE'] if not top_freq.empty else 'Top Clientes'}**.
-    4.  **Geografía:** Atención urgente a **{top_loser['Poblacion_Real'] if not ciudades_perdida.empty else 'N/A'}**.
+    1.  **Análisis de Categorías:** Revisa la pestaña "Peso Categorías". Se han unificado las Marcas y Categorías para mayor claridad (3M ha sido excluido).
+    2.  **Optimización:** Implementar *Batching* en **{top_freq.iloc[0]['CLIENTE'] if not top_freq.empty else 'Top Clientes'}**.
+    3.  **Geografía:** Atención urgente a **{top_loser['Poblacion_Real'] if not ciudades_perdida.empty else 'N/A'}**.
     """, unsafe_allow_html=True)
