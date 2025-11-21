@@ -1,5 +1,5 @@
 # ==============================================================================
-# ANÁLISIS ESTRATÉGICO POTENTE - FERREINOX
+# ANÁLISIS ESTRATÉGICO POTENTE - FERREINOX (V2.0 EXECUTIVE EDITION)
 # Guarda este archivo en la carpeta: pages/Analisis_Estrategico.py
 # ==============================================================================
 import streamlit as st
@@ -9,326 +9,404 @@ import plotly.graph_objects as go
 import numpy as np
 import unicodedata
 
-st.set_page_config(page_title="Análisis Estratégico Profundo", page_icon="🚀", layout="wide")
+st.set_page_config(page_title="Centro de Comando Estratégico", page_icon="🧠", layout="wide")
 
 # ==============================================================================
-# FUNCIONES AUXILIARES
+# 🎨 ESTILOS CSS PERSONALIZADOS PARA VISTA EJECUTIVA
+# ==============================================================================
+st.markdown("""
+<style>
+    .metric-card {
+        background-color: #f0f2f6;
+        border-left: 5px solid #4B4BFF;
+        padding: 15px;
+        border-radius: 5px;
+        margin-bottom: 10px;
+    }
+    .big-font { font-size: 18px !important; font-weight: bold; }
+</style>
+""", unsafe_allow_html=True)
+
+# ==============================================================================
+# 🔧 FUNCIONES AUXILIARES Y DE LIMPIEZA
 # ==============================================================================
 def normalizar_texto(texto):
     if not isinstance(texto, str): return str(texto) if texto is not None else ""
     try:
         texto_sin_tildes = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
-        return texto_sin_tildes.upper().replace('-', ' ').replace('_', ' ').replace('.', ' ').strip().replace('  ', ' ')
+        return texto_sin_tildes.upper().replace('-', ' ').replace('_', ' ').strip()
     except: return str(texto)
 
+def categorizar_marcas_estrategicas(marca_original):
+    """
+    Agrupa todas las marcas que NO están en la lista VIP como 'PINTUCO'.
+    """
+    marca = normalizar_texto(marca_original)
+    
+    # Lista de marcas a MANTENER individualmente
+    marcas_vip = [
+        'ABRACOL', 'ARTECOLA', 'INDUMA', 'SAINT GOBAIN', 'YALE', 
+        'ALLEGION', 'SEGUREX', 'ATLAS', 'POLVOS', 'DELTA', 
+        'GOYA', 'MASTERD'
+    ]
+    
+    # Verificamos si la marca normalizada contiene alguna de las VIP
+    # Usamos coincidencia parcial para mayor robustez
+    for vip in marcas_vip:
+        if vip in marca:
+            return vip # Retorna el nombre limpio
+            
+    return "PINTUCO (AGRUPADO)"
+
 # ==============================================================================
-# 1. CARGA Y PREPARACIÓN DE DATOS (Inteligente)
+# 1. CARGA, LIMPIEZA Y ENRIQUECIMIENTO DE DATOS
 # ==============================================================================
 if 'df_ventas' not in st.session_state:
-    st.warning("⚠️ Por favor, inicia sesión primero desde la página principal ('Resumen Mensual') para cargar los datos seguros.")
+    st.warning("⚠️ Acceso Restringido: Por favor inicia sesión en el 'Resumen Mensual' para cargar el núcleo de datos.")
     st.stop()
 
-df_ventas = st.session_state.df_ventas.copy()
+# Copia de seguridad
+df_raw = st.session_state.df_ventas.copy()
 
-# FILTRO INICIAL: Solo Ventas Netas (Facturas y Notas Crédito)
+# --- FILTRADO NETO (Facturas - Notas) ---
 filtro_neto = 'FACTURA|NOTA.*CREDITO'
-# Aseguramos que TipoDocumento sea string para evitar errores
-df_ventas['TipoDocumento'] = df_ventas['TipoDocumento'].astype(str)
-df = df_ventas[df_ventas['TipoDocumento'].str.contains(filtro_neto, na=False, case=False, regex=True)].copy()
+df_raw['TipoDocumento'] = df_raw['TipoDocumento'].astype(str)
+df = df_raw[df_raw['TipoDocumento'].str.contains(filtro_neto, na=False, case=False, regex=True)].copy()
 
-# CÁLCULOS MAESTROS DE RENTABILIDAD
-# Calculamos el Costo Total de la venta (Unidades * Costo Unitario)
-# Aseguramos que sean numéricos
-df['unidades_vendidas'] = pd.to_numeric(df['unidades_vendidas'], errors='coerce').fillna(0)
-df['costo_unitario'] = pd.to_numeric(df['costo_unitario'], errors='coerce').fillna(0)
-df['valor_venta'] = pd.to_numeric(df['valor_venta'], errors='coerce').fillna(0)
+# --- CONVERSIÓN NUMÉRICA ROBUSTA ---
+cols_num = ['unidades_vendidas', 'costo_unitario', 'valor_venta']
+for col in cols_num:
+    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
+# --- CÁLCULOS FINANCIEROS BASE ---
 df['Costo_Total'] = df['unidades_vendidas'] * df['costo_unitario']
-# Calculamos el Margen Bruto en pesos (Venta - Costo)
 df['Margen_Pesos'] = df['valor_venta'] - df['Costo_Total']
-# Calculamos el Margen Porcentual
-df['Margen_Pct'] = np.where(df['valor_venta'] != 0, (df['Margen_Pesos'] / df['valor_venta']) * 100, 0)
+
+# --- APLICACIÓN DE LA LÓGICA DE NEGOCIO (PINTUCO VS OTROS) ---
+# Asumimos que la columna de marca es 'marca_producto' o 'grupo'. Ajustar según tu dataset real.
+col_marca = 'marca_producto' if 'marca_producto' in df.columns else 'categoria_producto'
+df['Marca_Analisis'] = df[col_marca].apply(categorizar_marcas_estrategicas)
+
+# Intentamos inferir ciudad si no existe explícitamente
+if 'ciudad_cliente' not in df.columns:
+    # Fallback: Intentar extraer de dirección o usar vendedor como proxy (muy básico)
+    df['Poblacion_Objetivo'] = "NO DEFINIDO"
+else:
+    df['Poblacion_Objetivo'] = df['ciudad_cliente'].apply(normalizar_texto)
 
 # ==============================================================================
-# 2. INTERFAZ DE FILTROS AVANZADOS
+# 2. BARRA LATERAL DE CONTROL (COCKPIT)
 # ==============================================================================
-st.title("🚀 Inteligencia de Negocios: Análisis Estratégico 360°")
-st.markdown("Analiza la evolución, rentabilidad y oportunidades ocultas en todas las categorías y marcas (Incluyendo: ARTECOLA, INDUMA, ATLAS).")
+st.title("🧠 Centro de Control de Categorías & Estrategia")
+st.markdown("### Análisis de Desempeño, Rentabilidad y Logística")
 
 with st.sidebar:
-    st.header("⚙️ Filtros de Análisis")
+    st.header("🎛️ Panel de Control")
     
-    # Filtro de Año
+    # Años
     anios_disp = sorted(df['anio'].unique(), reverse=True)
-    anio_sel = st.selectbox("Año Principal de Análisis", anios_disp)
+    anio_actual = st.selectbox("📅 Año de Análisis (Actual)", anios_disp, index=0)
     
-    # Comparativa
-    anio_comparar = st.selectbox("Comparar contra (Crecimiento)", [a for a in anios_disp if a != anio_sel] + ["Ninguno"], index=0)
+    anios_comp = [a for a in anios_disp if a != anio_actual]
+    anio_previo = st.selectbox("📅 Año Anterior (Comparativo)", anios_comp + ["Ninguno"], index=0 if anios_comp else 0)
     
-    # --- CORRECCIÓN DE ERROR DE ORDENAMIENTO ---
-    # Rellenamos nulos con 'SIN CATEGORIA' y forzamos a string antes de obtener únicos y ordenar
-    cats_raw = df['categoria_producto'].fillna('SIN CATEGORIA').astype(str).unique()
-    # Filtramos strings vacíos si los hubiera y ordenamos
-    cats_clean = sorted([c for c in cats_raw if c.strip() != ''])
-    cats_disp = ["TODAS"] + cats_clean
+    st.divider()
     
-    cat_sel = st.selectbox("Filtrar por Categoría", cats_disp)
+    # Filtro Global de Categoría / Marca Agrupada
+    opciones_marca = ["TODAS"] + sorted(df['Marca_Analisis'].unique())
+    marca_sel = st.selectbox("🏷️ Filtrar por Marca (Agrupada)", opciones_marca)
 
-# Aplicar Filtros al DataFrame Principal (Año Seleccionado)
-df_analisis = df[df['anio'] == anio_sel].copy()
-if cat_sel != "TODAS":
-    df_analisis = df_analisis[df_analisis['categoria_producto'].astype(str) == cat_sel]
+# --- FILTRADO DE DATOS ---
+# Dataset Año Actual
+df_act = df[df['anio'] == anio_actual].copy()
+# Dataset Año Anterior (si aplica)
+df_ant = df[df['anio'] == anio_previo].copy() if anio_previo != "Ninguno" else pd.DataFrame()
 
-# ==============================================================================
-# 3. DASHBOARD KPI DE ALTO NIVEL
-# ==============================================================================
-st.divider()
-col1, col2, col3, col4 = st.columns(4)
-
-total_ventas = df_analisis['valor_venta'].sum()
-total_margen = df_analisis['Margen_Pesos'].sum()
-margen_promedio = (total_margen / total_ventas * 100) if total_ventas != 0 else 0
-ticket_promedio = total_ventas / df_analisis['Serie'].nunique() if not df_analisis.empty else 0
-
-with col1:
-    st.metric("Ventas Totales (Año)", f"${total_ventas:,.0f}", help="Suma de Facturas - Notas Crédito")
-with col2:
-    st.metric("Margen Bruto Total", f"${total_margen:,.0f}", help="Venta Neta - (Unidades * Costo Unitario)")
-with col3:
-    color_margen = "normal" if margen_promedio > 15 else "inverse"
-    st.metric("Margen % Promedio", f"{margen_promedio:.2f}%", delta_color=color_margen)
-with col4:
-    st.metric("Ticket Promedio", f"${ticket_promedio:,.0f}", help="Venta Promedio por Factura")
+if marca_sel != "TODAS":
+    df_act = df_act[df_act['Marca_Analisis'] == marca_sel]
+    if not df_ant.empty:
+        df_ant = df_ant[df_ant['Marca_Analisis'] == marca_sel]
 
 # ==============================================================================
-# 4. PESTAÑAS DE ANÁLISIS PROFUNDO
+# 3. RESUMEN EJECUTIVO (HEADLINES)
 # ==============================================================================
-tab1, tab2, tab3, tab4 = st.tabs([
-    "📊 Evolución & Tendencias", 
-    "💎 Rentabilidad por Marca/Categoría", 
-    "📈 Matriz de Crecimiento",
-    "🚚 Logística & Costo por Servir"
+st.markdown("---")
+
+# Cálculos KPI Año Actual
+venta_act = df_act['valor_venta'].sum()
+margen_act = df_act['Margen_Pesos'].sum()
+pct_margen_act = (margen_act / venta_act * 100) if venta_act else 0
+clientes_act = df_act['cliente_id'].nunique() if 'cliente_id' in df_act.columns else 0
+
+# Cálculos KPI Año Anterior y Variaciones
+if not df_ant.empty:
+    venta_ant = df_ant['valor_venta'].sum()
+    margen_ant = df_ant['Margen_Pesos'].sum()
+    pct_margen_ant = (margen_ant / venta_ant * 100) if venta_ant else 0
+    
+    var_venta = ((venta_act - venta_ant) / venta_ant) * 100 if venta_ant else 0
+    var_margen_abs = margen_act - margen_ant
+    var_margen_pct = pct_margen_act - pct_margen_ant # Puntos porcentuales
+else:
+    venta_ant = 0
+    var_venta = 0
+    var_margen_pct = 0
+
+kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+
+with kpi1:
+    st.metric("Ventas Totales", f"${venta_act:,.0f}", f"{var_venta:+.1f}% vs Año Ant")
+with kpi2:
+    st.metric("Margen Bruto ($)", f"${margen_act:,.0f}", f"${var_margen_abs:,.0f} vs Año Ant")
+with kpi3:
+    st.metric("Margen %", f"{pct_margen_act:.2f}%", f"{var_margen_pct:+.2f} pp vs Año Ant")
+with kpi4:
+    st.metric("Clientes Activos", f"{clientes_act}", help="Clientes únicos con compra en el periodo")
+
+# ==============================================================================
+# 4. ANÁLISIS PROFUNDO (TABS)
+# ==============================================================================
+tab_market, tab_profit, tab_growth, tab_logistic = st.tabs([
+    "📊 Participación & Share", 
+    "💎 Matriz de Rentabilidad", 
+    "🚀 Motores de Crecimiento", 
+    "🚚 Logística & Costo x Servir"
 ])
 
-# --- TAB 1: EVOLUCIÓN TEMPORAL ---
-with tab1:
-    st.subheader("Tendencia Mensual de Ventas y Rentabilidad")
+# --- TAB 1: PARTICIPACIÓN DE MERCADO (SHARE) ---
+with tab_market:
+    st.subheader("¿Cómo se compone nuestra venta?")
+    st.markdown("Análisis de la composición de ventas por la agrupación estratégica definida.")
     
-    df_monthly = df_analisis.groupby('mes').agg(
+    col_m1, col_m2 = st.columns([2, 1])
+    
+    with col_m1:
+        # Agrupación para Treemap
+        df_tree = df_act.groupby(['Marca_Analisis', 'categoria_producto']).agg(
+            Ventas=('valor_venta', 'sum'),
+            Margen=('Margen_Pesos', 'sum')
+        ).reset_index()
+        
+        # Evitar valores negativos en ventas para el Treemap
+        df_tree['Ventas'] = df_tree['Ventas'].clip(lower=0)
+        
+        fig_tree = px.treemap(
+            df_tree,
+            path=[px.Constant("FERREINOX"), 'Marca_Analisis', 'categoria_producto'],
+            values='Ventas',
+            color='Margen',
+            color_continuous_scale='RdYlGn',
+            title="Mapa de Calor de Ventas (Tamaño) y Rentabilidad (Color)",
+            hover_data={'Ventas': ':,.0f', 'Margen': ':,.0f'}
+        )
+        st.plotly_chart(fig_tree, use_container_width=True)
+        
+    with col_m2:
+        st.markdown("##### Top Players (Share de Valor)")
+        df_share = df_act.groupby('Marca_Analisis')['valor_venta'].sum().reset_index()
+        df_share['Share'] = (df_share['valor_venta'] / df_share['valor_venta'].sum()) * 100
+        df_share = df_share.sort_values('Share', ascending=False)
+        
+        st.dataframe(
+            df_share, 
+            column_config={
+                "valor_venta": st.column_config.NumberColumn("Venta", format="$%d"),
+                "Share": st.column_config.ProgressColumn("Participación", format="%.2f%%", min_value=0, max_value=100)
+            },
+            hide_index=True,
+            use_container_width=True
+        )
+        
+         
+
+# --- TAB 2: MATRIZ DE RENTABILIDAD (CORREGIDA) ---
+with tab_profit:
+    st.subheader("Matriz Estratégica: Volumen vs. Desempeño")
+    
+    nivel_agrupacion = st.radio("Analizar rentabilidad por:", ["Marca_Analisis", "categoria_producto", "Poblacion_Objetivo"], horizontal=True)
+    
+    df_matrix = df_act.groupby(nivel_agrupacion).agg(
         Ventas=('valor_venta', 'sum'),
-        Margen=('Margen_Pesos', 'sum')
+        Margen_Pesos=('Margen_Pesos', 'sum'),
+        Unidades=('unidades_vendidas', 'sum')
     ).reset_index()
     
-    fig_combo = go.Figure()
-    fig_combo.add_trace(go.Bar(x=df_monthly['mes'], y=df_monthly['Ventas'], name='Ventas', marker_color='#1F4E78'))
-    fig_combo.add_trace(go.Scatter(x=df_monthly['mes'], y=df_monthly['Margen'], name='Margen ($)', yaxis='y2', line=dict(color='#FF4B4B', width=3)))
+    df_matrix['Margen_Pct'] = np.where(df_matrix['Ventas'] != 0, (df_matrix['Margen_Pesos'] / df_matrix['Ventas']) * 100, 0)
     
-    fig_combo.update_layout(
-        title="Ventas vs Margen Bruto (Mensual)",
-        xaxis=dict(title="Mes"),
-        yaxis=dict(title="Ventas ($)"),
-        yaxis2=dict(title="Margen ($)", overlaying='y', side='right'),
-        legend=dict(x=0, y=1.1, orientation='h')
+    # --- SOLUCIÓN AL ERROR DE PLOTLY ---
+    # Plotly 'size' debe ser positivo. Creamos una columna de tamaño absoluto.
+    df_matrix['Size_Ref'] = df_matrix['Margen_Pesos'].abs()
+    
+    # Filtro de ruido visual (eliminar ventas insignificantes)
+    umbral_venta = df_matrix['Ventas'].quantile(0.10) # Eliminar el 10% inferior
+    df_matrix_viz = df_matrix[df_matrix['Ventas'] > umbral_venta]
+    
+    fig_scatter = px.scatter(
+        df_matrix_viz,
+        x="Ventas",
+        y="Margen_Pct",
+        size="Size_Ref", # Usamos el valor absoluto
+        color="Margen_Pct", # El color sí indica si es bueno o malo
+        hover_name=nivel_agrupacion,
+        text=nivel_agrupacion,
+        color_continuous_scale="RdYlGn",
+        title=f"Matriz de Rentabilidad por {nivel_agrupacion}",
+        labels={"Size_Ref": "Magnitud del Margen ($)"}
     )
-    st.plotly_chart(fig_combo, use_container_width=True)
-
-# --- TAB 2: RENTABILIDAD (MARCAS Y CATEGORÍAS) ---
-with tab2:
-    col_a, col_b = st.columns([1, 3])
     
-    with col_a:
-        st.markdown("### Configuración")
-        nivel_agrupacion = st.radio("Agrupar por:", ["marca_producto", "categoria_producto", "nombre_articulo"])
-        min_venta = st.number_input("Venta Mínima para visualizar ($)", value=1000000, step=500000)
+    # Líneas cuadrantes
+    prom_margen = df_matrix_viz['Margen_Pct'].mean()
+    prom_venta = df_matrix_viz['Ventas'].mean()
+    
+    fig_scatter.add_hline(y=prom_margen, line_dash="dot", annotation_text="Margen Promedio")
+    fig_scatter.add_vline(x=prom_venta, line_dash="dot", annotation_text="Venta Promedio")
+    fig_scatter.update_traces(textposition='top center')
+    
+    st.plotly_chart(fig_scatter, use_container_width=True)
+    
+    st.info("💡 **Interpretación:** Cuadrante superior derecho = 'Estrellas' (Alta venta, Alto margen). Cuadrante inferior derecho = 'Vacas Lecheras' o riesgo de precio (Alta venta, Bajo margen).")
 
-    with col_b:
-        # Agrupación Dinámica
-        # Asegurar que la columna de agrupación no tenga nulos
-        if nivel_agrupacion in df_analisis.columns:
-            df_analisis[nivel_agrupacion] = df_analisis[nivel_agrupacion].fillna("SIN DATOS").astype(str)
-            
-            df_group = df_analisis.groupby(nivel_agrupacion).agg(
-                Ventas=('valor_venta', 'sum'),
-                Costo=('Costo_Total', 'sum'),
-                Unidades=('unidades_vendidas', 'sum'),
-                Transacciones=('Serie', 'nunique')
-            ).reset_index()
-            
-            df_group['Margen_Pesos'] = df_group['Ventas'] - df_group['Costo']
-            df_group['Margen_Pct'] = np.where(df_group['Ventas']!=0, (df_group['Margen_Pesos'] / df_group['Ventas']) * 100, 0)
-            
-            total_ventas_grupo = df_group['Ventas'].sum()
-            df_group['Peso_Venta_Pct'] = np.where(total_ventas_grupo!=0, (df_group['Ventas'] / total_ventas_grupo) * 100, 0)
-            
-            # Filtrar ruido
-            df_viz = df_group[df_group['Ventas'] >= min_venta].copy()
-            
-            if not df_viz.empty:
-                # SCATTER PLOT DE RENTABILIDAD
-                st.subheader("Matriz de Rentabilidad: Volumen vs Margen %")
-                st.info("Identifica tus 'Vacas Lecheras' (Alto Volumen, Margen Medio) y 'Estrellas' (Alto Volumen, Alto Margen).")
-                
-                fig_scatter = px.scatter(
-                    df_viz, 
-                    x="Ventas", 
-                    y="Margen_Pct", 
-                    size="Margen_Pesos", 
-                    color="Margen_Pct",
-                    hover_name=nivel_agrupacion,
-                    text=nivel_agrupacion,
-                    color_continuous_scale="RdYlGn",
-                    title=f"Mapa de Rentabilidad por {nivel_agrupacion.replace('_', ' ').title()}"
-                )
-                fig_scatter.update_traces(textposition='top center')
-                # Línea promedio
-                avg_margin = df_viz['Margen_Pct'].mean()
-                fig_scatter.add_hline(y=avg_margin, line_dash="dash", annotation_text=f"Promedio: {avg_margin:.1f}%")
-                st.plotly_chart(fig_scatter, use_container_width=True)
-                
-                # TABLA DE DETALLE
-                st.markdown("### Detalle de Datos")
-                st.dataframe(
-                    df_viz.sort_values('Ventas', ascending=False),
-                    column_config={
-                        "Ventas": st.column_config.NumberColumn(format="$ %d"),
-                        "Costo": st.column_config.NumberColumn(format="$ %d"),
-                        "Margen_Pesos": st.column_config.NumberColumn(format="$ %d"),
-                        "Margen_Pct": st.column_config.ProgressColumn(format="%.2f%%", min_value=0, max_value=100),
-                        "Peso_Venta_Pct": st.column_config.NumberColumn(format="%.2f %%")
-                    },
-                    hide_index=True,
-                    use_container_width=True
-                )
-            else:
-                st.warning("No hay datos que cumplan con el filtro de venta mínima seleccionado.")
-        else:
-            st.error(f"La columna {nivel_agrupacion} no se encuentra en los datos.")
-
-# --- TAB 3: CRECIMIENTO ---
-with tab3:
-    if anio_comparar == "Ninguno":
-        st.warning("Selecciona un año para comparar en el menú lateral.")
+# --- TAB 3: MOTORES DE CRECIMIENTO ---
+with tab_growth:
+    if anio_previo == "Ninguno":
+        st.warning("Selecciona un año comparativo en la barra lateral para ver este análisis.")
     else:
-        st.subheader(f"Comparativa de Crecimiento: {anio_comparar} vs {anio_sel}")
+        st.subheader(f"Descomposición del Crecimiento: {anio_previo} vs {anio_actual}")
         
-        # Preparar datos año anterior
-        df_prev = df[df['anio'] == anio_comparar].copy()
-        # Asegurar tipos
-        if 'categoria_producto' in df_prev.columns:
-             df_prev['categoria_producto'] = df_prev['categoria_producto'].fillna('SIN CATEGORIA').astype(str)
-
-        if cat_sel != "TODAS": 
-            df_prev = df_prev[df_prev['categoria_producto'] == cat_sel]
+        # Agrupación combinada
+        df_g_act = df_act.groupby('Marca_Analisis')['valor_venta'].sum().reset_index().rename(columns={'valor_venta': 'Venta_Actual'})
+        df_g_ant = df_ant.groupby('Marca_Analisis')['valor_venta'].sum().reset_index().rename(columns={'valor_venta': 'Venta_Anterior'})
         
-        # Asegurar tipos en actual
-        df_analisis['categoria_producto'] = df_analisis['categoria_producto'].fillna('SIN CATEGORIA').astype(str)
-
-        # Agrupar ambos años
-        df_curr_g = df_analisis.groupby('categoria_producto')['valor_venta'].sum().reset_index().rename(columns={'valor_venta': 'Venta_Actual'})
-        df_prev_g = df_prev.groupby('categoria_producto')['valor_venta'].sum().reset_index().rename(columns={'valor_venta': 'Venta_Anterior'})
+        df_growth = pd.merge(df_g_act, df_g_ant, on='Marca_Analisis', how='outer').fillna(0)
         
-        # Merge
-        df_growth = pd.merge(df_curr_g, df_prev_g, on='categoria_producto', how='outer').fillna(0)
+        # Variaciones
+        df_growth['Variacion_Pesos'] = df_growth['Venta_Actual'] - df_growth['Venta_Anterior']
         
-        # Calcular Variación
-        df_growth['Variacion_Abs'] = df_growth['Venta_Actual'] - df_growth['Venta_Anterior']
-        df_growth['Crecimiento_Pct'] = np.where(df_growth['Venta_Anterior'] > 0, (df_growth['Variacion_Abs'] / df_growth['Venta_Anterior']) * 100, 0)
+        # Contribución al crecimiento total
+        total_var = df_growth['Variacion_Pesos'].sum()
+        df_growth['Contribucion_Pct'] = (df_growth['Variacion_Pesos'] / venta_ant) * 100 if venta_ant else 0
         
-        # Gráfico de cascada (Waterfall) para ver qué categorías aportaron o restaron
-        st.markdown("#### ¿Qué impulsó el cambio en las ventas?")
+        col_g1, col_g2 = st.columns([2, 1])
         
-        df_growth_sorted = df_growth.sort_values('Variacion_Abs', ascending=False)
-        
-        if not df_growth_sorted.empty:
-            fig_waterfall = go.Figure(go.Waterfall(
-                name = "Crecimiento", orientation = "v",
-                measure = ["relative"] * len(df_growth_sorted),
-                x = df_growth_sorted['categoria_producto'],
-                textposition = "outside",
-                text = [f"{v/1e6:.1f}M" for v in df_growth_sorted['Variacion_Abs']],
-                y = df_growth_sorted['Variacion_Abs'],
-                connector = {"line":{"color":"rgb(63, 63, 63)"}},
+        with col_g1:
+            # Gráfico de Cascada (Waterfall)
+            df_waterfall = df_growth.sort_values('Variacion_Pesos', ascending=False)
+            
+            fig_water = go.Figure(go.Waterfall(
+                name="20", orientation="v",
+                measure=["relative"] * len(df_waterfall),
+                x=df_waterfall['Marca_Analisis'],
+                textposition="outside",
+                text=[f"${v/1e6:.1f}M" for v in df_waterfall['Variacion_Pesos']],
+                y=df_waterfall['Variacion_Pesos'],
+                connector={"line": {"color": "rgb(63, 63, 63)"}},
             ))
-            fig_waterfall.update_layout(title = "Contribución al Crecimiento por Categoría (Pesos)", showlegend = True)
-            st.plotly_chart(fig_waterfall, use_container_width=True)
-        else:
-            st.info("No hay datos suficientes para calcular el crecimiento.")
+            
+            fig_water.update_layout(title="¿Qué marcas impulsaron (o frenaron) el crecimiento?", showlegend=False)
+            st.plotly_chart(fig_water, use_container_width=True)
+            
+        with col_g2:
+            st.markdown("##### Detalle de Variación")
+            st.dataframe(
+                df_growth[['Marca_Analisis', 'Venta_Actual', 'Variacion_Pesos', 'Contribucion_Pct']].sort_values('Variacion_Pesos', ascending=False),
+                column_config={
+                    "Venta_Actual": st.column_config.NumberColumn(format="$%d"),
+                    "Variacion_Pesos": st.column_config.NumberColumn(format="$%d"),
+                    "Contribucion_Pct": st.column_config.NumberColumn("Aporte Crecimiento (pp)", format="%.2f pp")
+                },
+                hide_index=True
+            )
+            
 
-# --- TAB 4: LOGÍSTICA Y COSTO POR SERVIR ---
-with tab4:
-    st.subheader("🚚 Análisis Logístico y Costo por Servir Estimado")
+[Image of financial growth chart]
+
+
+# --- TAB 4: LOGÍSTICA Y COSTO POR SERVIR (AVANZADO) ---
+with tab_logistic:
+    st.subheader("🚚 Inteligencia Logística y Costo por Servir (Poblaciones)")
     st.markdown("""
-    **Metodología:** Este módulo analiza la distribución de ventas según el centro de operación (Asumiendo zonas de vendedores).
-    El *Costo por Servir* es una estimación de qué tan costoso es atender ciertas zonas geográficas relativo a su margen.
+    Este módulo evalúa la **densidad de venta por población**. 
+    *Una venta alta con pocas transacciones es eficiente (Bajo costo por servir).*
+    *Muchas transacciones pequeñas en zonas lejanas destruyen valor.*
     """)
     
-    df_geo = df_analisis.copy()
-    
-    # Buscamos si podemos mapear el grupo desde DATA_CONFIG en session_state
-    grupos_config = st.session_state.DATA_CONFIG.get('grupos_vendedores', {}) if 'DATA_CONFIG' in st.session_state else {}
-    
-    def map_zona_avanzado(nom_vendedor):
-        nom_norm = normalizar_texto(nom_vendedor)
-        # Primero buscar en grupos configurados
-        for grupo, vendedores in grupos_config.items():
-            if nom_norm in [normalizar_texto(v) for v in vendedores]:
-                return grupo 
-        # Si no está en grupo, intentar inferir por nombre
-        if "PEREIRA" in nom_norm: return "Eje Cafetero - Risaralda"
-        if "ARMENIA" in nom_norm: return "Eje Cafetero - Quindío"
-        if "MANIZALES" in nom_norm: return "Eje Cafetero - Caldas"
-        if "OPALO" in nom_norm: return "Digital / Remoto"
-        return "Otras Zonas / Viajeros"
-
-    df_geo['nomvendedor'] = df_geo['nomvendedor'].fillna("DESCONOCIDO").astype(str)
-    df_geo['Zona_Logistica'] = df_geo['nomvendedor'].apply(map_zona_avanzado)
-    
-    # Análisis por Zona
-    df_zona = df_geo.groupby('Zona_Logistica').agg(
-        Ventas=('valor_venta', 'sum'),
-        Margen=('Margen_Pesos', 'sum'),
-        Transacciones=('Serie', 'nunique'),
+    # Análisis por Población (Ciudad/Municipio)
+    # Usamos 'Poblacion_Objetivo' calculada al inicio
+    df_log = df_act.groupby(['Poblacion_Objetivo']).agg(
+        Venta_Total=('valor_venta', 'sum'),
+        Margen_Total=('Margen_Pesos', 'sum'),
+        Num_Pedidos=('Serie', 'nunique'), # Asumiendo 'Serie' es el # de factura
         Clientes_Unicos=('cliente_id', 'nunique')
     ).reset_index()
     
-    df_zona['Ticket_Promedio_Zona'] = np.where(df_zona['Transacciones']!=0, df_zona['Ventas'] / df_zona['Transacciones'], 0)
-    df_zona['Margen_Pct_Zona'] = np.where(df_zona['Ventas']!=0, (df_zona['Margen'] / df_zona['Ventas']) * 100, 0)
+    # Métricas Derivadas
+    df_log['Ticket_Promedio'] = df_log['Venta_Total'] / df_log['Num_Pedidos']
+    df_log['Margen_Pct'] = (df_log['Margen_Total'] / df_log['Venta_Total']) * 100
+    df_log['Costo_Servir_Proxy'] = 1 / df_log['Ticket_Promedio'] # Inverso del ticket como proxy de costo
     
-    if not df_zona.empty:
-        col_l1, col_l2 = st.columns(2)
+    # Filtro de ciudades top para no saturar el gráfico
+    top_ciudades = df_log.sort_values('Venta_Total', ascending=False).head(30)
+    
+    col_log1, col_log2 = st.columns([2, 1])
+    
+    with col_log1:
+        st.markdown("##### Eficiencia Logística: Ticket Promedio vs Margen %")
+        fig_bubble_log = px.scatter(
+            top_ciudades,
+            x="Ticket_Promedio",
+            y="Margen_Pct",
+            size="Venta_Total",
+            color="Poblacion_Objetivo",
+            hover_name="Poblacion_Objetivo",
+            text="Poblacion_Objetivo",
+            title="Ciudades: ¿Dónde es más costoso vender? (Bajo Ticket = Alto Costo Operativo)",
+            height=500
+        )
+        # Zona de peligro
+        fig_bubble_log.add_hrect(y0=0, y1=top_ciudades['Margen_Pct'].min(), fillcolor="red", opacity=0.1, line_width=0)
+        fig_bubble_log.add_vline(x=top_ciudades['Ticket_Promedio'].median(), line_dash="dash", annotation_text="Ticket Mediana")
         
-        with col_l1:
-            st.markdown("##### Rentabilidad por Zona Geográfica (Origen)")
-            fig_bar_zona = px.bar(
-                df_zona, 
-                x='Zona_Logistica', 
-                y='Margen_Pct_Zona', 
-                color='Ventas',
-                title="Margen % por Zona (Color = Volumen de Venta)",
-                text_auto='.1f'
-            )
-            st.plotly_chart(fig_bar_zona, use_container_width=True)
-            
-        with col_l2:
-            st.markdown("##### Eficiencia Logística (Ticket Promedio)")
-            st.info("Un ticket promedio bajo en zonas lejanas implica un **Alto Costo por Servir**.")
-            fig_bubble = px.scatter(
-                df_zona,
-                x="Transacciones",
-                y="Ticket_Promedio_Zona",
-                size="Ventas",
-                color="Zona_Logistica",
-                hover_name="Zona_Logistica",
-                title="Eficiencia: Frecuencia vs Tamaño de Pedido"
-            )
-            st.plotly_chart(fig_bubble, use_container_width=True)
+        st.plotly_chart(fig_bubble_log, use_container_width=True)
+        
+    with col_log2:
+        st.markdown("##### ⚠️ Alerta: Ciudades Ineficientes")
+        st.caption("Ciudades con alto volumen de pedidos pero bajo Ticket Promedio (Requiere optimización de rutas o pedido mínimo).")
+        
+        # Ciudades con muchas transacciones pero ticket bajo
+        ineficientes = top_ciudades.nsmallest(10, 'Ticket_Promedio')[['Poblacion_Objetivo', 'Ticket_Promedio', 'Num_Pedidos', 'Margen_Pct']]
+        
+        st.dataframe(
+            ineficientes,
+            column_config={
+                "Ticket_Promedio": st.column_config.NumberColumn(format="$%d"),
+                "Margen_Pct": st.column_config.NumberColumn(format="%.1f %%")
+            },
+            hide_index=True
+        )
+        
 
-        st.markdown("### 🧠 Insights Automáticos de Logística")
-        if not df_zona.empty:
-            zona_menor_ticket = df_zona.loc[df_zona['Ticket_Promedio_Zona'].idxmin()]
-            zona_mayor_margen = df_zona.loc[df_zona['Margen_Pct_Zona'].idxmax()]
-            
-            st.warning(f"⚠️ **Atención:** La zona **{zona_menor_ticket['Zona_Logistica']}** tiene el ticket promedio más bajo (${zona_menor_ticket['Ticket_Promedio_Zona']:,.0f}). Si esta zona está lejos de tus bodegas, el costo de transporte puede estar erosionando la utilidad.")
-            st.success(f"✅ **Fortaleza:** La zona **{zona_mayor_margen['Zona_Logistica']}** es la más rentable porcentualmente ({zona_mayor_margen['Margen_Pct_Zona']:.1f}%).")
-    else:
-        st.info("No hay información suficiente para el análisis logístico.")
+    st.markdown("### 🔎 Simulador de Impacto Logístico")
+    st.info("Selecciona una población para ver qué marcas/categorías estamos vendiendo allí y su rentabilidad específica.")
+    
+    ciudad_sel = st.selectbox("Seleccionar Población para Rayos X:", sorted(df_act['Poblacion_Objetivo'].unique()))
+    
+    df_ciudad = df_act[df_act['Poblacion_Objetivo'] == ciudad_sel]
+    
+    df_ciudad_cat = df_ciudad.groupby('Marca_Analisis').agg(
+        Venta=('valor_venta', 'sum'),
+        Margen=('Margen_Pesos', 'sum'),
+        Pedidos=('Serie', 'nunique')
+    ).reset_index()
+    
+    df_ciudad_cat['Ticket_Cat'] = df_ciudad_cat['Venta'] / df_ciudad_cat['Pedidos']
+    df_ciudad_cat['Mg_Pct'] = (df_ciudad_cat['Margen'] / df_ciudad_cat['Venta']) * 100
+    
+    st.dataframe(
+        df_ciudad_cat.sort_values('Venta', ascending=False),
+        use_container_width=True,
+        column_config={
+            "Venta": st.column_config.NumberColumn(format="$%d"),
+            "Mg_Pct": st.column_config.ProgressColumn("Rentabilidad", min_value=0, max_value=40, format="%.1f%%"),
+            "Ticket_Cat": st.column_config.NumberColumn("Ticket Promedio (Eficiencia)", format="$%d")
+        }
+    )
