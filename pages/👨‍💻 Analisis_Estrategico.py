@@ -9,53 +9,50 @@ import dropbox
 from datetime import datetime, date
 
 # ==============================================================================
-# 1. CONFIGURACIÓN VISUAL (UI/UX PREMIUM)
+# 1. CONFIGURACIÓN ULTRA (UI/UX)
 # ==============================================================================
 st.set_page_config(
-    page_title="Master Brain Ultra | Operations Intelligence",
-    page_icon="🧠",
+    page_title="Master Brain Ultra | Growth Engine", 
+    page_icon="🧠", 
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
+# CSS Ejecutivo y Limpio
 st.markdown("""
 <style>
-    /* Estilos Corporativos */
     :root { --primary: #0f172a; --accent: #3b82f6; --success: #10b981; --danger: #ef4444; --bg-light: #f8fafc; }
     .main { background-color: #ffffff; }
+    h1, h2, h3 { color: var(--primary); font-family: 'Segoe UI', sans-serif; font-weight: 700; }
     
     /* Tarjetas KPI */
     .metric-card {
-        background: white; border-left: 5px solid var(--accent);
-        padding: 20px; border-radius: 10px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.05); margin-bottom: 20px;
+        background: white; border-left: 4px solid var(--accent);
+        padding: 20px; border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); margin-bottom: 16px;
     }
-    .metric-val { font-size: 2rem; font-weight: 800; color: var(--primary); }
-    .metric-lbl { font-size: 0.8rem; text-transform: uppercase; font-weight: 700; color: #64748b; }
-    .metric-delta { font-size: 0.9rem; font-weight: 600; margin-top: 5px; }
-    .pos { color: var(--success); }
-    .neg { color: var(--danger); }
-    
+    .metric-val { font-size: 1.8rem; font-weight: 800; color: var(--primary); margin: 8px 0; }
+    .metric-lbl { font-size: 0.8rem; color: #64748b; text-transform: uppercase; font-weight: 700; letter-spacing: 1px;}
+    .metric-delta { font-size: 0.9rem; font-weight: 600; }
+    .pos { color: var(--success); background-color: #ecfdf5; padding: 2px 6px; border-radius: 4px;}
+    .neg { color: var(--danger); background-color: #fef2f2; padding: 2px 6px; border-radius: 4px;}
+
     /* Cajas de Análisis */
-    .analysis-box {
-        background-color: #f0f9ff; border: 1px solid #bae6fd;
-        border-left: 5px solid #0284c7;
-        padding: 20px; border-radius: 8px;
-        margin-top: 15px; margin-bottom: 15px;
-        color: #0c4a6e; font-size: 0.95rem;
+    .insight-box {
+        background-color: #eff6ff; border: 1px solid #bfdbfe;
+        padding: 20px; border-radius: 10px; color: #1e40af; margin-bottom: 20px;
     }
-    .analysis-title { font-weight: 800; display: block; margin-bottom: 5px; text-transform: uppercase; }
-    .action-item { font-weight: 600; color: #b91c1c; }
+    .insight-title { font-weight: 800; display: block; margin-bottom: 5px; text-transform: uppercase; font-size: 0.85rem;}
     
     /* Tabs */
-    .stTabs [data-baseweb="tab-list"] { gap: 10px; }
-    .stTabs [data-baseweb="tab"] { background-color: #f1f5f9; border-radius: 5px; border: none; font-weight: 600; }
+    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
+    .stTabs [data-baseweb="tab"] { background-color: #f1f5f9; border-radius: 8px; padding: 10px 20px; border: none; font-weight: 600; }
     .stTabs [aria-selected="true"] { background-color: var(--primary); color: white; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. FUNCIONES DE LÓGICA DE NEGOCIO
+# 2. LÓGICA DE NEGOCIO Y LIMPIEZA
 # ==============================================================================
 
 def normalizar_texto(texto):
@@ -73,47 +70,51 @@ def limpiar_codigo_master(codigo):
     except: pass
     return s_cod
 
+def obtener_nombre_marca_por_codigo(codigo):
+    # --- TU DICCIONARIO PERSONALIZADO ---
+    mapa = {
+        '33': 'OCEANIC PAINTS', '34': 'PROTECTO', '35': 'OTROS', '37': 'INTERNATIONAL PAINT', 
+        '40': 'ICO', '41': 'TERINSA', '50': 'PINTUCO (MEGA)', '54': 'INTERNATIONAL PAINT', 
+        '55': 'COLORANTS LATAM', '56': 'PINTUCO PROFESIONAL', '57': 'PINTUCO (MEGA)', 
+        '58': 'PINTUCO', '59': 'MADETEC', '60': 'INTERPON', '61': 'VARIOUS', '62': 'ICO', 
+        '63': 'TERINSA', '64': 'PINTUCO', '65': 'TERCEROS', '66': 'ICO PACKAGING', 
+        '67': 'AUTOMOTIVE OEM', '68': 'RESICOAT', '73': 'CORAL', '87': 'SIKKENS', 
+        '89': 'WANDA', '90': 'SIKKENS AUTOCOAT', '91': 'SIKKENS', '94': 'PROTECTO PROFESIONAL'
+    }
+    return mapa.get(str(codigo), None)
+
 def clasificar_estrategia_master(row):
     prod_name = normalizar_texto(row.get('NOMBRE_PRODUCTO_K', ''))
     cat_name = normalizar_texto(row.get('CATEGORIA_L', ''))
-    aliados = ['ABRACOL', 'INDUMA', 'YALE', 'ARTECOLA', 'GOYA', 'ATLAS', '3M', 'SISTA', 'SINTESOLDA']
     
-    texto = f"{prod_name} {cat_name}"
+    # 1. Busqueda por Aliados en el texto
+    aliados = ['ABRACOL', 'INDUMA', 'YALE', 'ARTECOLA', 'GOYA', 'ATLAS', '3M', 'SISTA', 'SINTESOLDA']
+    texto_busqueda = f"{prod_name} {cat_name}"
     for aliado in aliados:
-        if aliado in texto: return aliado
-        
+        if aliado in texto_busqueda: return aliado
+    
+    # 2. Busqueda por Codigo de Marca
     raw_code = str(row.get('CODIGO_MARCA_N', '0')).split('.')[0].strip()
-    mapa = {'33': 'OCEANIC', '34': 'PROTECTO', '58': 'PINTUCO', '60': 'INTERPON', '40': 'ICO', '41': 'TERINSA', '50':'PINTUCO MEGA'}
-    return mapa.get(raw_code, 'OTRAS MARCAS')
+    nombre_marca = obtener_nombre_marca_por_codigo(raw_code)
+    if nombre_marca: return nombre_marca
+    
+    return 'OTROS / GENERICO'
 
 def asignar_hub_logistico(ciudad):
     c = normalizar_texto(ciudad)
-    
-    # --- DEFINICIÓN ZONA LOGÍSTICA (TIENEN COSTO) ---
-    # 1. RISARALDA (Hub Local)
-    risaralda = ['PEREIRA', 'DOSQUEBRADAS', 'SANTA ROSA DE CABAL', 'LA VIRGINIA', 'MARSELLA', 'BELEN DE UMBRIA', 'APIA', 'SANTUARIO']
-    if c in risaralda: return 'HUB RISARALDA'
-
-    # 2. CALDAS (Hub Manizales)
-    caldas = ['MANIZALES', 'VILLAMARIA', 'CHINCHINA', 'NEIRA', 'RIOSUCIO', 'ANSERMA', 'VITERBO', 'SUPIA', 'FILADELFIA', 'PALESTINA']
-    if c in caldas: return 'HUB CALDAS'
-
-    # 3. QUINDIO (Hub Armenia)
-    quindio = ['ARMENIA', 'CALARCA', 'CIRCASIA', 'TEBAIDA', 'MONTENEGRO', 'QUIMBAYA', 'FILANDIA', 'SALENTO', 'PIJAO', 'GENOVA']
-    if c in quindio: return 'HUB QUINDIO'
-
-    # 4. VALLE DEL CAUCA Y NORTE DEL VALLE
-    valle = ['CARTAGO', 'OBANDO', 'ZARZAL', 'ROLDANILLO', 'LA UNION', 'SEVILLA', 'CAICEDONIA', 
-             'CALI', 'PALMIRA', 'BUGA', 'TULUA', 'YUMBO', 'JAMUNDI', 'CANDELARIA', 'BUENAVENTURA', 
-             'ANSERMANUEVO', 'ALCALA', 'ULLOA', 'EL AGUILA', 'EL CAIRO', 'ARGELIA', 'VERSALLES', 'EL DOVIO']
-    if c in valle: return 'HUB VALLE'
-
-    # --- ZONA MOSTRADOR (SIN COSTO LOGÍSTICO) ---
-    # Todo lo que no sea Risaralda, Caldas, Quindío o Valle
-    return 'MOSTRADOR / SIN LOGISTICA'
+    # Risaralda
+    if c in ['PEREIRA', 'DOSQUEBRADAS', 'SANTA ROSA DE CABAL', 'LA VIRGINIA']: return 'HUB RISARALDA'
+    # Caldas
+    if c in ['MANIZALES', 'VILLAMARIA', 'CHINCHINA', 'NEIRA']: return 'HUB CALDAS'
+    # Quindio
+    if c in ['ARMENIA', 'CALARCA', 'CIRCASIA', 'TEBAIDA', 'MONTENEGRO', 'QUIMBAYA']: return 'HUB QUINDIO'
+    # Valle Norte y Otros
+    if c in ['CARTAGO', 'ANSERMA', 'RIOSUCIO', 'VITERBO']: return 'ZONA CERCANA'
+    # Resto
+    return 'NACIONAL / FORANEO'
 
 # ==============================================================================
-# 3. CARGA DE DATOS (DROPBOX + VENTAS)
+# 3. DATA LOADING (DROPBOX)
 # ==============================================================================
 @st.cache_data(ttl=3600)
 def cargar_poblaciones_dropbox_excel():
@@ -121,6 +122,7 @@ def cargar_poblaciones_dropbox_excel():
         APP_KEY = st.secrets["dropbox"]["app_key"]
         APP_SECRET = st.secrets["dropbox"]["app_secret"]
         REFRESH_TOKEN = st.secrets["dropbox"]["refresh_token"]
+
         with dropbox.Dropbox(app_key=APP_KEY, app_secret=APP_SECRET, oauth2_refresh_token=REFRESH_TOKEN) as dbx:
             rutas = ['/clientes_detalle.xlsx', '/data/clientes_detalle.xlsx', '/Master/clientes_detalle.xlsx']
             res = None
@@ -129,346 +131,421 @@ def cargar_poblaciones_dropbox_excel():
                     _, res = dbx.files_download(path=r)
                     break
                 except: continue
+            
             if not res: return pd.DataFrame()
+
             with io.BytesIO(res.content) as stream:
-                df = pd.read_excel(stream, engine='openpyxl')
+                df_drop = pd.read_excel(stream, engine='openpyxl')
             
-            cols = {c.strip().lower(): c for c in df.columns}
-            col_k = next((v for k,v in cols.items() if 'cod' in k and 'cli' in k), None)
-            col_c = next((v for k,v in cols.items() if 'ciudad' in k), None)
-            col_v = next((v for k,v in cols.items() if 'vendedor' in k), None)
+            cols_actuales = {c.strip(): c for c in df_drop.columns}
+            key_col_match = next((val for key, val in cols_actuales.items() if 'cod' in key.lower() and 'cli' in key.lower()), None)
+            city_col_match = next((val for key, val in cols_actuales.items() if 'ciudad' in key.lower()), None)
+            vendedor_match = next((val for key, val in cols_actuales.items() if 'vendedor' in key.lower()), None)
+
+            if not key_col_match: return pd.DataFrame()
+
+            df_final = df_drop.copy()
+            df_final['Key_Nit'] = df_final[key_col_match].apply(limpiar_codigo_master)
             
-            if col_k:
-                df['Key_Nit'] = df[col_k].apply(limpiar_codigo_master)
-                df['Poblacion_Real'] = df[col_c].apply(normalizar_texto) if col_c else 'SIN ASIGNAR'
-                df['Vendedor'] = df[col_v].apply(normalizar_texto) if col_v else 'GENERAL'
-                df['Hub_Logistico'] = df['Poblacion_Real'].apply(asignar_hub_logistico)
-                return df[['Key_Nit', 'Poblacion_Real', 'Hub_Logistico', 'Vendedor']].drop_duplicates(subset=['Key_Nit'])
-    except Exception: pass
-    return pd.DataFrame()
+            if city_col_match:
+                df_final['Poblacion_Real'] = df_final[city_col_match].apply(normalizar_texto)
+            else:
+                df_final['Poblacion_Real'] = 'SIN ASIGNAR'
+
+            df_final['Hub_Logistico'] = df_final['Poblacion_Real'].apply(asignar_hub_logistico)
+            
+            if vendedor_match:
+                df_final['Vendedor'] = df_final[vendedor_match].apply(normalizar_texto)
+            else:
+                df_final['Vendedor'] = 'GENERAL'
+                
+            return df_final.drop_duplicates(subset=['Key_Nit'])[['Key_Nit', 'Poblacion_Real', 'Hub_Logistico', 'Vendedor']]
+
+    except Exception as e:
+        # st.error(f"Dropbox Error: {e}") # Ocultar en producción si se desea
+        return pd.DataFrame()
 
 # ==============================================================================
-# 4. PROCESAMIENTO Y FILTRADO YTD
+# 4. PROCESAMIENTO MAESTRO (YTD)
 # ==============================================================================
 if 'df_ventas' not in st.session_state:
-    st.warning("⚠️ Carga el archivo en el Home primero.")
+    st.info("👋 Carga tu archivo maestro en el Home.")
     st.stop()
 
 df_raw = st.session_state.df_ventas.copy()
 
+# Mapeo de Columnas
 try:
-    cols_map = {0: 'anio', 1: 'mes', 7: 'COD', 8: 'CLIENTE', 10: 'PROD', 11: 'CATEGORIA', 13: 'MARCA', 14: 'VALOR'}
-    df_raw = df_raw.rename(columns={df_raw.columns[i]: n for i,n in cols_map.items() if i < len(df_raw.columns)})
-    if len(df_raw.columns) > 2 and str(df_raw.iloc[0,2]).isnumeric():
-        df_raw['dia'] = df_raw.iloc[:, 2].astype(int)
+    df_raw = df_raw.rename(columns={
+        df_raw.columns[0]: 'anio',
+        df_raw.columns[1]: 'mes',
+        df_raw.columns[7]: 'CODIGO_CLIENTE_H',
+        df_raw.columns[8]: 'NOMBRE_CLIENTE_I',
+        df_raw.columns[10]: 'NOMBRE_PRODUCTO_K',
+        df_raw.columns[11]: 'CATEGORIA_L',
+        df_raw.columns[13]: 'CODIGO_MARCA_N',
+        df_raw.columns[14]: 'VALOR_VENTA_O'
+    })
+    # Verificar si hay columna día
+    if len(df_raw.columns) > 2:
+        if df_raw.iloc[:, 2].apply(lambda x: str(x).isnumeric()).all():
+             df_raw['dia'] = df_raw.iloc[:, 2].astype(int)
+        else: df_raw['dia'] = 15
     else: df_raw['dia'] = 15
-except: st.stop()
+except:
+    st.error("Error en estructura de archivo.")
+    st.stop()
 
-df_raw['VALOR'] = pd.to_numeric(df_raw['VALOR'], errors='coerce').fillna(0)
-df_raw['anio'] = pd.to_numeric(df_raw['anio'], errors='coerce').fillna(date.today().year).astype(int)
+df_raw['VALOR_VENTA_O'] = pd.to_numeric(df_raw['VALOR_VENTA_O'], errors='coerce').fillna(0)
+df_raw['anio'] = pd.to_numeric(df_raw['anio'], errors='coerce').fillna(datetime.now().year).astype(int)
 df_raw['mes'] = pd.to_numeric(df_raw['mes'], errors='coerce').fillna(1).astype(int)
-df_raw['Key_Nit'] = df_raw['COD'].apply(limpiar_codigo_master)
+df_raw['Key_Nit'] = df_raw['CODIGO_CLIENTE_H'].apply(limpiar_codigo_master)
 
-with st.spinner("🧠 Analizando Operación..."):
+# Fusión de Datos
+with st.spinner("⚙️ Master Brain procesando datos..."):
     df_raw['Marca_Master'] = df_raw.apply(clasificar_estrategia_master, axis=1)
-    df_cli = cargar_poblaciones_dropbox_excel()
-    if not df_cli.empty:
-        df_full = pd.merge(df_raw, df_cli, on='Key_Nit', how='left')
+    df_clientes = cargar_poblaciones_dropbox_excel()
+    
+    if not df_clientes.empty:
+        df_full = pd.merge(df_raw, df_clientes, on='Key_Nit', how='left')
         df_full['Poblacion_Real'] = df_full['Poblacion_Real'].fillna('NO IDENTIFICADO')
-        # Si no cruzó, recalcular Hub basado en poblacion (aunque sea None, irá a Mostrador si no se sabe)
-        mask_null = df_full['Hub_Logistico'].isna()
-        df_full.loc[mask_null, 'Hub_Logistico'] = df_full.loc[mask_null, 'Poblacion_Real'].apply(asignar_hub_logistico)
+        df_full['Hub_Logistico'] = df_full['Hub_Logistico'].fillna('NACIONAL / FORANEO')
         df_full['Vendedor'] = df_full['Vendedor'].fillna('GENERAL')
     else:
         df_full = df_raw.copy()
         df_full['Poblacion_Real'] = 'SIN DATA'
-        df_full['Hub_Logistico'] = 'MOSTRADOR / SIN LOGISTICA'
+        df_full['Hub_Logistico'] = 'NACIONAL / FORANEO'
         df_full['Vendedor'] = 'GENERAL'
 
-hoy = date.today()
-def ytd(row):
-    if row['mes'] < hoy.month: return True
-    if row['mes'] == hoy.month: return row['dia'] <= hoy.day
+# Filtro YTD Estricto
+today = date.today()
+def es_ytd_valido(row):
+    if row['mes'] < today.month: return True
+    if row['mes'] == today.month: return row['dia'] <= today.day
     return False
-df_master = df_full[df_full.apply(ytd, axis=1)].copy()
+
+df_full['Is_YTD'] = df_full.apply(es_ytd_valido, axis=1)
+df_master = df_full[df_full['Is_YTD'] == True].copy()
 
 # ==============================================================================
-# 5. DASHBOARD & LÓGICA DE NEGOCIO AVANZADA
+# 5. INTERFAZ Y DASHBOARD
 # ==============================================================================
-st.title("🧠 Master Brain Ultra | Ops Intelligence Center")
-st.markdown(f"**Fecha Corte:** {hoy.strftime('%d-%b-%Y')} | Comparación exacta de periodos.")
+
+st.title("🧠 Master Brain | Análisis de Crecimiento & Rentabilidad")
+st.markdown(f"Comparativo YTD Estricto al **{today.strftime('%d de %B')}**.")
 st.divider()
 
-# --- SIDEBAR: PARÁMETROS Y FILTROS ---
+# --- SIDEBAR ---
 with st.sidebar:
-    st.header("🎛️ Panel de Control")
+    st.header("🎛️ Filtros Globales")
     
-    st.subheader("1. Estructura de Costos")
-    margen_pct = st.slider("Margen Bruto (%)", 10, 60, 25) / 100
-    st.info("ℹ️ Costos aplican solo a: Eje Cafetero y Valle.")
-    costo_local = st.number_input("Costo Envío Local/Cercano ($)", 10000, 50000, 12000)
-    costo_nal = st.number_input("Costo Envío Regional ($)", 20000, 100000, 45000)
-    
-    st.subheader("2. Segmentación")
+    # Fechas
     anios = sorted(df_master['anio'].unique(), reverse=True)
-    anio_obj = st.selectbox("Año Objetivo", anios, 0)
-    anio_base = st.selectbox("Año Base", [a for a in anios if a!=anio_obj], 0)
+    anio_obj = st.selectbox("Año Objetivo (Actual)", anios, index=0)
+    list_base = [a for a in anios if a != anio_obj]
+    anio_base = st.selectbox("Año Base (Anterior)", list_base if list_base else anios, index=0)
     
-    sel_hubs = st.multiselect("Hubs Logísticos", sorted(df_master['Hub_Logistico'].unique()), default=sorted(df_master['Hub_Logistico'].unique()))
-    sel_city = st.multiselect("Poblaciones", sorted(df_master['Poblacion_Real'].unique()))
-    sel_brand = st.multiselect("Marcas", sorted(df_master['Marca_Master'].unique()))
-    sel_cat = st.multiselect("Categorías", sorted(df_master['CATEGORIA'].astype(str).unique()))
+    st.markdown("---")
+    st.subheader("Segmentación")
+    
+    # Filtros Anidados
+    hubs = sorted(df_master['Hub_Logistico'].unique())
+    sel_hubs = st.multiselect("Hubs Logísticos", hubs, default=hubs)
+    
+    # Filtrar df para obtener opciones dependientes
+    df_temp = df_master[df_master['Hub_Logistico'].isin(sel_hubs)]
+    
+    ciudades = sorted(df_temp['Poblacion_Real'].unique())
+    sel_city = st.multiselect("Ciudades", ciudades)
+    
+    categorias = sorted(df_temp['CATEGORIA_L'].astype(str).unique())
+    sel_cat = st.multiselect("Categorías", categorias)
+    
+    marcas = sorted(df_temp['Marca_Master'].unique())
+    sel_brand = st.multiselect("Marcas", marcas)
+    
+    st.markdown("---")
+    st.caption("PARAMETROS FINANCIEROS")
+    margen_bruto = st.slider("Margen Bruto (%)", 10, 60, 25) / 100
+    costo_local = st.number_input("Costo Local ($)", 12000)
+    costo_nal = st.number_input("Costo Nacional ($)", 45000)
 
-# --- FILTRADO DINÁMICO ---
+# --- APLICACIÓN DE FILTROS ---
 df_f = df_master[df_master['Hub_Logistico'].isin(sel_hubs)].copy()
 if sel_city: df_f = df_f[df_f['Poblacion_Real'].isin(sel_city)]
+if sel_cat: df_f = df_f[df_f['CATEGORIA_L'].isin(sel_cat)]
 if sel_brand: df_f = df_f[df_f['Marca_Master'].isin(sel_brand)]
-if sel_cat: df_f = df_f[df_f['CATEGORIA'].isin(sel_cat)]
 
 df_act = df_f[df_f['anio'] == anio_obj].copy()
 df_ant = df_f[df_f['anio'] == anio_base].copy()
 
-# --- CÁLCULOS "COST-TO-SERVE" (LOGICA CORREGIDA) ---
-df_act['Pedido_ID'] = df_act['Key_Nit'].astype(str)+'-'+df_act['mes'].astype(str)+'-'+df_act['dia'].astype(str)
-n_pedidos = df_act['Pedido_ID'].nunique()
-venta = df_act['VALOR'].sum()
+# --- CÁLCULOS GLOBALES ---
+vta_act = df_act['VALOR_VENTA_O'].sum()
+vta_ant = df_ant['VALOR_VENTA_O'].sum()
+diff_vta = vta_act - vta_ant
+diff_pct = (diff_vta / vta_ant * 100) if vta_ant > 0 else 100
 
-def calc_costo(row):
-    hub = row['Hub_Logistico']
-    # REGLA DE ORO: Si es MOSTRADOR (fuera de cobertura logística), costo es CERO.
-    if 'MOSTRADOR' in hub:
-        return 0
-    
-    # Si está dentro de la cobertura (Risaralda, Caldas, Quindio, Valle)
-    # Asumimos Pereira/Dosq como 'Local' y el resto como 'Regional' (Nacional en contexto variable)
-    # O si prefieres: Risaralda = Local, Resto = Nacional.
-    if 'RISARALDA' in hub: # Pereira, Dosquebradas, etc.
-        return costo_local
-    else: # Caldas, Quindio, Valle
-        return costo_nal
+# Cálculo de Costo Logístico Estimado (Para rentabilidad)
+df_act['Pedido_ID'] = df_act['Key_Nit'].astype(str) + '-' + df_act['mes'].astype(str) + '-' + df_act['dia'].astype(str)
+df_pedidos = df_act[['Pedido_ID', 'Hub_Logistico']].drop_duplicates()
 
-df_pedidos_unicos = df_act[['Pedido_ID', 'Hub_Logistico']].drop_duplicates()
-df_pedidos_unicos['Costo'] = df_pedidos_unicos.apply(calc_costo, axis=1)
-costo_total = df_pedidos_unicos['Costo'].sum()
+def calcular_costo_row(h):
+    if 'RISARALDA' in h or 'CALDAS' in h or 'QUINDIO' in h or 'CERCANA' in h: return costo_local
+    return costo_nal
 
-ut_bruta = venta * margen_pct
-ut_neta = ut_bruta - costo_total
-margen_real = (ut_neta/venta*100) if venta > 0 else 0
+df_pedidos['Costo'] = df_pedidos['Hub_Logistico'].apply(calcular_costo_row)
+costo_total = df_pedidos['Costo'].sum()
+utilidad = (vta_act * margen_bruto) - costo_total
+margen_neto = (utilidad / vta_act * 100) if vta_act > 0 else 0
 
-# --- HEADER METRICS ---
-c1,c2,c3,c4,c5 = st.columns(5)
-delta_v = ((venta - df_ant['VALOR'].sum())/df_ant['VALOR'].sum()*100) if df_ant['VALOR'].sum()>0 else 100
+# --- KPI CARDS ---
+c1, c2, c3, c4, c5 = st.columns(5)
 
-def card(col, tit, val, d, sub, color="pos"):
-    col.markdown(f"""<div class="metric-card"><div class="metric-lbl">{tit}</div>
-    <div class="metric-val">{val}</div><div class="metric-delta"><span class="{color}">{d}</span> {sub}</div></div>""", unsafe_allow_html=True)
+def kpi(col, title, val, delta, sub, color="pos"):
+    col.markdown(f"""
+    <div class="metric-card">
+        <div class="metric-lbl">{title}</div>
+        <div class="metric-val">{val}</div>
+        <div class="metric-delta"><span class="{color}">{delta}</span> {sub}</div>
+    </div>""", unsafe_allow_html=True)
 
-card(c1, "Venta Total", f"${venta/1e6:,.1f}M", f"{delta_v:+.1f}%", "Crecimiento")
-card(c2, "Utilidad Real", f"${ut_neta/1e6:,.1f}M", f"{margen_real:.1f}%", "Margen Neto Oper.")
-card(c3, "Costo Logístico", f"${costo_total/1e6:,.1f}M", f"{(costo_total/venta)*100:.1f}%", "del Venta Total", "neg")
-card(c4, "# Despachos", f"{n_pedidos:,}", f"{n_pedidos/df_act['Key_Nit'].nunique():.1f}", "Freq. Promedio")
-card(c5, "Ticket Promedio", f"${(venta/n_pedidos if n_pedidos else 0):,.0f}", "---", "Por Despacho")
+kpi(c1, "Venta Actual", f"${vta_act/1e6:,.1f}M", f"{diff_pct:+.1f}%", "vs Año Ant")
+kpi(c2, "Variación $", f"${diff_vta/1e6:,.1f}M", "Crecimiento", "Neto")
+kpi(c3, "Utilidad Real", f"${utilidad/1e6:,.1f}M", f"{margen_neto:.1f}%", "Margen Operativo")
+kpi(c4, "Gasto Logístico", f"${costo_total/1e6:,.1f}M", f"{(costo_total/vta_act)*100:.1f}%", "del Ingreso", "neg")
+kpi(c5, "Clientes Activos", f"{df_act['Key_Nit'].nunique()}", f"{df_act['Key_Nit'].nunique() - df_ant['Key_Nit'].nunique():+}", "vs Año Ant")
+
+# --- ESTRUCTURA DE PESTAÑAS ---
+tabs = st.tabs([
+    "🚀 Drivers de Crecimiento", 
+    "⚖️ Mix & Categorías",
+    "🚚 Rentabilidad & Costos", 
+    "🌍 Mapa de Expansión",
+    "👥 Retención de Clientes",
+    "🧪 Simulador Batching"
+])
 
 # ==============================================================================
-# 6. TABS CON ANÁLISIS
+# TAB 1: DRIVERS DE CRECIMIENTO (WATERFALL & INCIDENCIA)
 # ==============================================================================
-tabs = st.tabs(["🚚 Rentabilidad", "⚖️ Peso Categorías", "🔄 Batching (Ahorro)", "📈 Drivers", "👥 Retención", "🌍 Geo-Estrategia", "🤖 Conclusión"])
-
-# --- TAB 1: RENTABILIDAD ---
 with tabs[0]:
-    df_city = df_act.groupby(['Poblacion_Real', 'Hub_Logistico']).agg(
-        Venta=('VALOR', 'sum'), Pedidos=('Pedido_ID', 'nunique')
+    st.subheader("¿Quién está aportando el crecimiento?")
+    st.markdown("Este análisis desglosa la variación de ventas para identificar exactamente qué Marcas o Categorías son responsables del resultado.")
+
+    col_d1, col_d2 = st.columns([3, 1])
+    
+    with col_d1:
+        dimension = st.radio("Analizar Crecimiento por:", ["Marca_Master", "CATEGORIA_L"], horizontal=True)
+        
+        # Agrupación
+        g_act = df_act.groupby(dimension)['VALOR_VENTA_O'].sum()
+        g_ant = df_ant.groupby(dimension)['VALOR_VENTA_O'].sum()
+        
+        df_growth = pd.DataFrame({'Actual': g_act, 'Anterior': g_ant}).fillna(0)
+        df_growth['Variacion'] = df_growth['Actual'] - df_growth['Anterior']
+        df_growth['Crecimiento_Pct'] = (df_growth['Variacion'] / df_growth['Anterior']).replace([np.inf, -np.inf], 0)
+        
+        # Incidencia: Cuánto pesa esta variación sobre la variación TOTAL absoluta
+        total_var_abs = abs(df_growth['Variacion'].sum())
+        df_growth['Incidencia'] = df_growth['Variacion'] / total_var_abs if total_var_abs > 0 else 0
+        
+        df_growth = df_growth.sort_values('Variacion', ascending=False)
+        
+        # Gráfico Waterfall
+        fig_water = go.Figure(go.Waterfall(
+            orientation="v",
+            measure=["relative"] * len(df_growth),
+            x=df_growth.index,
+            y=df_growth['Variacion'],
+            connector={"line": {"color": "rgb(63, 63, 63)"}},
+            decreasing={"marker": {"color": "#ef4444"}},
+            increasing={"marker": {"color": "#10b981"}},
+        ))
+        fig_water.update_layout(title=f"Cascada de Crecimiento por {dimension}", height=500)
+        st.plotly_chart(fig_water, use_container_width=True)
+
+    with col_d2:
+        st.markdown(f"**Top Drivers ({dimension})**")
+        st.caption("Ordenado por aporte en Dinero ($)")
+        
+        display_cols = df_growth[['Actual', 'Variacion', 'Crecimiento_Pct']]
+        st.dataframe(
+            display_cols.style.format({
+                'Actual': '${:,.0f}', 
+                'Variacion': '${:,.0f}', 
+                'Crecimiento_Pct': '{:+.1%}'
+            }).background_gradient(cmap='RdYlGn', subset=['Variacion']),
+            use_container_width=True,
+            height=500
+        )
+
+# ==============================================================================
+# TAB 2: MIX & CATEGORIAS
+# ==============================================================================
+with tabs[1]:
+    st.subheader("Evolución del Mix de Venta")
+    
+    col_m1, col_m2 = st.columns(2)
+    
+    with col_m1:
+        fig_sun = px.sunburst(
+            df_act, 
+            path=['Marca_Master', 'CATEGORIA_L'], 
+            values='VALOR_VENTA_O',
+            title=f"Distribución de Venta {anio_obj}",
+            color_discrete_sequence=px.colors.qualitative.Prism
+        )
+        st.plotly_chart(fig_sun, use_container_width=True)
+        
+    with col_m2:
+        # Comparativo de Share
+        share_act = df_act.groupby('CATEGORIA_L')['VALOR_VENTA_O'].sum() / vta_act
+        share_ant = df_ant.groupby('CATEGORIA_L')['VALOR_VENTA_O'].sum() / vta_ant
+        
+        df_share = pd.DataFrame({'Share_Act': share_act, 'Share_Ant': share_ant}).fillna(0)
+        df_share['Cambio_Puntos'] = (df_share['Share_Act'] - df_share['Share_Ant']) * 100
+        df_share = df_share.sort_values('Share_Act', ascending=False)
+        
+        st.markdown("**Cambio en la Participación (Share of Pocket)**")
+        st.dataframe(
+            df_share.style.format("{:.2f}%").background_gradient(cmap='RdYlGn', subset=['Cambio_Puntos']),
+            use_container_width=True
+        )
+
+# ==============================================================================
+# TAB 3: RENTABILIDAD (COST TO SERVE)
+# ==============================================================================
+with tabs[2]:
+    st.subheader("Matriz de Eficiencia Operativa")
+    st.markdown("Relación entre el Costo Logístico Total y la Utilidad Generada por población.")
+    
+    # Preparar datos por Ciudad
+    df_city_ops = df_act.groupby(['Poblacion_Real', 'Hub_Logistico']).agg(
+        Venta=('VALOR_VENTA_O', 'sum'),
+        Pedidos=('Pedido_ID', 'nunique')
     ).reset_index()
     
-    df_city['Costo_Unit'] = df_city.apply(calc_costo, axis=1)
-    df_city['Costo_Total'] = df_city['Pedidos'] * df_city['Costo_Unit']
-    df_city['Utilidad'] = (df_city['Venta'] * margen_pct) - df_city['Costo_Total']
-    
-    ciudades_perdida = df_city[df_city['Utilidad'] < 0]
-    txt_rentabilidad = ""
-    if ciudades_perdida.empty:
-        txt_rentabilidad = "✅ **EXCELENTE NOTICIA:** Todas las poblaciones son rentables con los filtros actuales."
-    else:
-        top_loser = ciudades_perdida.sort_values('Utilidad').iloc[0]
-        txt_rentabilidad = f"""
-        ⚠️ **ALERTA:** Pierdes dinero en **{len(ciudades_perdida)} poblaciones**.
-        <br>Crítico: **{top_loser['Poblacion_Real']}** (Pérdida: ${abs(top_loser['Utilidad']):,.0f}).
-        """
-
-    st.markdown(f"""<div class="analysis-box"><span class="analysis-title">ANÁLISIS DE RENTABILIDAD</span>{txt_rentabilidad}</div>""", unsafe_allow_html=True)
+    # Aplicar costos
+    df_city_ops['Costo_Unit'] = df_city_ops['Hub_Logistico'].apply(calcular_costo_row)
+    df_city_ops['Costo_Total'] = df_city_ops['Pedidos'] * df_city_ops['Costo_Unit']
+    df_city_ops['Utilidad'] = (df_city_ops['Venta'] * margen_bruto) - df_city_ops['Costo_Total']
     
     col_r1, col_r2 = st.columns([2,1])
+    
     with col_r1:
-        if not df_city.empty:
-            fig = px.scatter(df_city, x="Costo_Total", y="Utilidad", size="Venta", color="Hub_Logistico", 
-                             hover_name="Poblacion_Real", title="Matriz Eficiencia", height=450)
-            fig.add_hline(y=0, line_dash="dash", line_color="red")
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No hay datos para graficar.")
-    with col_r2:
-        st.markdown("**Detalle Financiero**")
-        format_dict = {"Venta": "${:,.0f}", "Costo_Total": "${:,.0f}", "Utilidad": "${:,.0f}"}
-        st.dataframe(df_city[['Poblacion_Real', 'Venta', 'Costo_Total', 'Utilidad']]
-                     .sort_values('Utilidad')
-                     .style.format(format_dict).background_gradient(cmap='RdYlGn', subset=['Utilidad']), 
-                     use_container_width=True)
-
-# --- TAB 2: PESO CATEGORÍAS ---
-with tabs[1]:
-    st.markdown("""
-    <div class="analysis-box">
-    <span class="analysis-title">ANÁLISIS DE IMPACTO POR CATEGORÍA</span>
-    Aquí analizamos minuciosamente si una categoría está "poniendo" o "quitando" valor al crecimiento global.
-    </div>
-    """, unsafe_allow_html=True)
-
-    cat_act = df_act.groupby('CATEGORIA')['VALOR'].sum()
-    cat_ant = df_ant.groupby('CATEGORIA')['VALOR'].sum()
-    
-    df_cat_analysis = pd.DataFrame({'Venta_Actual': cat_act, 'Venta_Anterior': cat_ant}).fillna(0)
-    df_cat_analysis['Var_Pesos'] = df_cat_analysis['Venta_Actual'] - df_cat_analysis['Venta_Anterior']
-    df_cat_analysis['Var_Pct'] = (df_cat_analysis['Var_Pesos'] / df_cat_analysis['Venta_Anterior']).replace([np.inf, -np.inf], 0)
-    
-    total_growth_abs = df_cat_analysis['Var_Pesos'].sum()
-    df_cat_analysis['Incidencia_Peso'] = df_cat_analysis.apply(
-        lambda row: (row['Var_Pesos'] / abs(total_growth_abs)) if total_growth_abs != 0 else 0, axis=1
-    )
-    
-    df_cat_analysis = df_cat_analysis.sort_values('Var_Pesos', ascending=False)
-
-    fig_cat = go.Figure(go.Waterfall(
-        orientation="v",
-        measure=["relative"] * len(df_cat_analysis),
-        x=df_cat_analysis.index,
-        y=df_cat_analysis['Var_Pesos'],
-        connector={"line": {"color": "rgb(63, 63, 63)"}},
-        decreasing={"marker": {"color": "#ef4444"}}, 
-        increasing={"marker": {"color": "#10b981"}}, 
-    ))
-    fig_cat.update_layout(title="Contribution Chart: ¿Quién aporta y quién resta al crecimiento?", height=450)
-    st.plotly_chart(fig_cat, use_container_width=True)
-
-    st.markdown("### 📋 Detalle Minucioso de Aporte")
-    format_cat = {
-        "Venta_Actual": "${:,.0f}", "Venta_Anterior": "${:,.0f}",
-        "Var_Pesos": "${:,.0f}", "Var_Pct": "{:+.1%}", "Incidencia_Peso": "{:+.2%}"
-    }
-    df_show = df_cat_analysis[['Venta_Actual', 'Venta_Anterior', 'Var_Pesos', 'Var_Pct', 'Incidencia_Peso']].copy()
-    st.dataframe(
-        df_show.style.format(format_cat)
-        .background_gradient(cmap='RdYlGn', subset=['Var_Pesos', 'Incidencia_Peso'])
-        .bar(subset=['Var_Pct'], align='mid', color=['#ef4444', '#10b981']),
-        use_container_width=True
-    )
-
-# --- TAB 3: BATCHING ---
-with tabs[2]:
-    st.markdown(f"""<div class="analysis-box"><span class="analysis-title">SIMULADOR DE EFICIENCIA</span>
-    Promedio actual: **{n_pedidos/df_act['Key_Nit'].nunique():.1f} despachos por cliente**.
-    <br>Agrupar pedidos reduce costos y aumenta utilidad directa.
-    </div>""", unsafe_allow_html=True)
-    
-    col_b1, col_b2 = st.columns(2)
-    with col_b1:
-        ahorro_pct = st.slider("Meta reducción de viajes (%)", 0, 50, 20) / 100
-        ahorro = costo_total * ahorro_pct
+        fig_scatter = px.scatter(
+            df_city_ops,
+            x="Costo_Total", y="Utilidad",
+            size="Venta", color="Hub_Logistico",
+            hover_name="Poblacion_Real",
+            title="Utilidad vs. Costo Logístico (Tamaño burbuja = Venta)",
+            height=500
+        )
+        # Linea de equilibrio
+        fig_scatter.add_hline(y=0, line_dash="dash", line_color="red", annotation_text="Punto de Equilibrio")
+        st.plotly_chart(fig_scatter, use_container_width=True)
         
-        fig_w = go.Figure(go.Waterfall(
+    with col_r2:
+        st.markdown("**🚨 Ciudades Críticas (Menor Utilidad)**")
+        st.dataframe(
+            df_city_ops.sort_values('Utilidad').head(10)[['Poblacion_Real', 'Venta', 'Utilidad']]
+            .style.format("${:,.0f}").background_gradient(cmap='RdYlGn', subset=['Utilidad']),
+            use_container_width=True
+        )
+
+# ==============================================================================
+# TAB 4: MAPA DE EXPANSION (CORREGIDO)
+# ==============================================================================
+with tabs[3]:
+    st.subheader("Mapa Territorial de Crecimiento")
+    st.markdown("El tamaño representa la Venta Actual. El color representa el **Crecimiento %** (Verde = Creciendo, Rojo = Cayendo).")
+    
+    # Preparar Datos para Treemap con la corrección del TypeError
+    df_map = df_city_ops.copy()
+    
+    # Traer venta anterior para calcular crecimiento por ciudad
+    df_map_ant = df_ant.groupby('Poblacion_Real')['VALOR_VENTA_O'].sum().reset_index().rename(columns={'VALOR_VENTA_O': 'Venta_Ant'})
+    df_map = pd.merge(df_map, df_map_ant, on='Poblacion_Real', how='left').fillna(0)
+    df_map['Crecimiento'] = df_map['Venta'] - df_map['Venta_Ant']
+    df_map['Crecimiento_Pct'] = (df_map['Crecimiento'] / df_map['Venta_Ant']).replace([np.inf, -np.inf], 0)
+    
+    # --- CORRECCIÓN CLAVE PARA TYPEERROR ---
+    # En lugar de px.Constant en el path, creamos una columna real
+    df_map['Pais'] = 'COLOMBIA' 
+    
+    # Filtramos ventas cero para limpiar el gráfico
+    df_map = df_map[df_map['Venta'] > 0]
+    
+    fig_tree = px.treemap(
+        df_map,
+        path=['Pais', 'Hub_Logistico', 'Poblacion_Real'], # Usamos la columna 'Pais'
+        values='Venta',
+        color='Crecimiento_Pct',
+        color_continuous_scale='RdYlGn',
+        midpoint=0,
+        custom_data=['Crecimiento', 'Utilidad']
+    )
+    
+    fig_tree.update_traces(hovertemplate='<b>%{label}</b><br>Venta: %{value:$,.0f}<br>Crecimiento: %{color:.1%}<br>Utilidad: %{customdata[1]:$,.0f}')
+    st.plotly_chart(fig_tree, use_container_width=True, height=600)
+
+# ==============================================================================
+# TAB 5: RETENCIÓN
+# ==============================================================================
+with tabs[4]:
+    st.subheader("Análisis de Fuga (Churn) y Nuevos Clientes")
+    
+    cli_act = set(df_act['Key_Nit'])
+    cli_ant = set(df_ant['Key_Nit'])
+    
+    lost = cli_ant - cli_act
+    new = cli_act - cli_ant
+    retained = cli_act.intersection(cli_ant)
+    
+    col_ch1, col_ch2 = st.columns([1, 2])
+    
+    with col_ch1:
+        st.metric("Retenidos", len(retained))
+        st.metric("Nuevos", len(new), delta=len(new), delta_color="normal")
+        st.metric("Perdidos", len(lost), delta=-len(lost), delta_color="inverse")
+        
+    with col_ch2:
+        if len(lost) > 0:
+            st.markdown("##### ⚠️ Top Clientes Perdidos (Mayor Venta Año Anterior)")
+            df_lost_val = df_ant[df_ant['Key_Nit'].isin(lost)].groupby(['NOMBRE_CLIENTE_I', 'Poblacion_Real'])['VALOR_VENTA_O'].sum().reset_index()
+            df_lost_val = df_lost_val.sort_values('VALOR_VENTA_O', ascending=False).head(10)
+            st.dataframe(df_lost_val.style.format({'VALOR_VENTA_O': '${:,.0f}'}), use_container_width=True)
+        else:
+            st.success("¡Excelente! No hay clientes perdidos en este periodo.")
+
+# ==============================================================================
+# TAB 6: SIMULADOR BATCHING
+# ==============================================================================
+with tabs[5]:
+    st.subheader("Simulador de Ahorro Operativo")
+    
+    col_sim1, col_sim2 = st.columns(2)
+    with col_sim1:
+        ahorro_pct = st.slider("Meta de reducción de viajes (Batching)", 0, 50, 20, format="%d%%") / 100
+        ahorro_dinero = costo_total * ahorro_pct
+        nueva_utilidad = utilidad + ahorro_dinero
+        
+        st.metric("Dinero Liberado (Ahorro)", f"${ahorro_dinero/1e6:,.1f}M")
+        
+        fig_b = go.Figure(go.Waterfall(
             measure=["relative", "relative", "total"],
-            x=["Utilidad Actual", "Ahorro Logístico", "Utilidad Potencial"],
-            y=[ut_neta, ahorro, ut_neta+ahorro],
-            text=[f"${ut_neta/1e6:.1f}M", f"+${ahorro/1e6:.1f}M", f"${(ut_neta+ahorro)/1e6:.1f}M"],
+            x=["Utilidad Actual", "Ahorro Logístico", "Nueva Utilidad"],
+            y=[utilidad, ahorro_dinero, nueva_utilidad],
             decreasing={"marker":{"color":"#ef4444"}}, increasing={"marker":{"color":"#10b981"}}, totals={"marker":{"color":"#0f172a"}}
         ))
-        st.plotly_chart(fig_w, use_container_width=True)
+        st.plotly_chart(fig_b, use_container_width=True)
         
-    with col_b2:
-        top_freq = df_act.groupby(['Key_Nit', 'CLIENTE'])['Pedido_ID'].nunique().reset_index().sort_values('Pedido_ID', ascending=False).head(5)
-        st.markdown("**Top Clientes Candidatos a Batching**")
-        st.table(top_freq.rename(columns={'Pedido_ID':'# Despachos'}))
+    with col_sim2:
+        st.info("💡 **Insight:** Agrupar pedidos de clientes frecuentes reduce el costo de servir sin afectar la venta.")
+        # Top clientes por frecuencia
+        freq = df_act.groupby('NOMBRE_CLIENTE_I')['Pedido_ID'].nunique().reset_index().sort_values('Pedido_ID', ascending=False).head(5)
+        st.markdown("**Clientes con más despachos (Candidatos):**")
+        st.table(freq.rename(columns={'Pedido_ID': '# Envíos'}))
 
-# --- TAB 4: DRIVERS ---
-with tabs[3]:
-    col_d1, col_d2 = st.columns([3,1])
-    with col_d1:
-        dim = st.radio("Ver impacto por:", ["Marca_Master", "Hub_Logistico"], horizontal=True)
-        g_act = df_act.groupby(dim)['VALOR'].sum()
-        g_ant = df_ant.groupby(dim)['VALOR'].sum()
-        df_diff = pd.DataFrame({'Act': g_act, 'Ant': g_ant}).fillna(0)
-        df_diff['Diff'] = df_diff['Act'] - df_diff['Ant']
-        df_diff = df_diff.sort_values('Diff', ascending=False)
-        
-        best = df_diff.index[0] if not df_diff.empty else "N/A"
-        val_best = df_diff['Diff'].iloc[0] if not df_diff.empty else 0
-        st.markdown(f"<div class='analysis-box'>Mayor impulsor: **{best}** (+${val_best/1e6:,.1f}M).</div>", unsafe_allow_html=True)
-
-        fig_d = go.Figure(go.Waterfall(orientation="v", measure=["relative"]*len(df_diff), x=df_diff.index, y=df_diff['Diff'],
-                                      decreasing={"marker":{"color":"#ef4444"}}, increasing={"marker":{"color":"#10b981"}}))
-        st.plotly_chart(fig_d, use_container_width=True)
-    
-    with col_d2:
-        st.dataframe(df_diff[['Diff']].style.format({"Diff": "${:,.0f}"}).background_gradient(cmap='RdYlGn'), use_container_width=True)
-
-# --- TAB 5: RETENCIÓN ---
-with tabs[4]:
-    c_act = set(df_act['Key_Nit']); c_ant = set(df_ant['Key_Nit'])
-    lost = c_ant - c_act; new = c_act - c_ant
-    
-    val_lost = df_ant[df_ant['Key_Nit'].isin(lost)]['VALOR'].sum() if lost else 0
-    txt_churn = f"⚠️ Se han fugado **{len(lost)} clientes**. Venta perdida: **${val_lost/1e6:,.1f}M**." if lost else "✅ Cero fugas."
-        
-    st.markdown(f"<div class='analysis-box'>{txt_churn}</div>", unsafe_allow_html=True)
-    
-    c1,c2,c3 = st.columns(3)
-    c1.metric("Retenidos", len(c_act.intersection(c_ant))); c2.metric("Nuevos", len(new)); c3.metric("Perdidos", len(lost))
-    
-    if lost:
-        st.markdown("**Clientes Perdidos (Top 10)**")
-        df_lost = df_ant[df_ant['Key_Nit'].isin(lost)].groupby(['CLIENTE','Poblacion_Real'])['VALOR'].sum().sort_values(ascending=False).head(10).to_frame()
-        st.dataframe(df_lost.style.format({"VALOR": "${:,.0f}"}), use_container_width=True)
-
-# --- TAB 6: GEO ESTRATEGIA (CORREGIDO TYPEERROR) ---
-with tabs[5]:
-    st.markdown(f"""<div class="analysis-box">
-    <strong>Volumen (Tamaño)</strong> vs <strong>Rentabilidad (Color)</strong>.
-    <br>• <strong style='color:green'>VERDE:</strong> Ganancia. <strong style='color:red'>ROJO:</strong> Pérdida operativa.
-    <br>ℹ️ Nota: Las zonas en <strong>'MOSTRADOR'</strong> tendrán $0 costo y alta utilidad (verde intenso).
-    </div>""", unsafe_allow_html=True)
-    
-    # Preparación de datos segura para evitar TypeError
-    df_tree = df_city.copy()
-    df_tree = df_tree[df_tree['Venta'] > 0]
-    
-    # Asegurar tipos de datos y eliminar NaNs críticos
-    df_tree['Hub_Logistico'] = df_tree['Hub_Logistico'].fillna('SIN DEFINIR').astype(str)
-    df_tree['Poblacion_Real'] = df_tree['Poblacion_Real'].fillna('SIN DEFINIR').astype(str)
-    df_tree['Utilidad'] = pd.to_numeric(df_tree['Utilidad'], errors='coerce').fillna(0)
-    
-    if not df_tree.empty:
-        # Solo graficar si hay datos
-        fig_t = px.treemap(df_tree, path=[px.Constant("Colombia"), 'Hub_Logistico', 'Poblacion_Real'], 
-                           values='Venta', color='Utilidad', color_continuous_scale='RdYlGn', midpoint=0)
-        st.plotly_chart(fig_t, use_container_width=True)
-    else:
-        st.warning("No hay datos suficientes para generar el mapa geográfico.")
-
-# --- TAB 7: CONCLUSIÓN ---
-with tabs[6]:
-    st.subheader("🤖 Master Brain Diagnosis")
-    status = "CRECIMIENTO" if delta_v > 0 else "CONTRACCIÓN"
-    color_st = "green" if delta_v > 0 else "red"
-    
-    st.markdown(f"""
-    ### 1. Resumen Ejecutivo
-    Operación en **<span style='color:{color_st}'>{status} ({delta_v:+.1f}%)</span>**.
-    
-    ### 2. Situación Financiera
-    Costo logístico: **{(costo_total/venta)*100:.1f}%** de la venta.
-    Margen Neto Real: **{margen_real:.1f}%**.
-    
-    ### 3. Recomendaciones:
-    1.  **Análisis de Categorías:** Revisa la pestaña "Peso Categorías" para ver qué líneas están destruyendo valor (barras rojas en el Waterfall).
-    2.  **Optimización:** Implementar *Batching* en **{top_freq.iloc[0]['CLIENTE'] if not top_freq.empty else 'Top Clientes'}**.
-    3.  **Geografía:** Atención urgente a **{top_loser['Poblacion_Real'] if not ciudades_perdida.empty else 'N/A'}**.
-    """, unsafe_allow_html=True)
+st.markdown("---")
+st.caption("Master Brain Ultra v4.0 | Growth Focus | Powered by Python & Streamlit")
