@@ -75,7 +75,7 @@ APP_CONFIG = {
     "productos_oportunidad_cl4": ['ESTUCOMAS', 'PINTULUX', 'KORAZA', 'VINILTEX', 'VINILICO'],
     "complementarios": {"exclude_super_categoria": "Pintuco", "presupuesto_pct": 0.10},
     "sub_meta_complementarios": {"nombre_marca_objetivo": "non-AN Third Party", "presupuesto_pct": 0.10},
-    "categorias_clave_venta": ['ABRACOL', 'YALE', 'SAINT GOBAIN', 'GOYA', 'ALLEGION', 'SEGUREX'],
+    "categorias_clave_venta": ['ABRACOL', 'YALE', 'SAINT GOBAIN', 'GOYA', 'ALLEGION', 'SEGUREX', 'ARTECOLA', 'ATLAS', 'INDUMA'],
     "presupuesto_mostradores": {"incremento_anual_pct": 0.10}
 }
 # Bloque DATA_CONFIG limpio
