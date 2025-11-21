@@ -15,7 +15,7 @@ st.set_page_config(
     page_title="Master Brain Ultra | Operations & Growth Hub", 
     page_icon="🧠", 
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
 # CSS Ejecutivo, Limpio y con Nuevos Estilos para Insights
@@ -188,9 +188,8 @@ try:
         df_raw.columns[13]: 'CODIGO_MARCA_N',
         df_raw.columns[14]: 'VALOR_VENTA_O'
     })
-    # INTENTO DE DETECTAR COLUMNA DÍA (Si existe en pos 2, usualmente)
+    # INTENTO DE DETECTAR COLUMNA DÍA
     if len(df_raw.columns) > 2:
-        # Verificamos si la columna 2 parece ser un día (1-31)
         if df_raw.iloc[:, 2].apply(lambda x: str(x).isnumeric()).all():
              df_raw['dia'] = df_raw.iloc[:, 2].astype(int)
         else:
@@ -223,7 +222,6 @@ with st.spinner("⚙️ Ejecutando Data Fusion Engine (Ventas + Geo + Logística
         df_full['Vendedor'] = 'GENERAL'
 
 # --- FILTRO YTD ESTRICTO (LO MEJOR DE LO MEJOR) ---
-# Esto asegura que compares Peras con Peras a la fecha de HOY
 today = date.today()
 current_month = today.month
 current_day = today.day
@@ -233,7 +231,6 @@ def es_ytd_valido(row):
     if row['mes'] < current_month: return True
     # Si el mes es el actual, revisamos el día.
     if row['mes'] == current_month:
-        # Si tenemos columna dia real, filtramos. Si es dummy (15), dejamos pasar todo el mes si hoy > 15.
         return row['dia'] <= current_day
     return False
 
@@ -249,7 +246,7 @@ st.title("🧠 Master Brain Ultra | Strategic Operations Center")
 st.markdown(f"**Informe de Inteligencia Operacional y Crecimiento** | Corte de Datos: **{today.strftime('%d de %B')}** (Comparativo YTD Real)")
 st.divider()
 
-# --- SIDEBAR RECARGADO ---
+# --- SIDEBAR RECARGADO (CON FILTROS DE MARCA Y CATEGORÍA) ---
 with st.sidebar:
     st.header("🎛️ Centro de Control")
     
@@ -262,6 +259,18 @@ with st.sidebar:
         anio_base = c_s2.selectbox("Año Base", list_base if list_base else anios, index=0)
     
     st.markdown("---")
+    st.subheader("🔎 Filtros de Portafolio")
+    st.caption("Crucial para análisis de rentabilidad por línea")
+    
+    # --- NUEVOS FILTROS SOLICITADOS ---
+    all_brands = sorted(df_master['Marca_Master'].unique())
+    sel_brands = st.multiselect("Filtrar Marcas", all_brands, placeholder="Todas las Marcas")
+    
+    all_cats = sorted(df_master['CATEGORIA_L'].astype(str).unique())
+    sel_cats = st.multiselect("Filtrar Categorías", all_cats, placeholder="Todas las Categorías")
+    # ----------------------------------
+
+    st.markdown("---")
     st.subheader("🧪 Simulador Operativo")
     st.caption("Ajusta parámetros para ver tu Rentabilidad Real")
     
@@ -270,13 +279,20 @@ with st.sidebar:
     costo_pedido_nal = st.number_input("Costo Logístico Nacional ($)", value=45000, step=5000, help="Costo flota/flete para foráneos")
     
     st.markdown("---")
-    st.caption("SEGMENTACIÓN")
+    st.caption("SEGMENTACIÓN GEO")
     hubs_sel = st.multiselect("Filtrar Hubs", df_master['Hub_Logistico'].unique(), default=df_master['Hub_Logistico'].unique())
     sel_city = st.multiselect("Filtrar Ciudades", sorted(df_master['Poblacion_Real'].unique()))
 
 # --- FILTRADO GLOBAL ---
-df_f = df_master[df_master['Hub_Logistico'].isin(hubs_sel)].copy()
+df_f = df_master.copy()
+
+# Aplicar Filtros Geo
+if hubs_sel: df_f = df_f[df_f['Hub_Logistico'].isin(hubs_sel)]
 if sel_city: df_f = df_f[df_f['Poblacion_Real'].isin(sel_city)]
+
+# Aplicar Filtros Portafolio (NUEVO)
+if sel_brands: df_f = df_f[df_f['Marca_Master'].isin(sel_brands)]
+if sel_cats: df_f = df_f[df_f['CATEGORIA_L'].isin(sel_cats)]
 
 df_act = df_f[df_f['anio'] == anio_obj]
 df_ant = df_f[df_f['anio'] == anio_base]
@@ -288,7 +304,6 @@ vta_ant = df_ant['VALOR_VENTA_O'].sum()
 diff_pct = ((vta_act - vta_ant) / vta_ant * 100) if vta_ant > 0 else 0
 
 # 2. Operaciones (Proxy de Pedidos: Combinación Clave-Mes-Día única)
-# Asumimos que un cliente comprando en una fecha es UN despacho/factura
 df_act['Pedido_ID'] = df_act['Key_Nit'].astype(str) + '-' + df_act['mes'].astype(str) + '-' + df_act['dia'].astype(str)
 num_pedidos = df_act['Pedido_ID'].nunique()
 freq_compra = num_pedidos / df_act['Key_Nit'].nunique() if df_act['Key_Nit'].nunique() > 0 else 0
@@ -299,8 +314,7 @@ def calcular_costo_fila(row):
         return costo_pedido_local
     return costo_pedido_nal
 
-# Estimamos costo total multiplicando costo unitario por número de pedidos únicos
-# Para hacerlo rápido, lo hacemos agrupado
+# Cálculo optimizado de costos
 df_pedidos_unicos = df_act[['Pedido_ID', 'Hub_Logistico']].drop_duplicates()
 df_pedidos_unicos['Costo_Envio'] = df_pedidos_unicos.apply(calcular_costo_fila, axis=1)
 costo_servir_total = df_pedidos_unicos['Costo_Envio'].sum()
@@ -339,7 +353,7 @@ tabs = st.tabs([
     "📝 AI Insights (Resumen)"
 ])
 
-# TAB 1: RENTABILIDAD
+# TAB 1: RENTABILIDAD (CORREGIDO FORMATO DATA FRAME)
 with tabs[0]:
     st.subheader("Análisis de Costo de Servir por Población")
     col_r1, col_r2 = st.columns([2,1])
@@ -374,9 +388,18 @@ with tabs[0]:
     with col_r2:
         st.markdown("**Top Ciudades: Menor Margen**")
         st.caption("Ciudades donde el flete se come la ganancia. Revisar precios o frecuencias.")
+        
+        # --- FIX DEL ERROR ANTERIOR: Diccionario de Formatos Específico ---
+        format_dict = {
+            'Venta': '${:,.0f}',
+            'Costo_Total_Logistica': '${:,.0f}',
+            'Utilidad_Neta': '${:,.0f}'
+            # Poblacion_Real NO se formatea porque es texto
+        }
+        
         st.dataframe(
             df_city_ops.sort_values('Utilidad_Neta').head(10)[['Poblacion_Real', 'Venta', 'Costo_Total_Logistica', 'Utilidad_Neta']]
-            .style.format("${:,.0f}").background_gradient(cmap='RdYlGn', subset=['Utilidad_Neta']),
+            .style.format(format_dict).background_gradient(cmap='RdYlGn', subset=['Utilidad_Neta']),
             use_container_width=True
         )
 
@@ -461,32 +484,40 @@ with tabs[3]:
 with tabs[4]:
     st.subheader("Estrategia Territorial")
     # Treemap para ver Jerarquia: Hub -> Ciudad -> Venta
-    fig_tree = px.treemap(
-        df_city_ops, 
-        path=[px.Constant("Territorio"), 'Hub_Logistico', 'Poblacion_Real'], 
-        values='Venta',
-        color='Utilidad_Neta',
-        color_continuous_scale='RdYlGn',
-        midpoint=0,
-        title="Mapa de Calor: Tamaño (Ventas) vs. Color (Utilidad Real)"
-    )
-    st.plotly_chart(fig_tree, use_container_width=True)
+    # Si los datos filtrados quedan vacíos (por ejemplo al filtrar una marca que no se vende en cierta ciudad)
+    if not df_city_ops.empty:
+        fig_tree = px.treemap(
+            df_city_ops, 
+            path=[px.Constant("Territorio"), 'Hub_Logistico', 'Poblacion_Real'], 
+            values='Venta',
+            color='Utilidad_Neta',
+            color_continuous_scale='RdYlGn',
+            midpoint=0,
+            title="Mapa de Calor: Tamaño (Ventas) vs. Color (Utilidad Real)"
+        )
+        st.plotly_chart(fig_tree, use_container_width=True)
+    else:
+        st.warning("No hay datos para generar el mapa con los filtros actuales.")
 
 # TAB 6: AI INSIGHTS
 with tabs[5]:
     st.subheader("📝 Informe Ejecutivo Automático (AI Generated)")
     
-    # Lógica de Texto
+    # Lógica de Texto Dinámico
     trend_txt = "CRECIMIENTO SÓLIDO" if diff_pct > 5 else "ESTABILIDAD" if diff_pct > -5 else "CONTRACCIÓN"
     color_trend = "green" if diff_pct > 0 else "red"
     
-    top_hub = df_city_ops.groupby('Hub_Logistico')['Utilidad_Neta'].sum().idxmax()
-    low_hub = df_city_ops.groupby('Hub_Logistico')['Utilidad_Neta'].sum().idxmin()
+    if not df_city_ops.empty:
+        top_hub = df_city_ops.groupby('Hub_Logistico')['Utilidad_Neta'].sum().idxmax()
+        low_hub = df_city_ops.groupby('Hub_Logistico')['Utilidad_Neta'].sum().idxmin()
+    else:
+        top_hub = "N/A"
+        low_hub = "N/A"
     
     st.markdown(f"""
     <div class="insight-box">
         <span class="insight-title">1. DIAGNÓSTICO GLOBAL</span>
-        La operación muestra una tendencia de <strong style="color:{color_trend}">{trend_txt}</strong> con una variación del 
+        La operación (bajo filtros actuales) muestra una tendencia de <strong style="color:{color_trend}">{trend_txt}</strong> con una variación del 
         <strong>{diff_pct:+.1f}%</strong> YTD. La utilidad neta operativa estimada es del <strong>{margen_neto_real_pct:.1f}%</strong>, 
         después de descontar un gasto logístico aproximado de <strong>${costo_servir_total/1e6:,.1f} Millones</strong>.
     </div>
@@ -508,4 +539,4 @@ with tabs[5]:
 
 # Footer
 st.markdown("---")
-st.caption("Master Brain Ultra v3.0 | Strategic Intelligence | Datos Confidenciales")
+st.caption("Master Brain Ultra v3.1 | Strategic Intelligence | Datos Confidenciales")
