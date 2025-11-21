@@ -1,6 +1,3 @@
-# ==============================================================================
-# 🧠 MASTER BRAIN V.ULTRA - CENTRO DE ESTRATEGIA & LOGÍSTICA
-# ==============================================================================
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -9,414 +6,438 @@ import numpy as np
 import unicodedata
 import io
 import dropbox
-import toml
-
-st.set_page_config(page_title="Master Brain Estratégico", page_icon="♟️", layout="wide")
+import re
 
 # ==============================================================================
-# 🎨 ESTILOS DE ALTO NIVEL (CSS)
+# 🧠 CONFIGURACIÓN MAESTRA Y ESTILOS
 # ==============================================================================
+st.set_page_config(page_title="Master Brain Ultra - Estrategia Real", page_icon="♟️", layout="wide")
+
 st.markdown("""
 <style>
+    /* Estilo de Tarjetas Métricas */
     .metric-card {
-        background: linear-gradient(to bottom right, #ffffff, #f8f9fa);
-        border-left: 6px solid #003865;
+        background: linear-gradient(to bottom right, #ffffff, #f0f2f6);
+        border-left: 5px solid #003865;
         padding: 20px;
-        border-radius: 10px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        margin-bottom: 10px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        margin-bottom: 15px;
     }
-    h1, h2, h3 { color: #003865; font-family: 'Helvetica', sans-serif; font-weight: 700; }
-    .stDataFrame { border: 1px solid #ddd; border-radius: 5px; }
-    div[data-testid="stMetricValue"] { font-size: 28px; color: #0058A7; }
-    div[data-testid="stMetricDelta"] { font-size: 16px; }
+    h1, h2, h3 { color: #003865; font-family: 'Arial', sans-serif; font-weight: 700; }
+    
+    /* Ajustes de Tablas */
+    .stDataFrame { border: 1px solid #e0e0e0; border-radius: 5px; }
+    
+    /* Métricas Grandes */
+    div[data-testid="stMetricValue"] { font-size: 26px; color: #0058A7; font-weight: bold; }
+    div[data-testid="stMetricDelta"] { font-size: 14px; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 🔧 MOTOR DE INTELIGENCIA (FUNCIONES DE LIMPIEZA Y LÓGICA)
+# 🔧 MOTOR DE INTELIGENCIA 1: LIMPIEZA DE TEXTO
 # ==============================================================================
 def normalizar_texto(texto):
+    """Limpia textos para comparaciones (quita tildes, mayúsculas, espacios extra)."""
     if not isinstance(texto, str): return str(texto) if texto is not None else ""
     try:
         texto = str(texto)
         texto_sin_tildes = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
-        return texto_sin_tildes.upper().replace('-', ' ').replace('_', ' ').replace('.', '').strip()
-    except: return str(texto)
+        # Mantenemos solo letras y números para nombres, eliminamos caracteres raros
+        return texto_sin_tildes.upper().strip()
+    except: return ""
 
-def clasificar_marca_estricta(fila):
+def limpiar_nit(nit):
+    """Limpia el NIT/ID para asegurar el cruce (solo deja números)."""
+    if pd.isna(nit): return "0"
+    s_nit = str(nit)
+    # Elimina puntos, comas, guiones y espacios, dejando solo dígitos
+    s_limpio = re.sub(r'[^0-9]', '', s_nit)
+    return s_limpio if s_limpio else "0"
+
+# ==============================================================================
+# 🔧 MOTOR DE INTELIGENCIA 2: LÓGICA DE MARCAS (LA SOLICITUD CLAVE)
+# ==============================================================================
+def clasificar_marca_ultra(fila):
     """
-    LÓGICA MAESTRA DE CATEGORIZACIÓN:
-    1. Busca en una 'Lista Blanca' (ABRACOL, INDUMA, etc.)
-    2. Si encuentra alguna, asigna esa marca.
-    3. Si NO encuentra ninguna, asigna automáticamente 'PINTUCO'.
+    LÓGICA DE SEGREGACIÓN REAL:
+    1. Busca Marcas Estratégicas (Independientes).
+    2. Busca explícitamente PINTUCO (o sus submarcas clave).
+    3. Todo lo demás se va a 'OTROS' (Accesorios, genéricos, etc).
     """
-    # Concatenamos todo para buscar (Marca + Categoria + Articulo)
-    texto_busqueda = f"{normalizar_texto(fila.get('marca_producto', ''))} {normalizar_texto(fila.get('categoria_producto', ''))} {normalizar_texto(fila.get('nombre_articulo', ''))}"
+    # Unimos Marca + Categoria + Nombre para buscar palabras clave
+    marca_original = normalizar_texto(fila.get('marca_producto', ''))
+    categoria = normalizar_texto(fila.get('categoria_producto', ''))
+    articulo = normalizar_texto(fila.get('nombre_articulo', ''))
     
-    # TU LISTA BLANCA (Lo que NO es Pintuco)
-    lista_blanca = [
+    texto_busqueda = f"{marca_original} {categoria} {articulo}"
+    
+    # --- NIVEL 1: MARCAS ESTRATÉGICAS (LISTA BLANCA) ---
+    # Estas se separan SIEMPRE.
+    lista_estrategica = [
         'ABRACOL', 'INDUMA', 'YALE', 'ARTECOLA', 'GOYA', 'ATLAS', 
         'SAINT GOBAIN', 'ALLEGION', 'SEGUREX', 'POLVOS', 'DELTA', 'MASTERD'
     ]
     
-    for marca in lista_blanca:
+    for marca in lista_estrategica:
         if marca in texto_busqueda:
-            return marca # ¡Encontrado! Es una marca estratégica separada
-            
-    return 'PINTUCO' # Si no está en la lista blanca, ES PINTUCO (Por defecto)
+            return marca # ¡Es una marca estratégica!
+
+    # --- NIVEL 2: PINTUCO PURO ---
+    # Si no es estratégica, verificamos si es realmente Pintuco.
+    # Agregamos palabras clave que identifican productos Pintuco.
+    lista_pintuco_keywords = ['PINTUCO', 'TERINSA', 'ICO', 'VINILTEX', 'KORAZA', 'DOMESTICO', 'CONSTRUCCION']
+    
+    # Primero miramos si la marca original dice explícitamente PINTUCO
+    if 'PINTUCO' in marca_original:
+        return 'PINTUCO'
+    
+    # Si no, buscamos en el texto completo
+    for kw in lista_pintuco_keywords:
+        if kw in texto_busqueda:
+            return 'PINTUCO'
+
+    # --- NIVEL 3: BOLSA DE "OTROS" ---
+    # Si no es estratégica y no dice Pintuco por ningún lado, es OTROS.
+    return 'OTROS'
 
 # ==============================================================================
-# 📥 CARGADOR DE CARTERA (LÓGICA EXACTA DE TU EJEMPLO)
+# 📥 MOTOR DE CONEXIÓN DROPBOX (CARTERA & LOGÍSTICA)
 # ==============================================================================
-@st.cache_data(ttl=600)
-def cargar_cartera_dropbox_exacta():
-    """
-    Usa TU lógica probada para leer cartera_detalle.csv desde Dropbox.
-    """
+@st.cache_data(ttl=900)
+def cargar_cartera_logistica():
+    """Descarga cartera_detalle.csv para obtener UBICACIÓN y RIESGO."""
     try:
-        # Recuperar credenciales (Manejo de errores si no están en secrets)
+        # Intentar obtener secretos
         try:
             APP_KEY = st.secrets["dropbox"]["app_key"]
             APP_SECRET = st.secrets["dropbox"]["app_secret"]
             REFRESH_TOKEN = st.secrets["dropbox"]["refresh_token"]
         except:
-            # Fallback para entornos locales sin secrets configurados igual
+            st.warning("⚠️ No se detectaron credenciales de Dropbox en secrets.toml.")
             return pd.DataFrame()
 
         with dropbox.Dropbox(app_key=APP_KEY, app_secret=APP_SECRET, oauth2_refresh_token=REFRESH_TOKEN) as dbx:
-            path_archivo_dropbox = '/data/cartera_detalle.csv'
-            metadata, res = dbx.files_download(path=path_archivo_dropbox)
+            # Ruta exacta
+            metadata, res = dbx.files_download(path='/data/cartera_detalle.csv')
             contenido_csv = res.content.decode('latin-1')
 
-            nombres_columnas_originales = [
-                'Serie', 'Numero', 'Fecha Documento', 'Fecha Vencimiento', 'Cod Cliente',
-                'NombreCliente', 'Nit', 'Poblacion', 'Provincia', 'Telefono1', 'Telefono2',
-                'NomVendedor', 'Entidad Autoriza', 'E-Mail', 'Importe', 'Descuento',
-                'Cupo Aprobado', 'Dias Vencido'
+            # Nombres de columnas según tu imagen/estructura previa
+            cols = [
+                'Serie', 'Numero', 'FechaDoc', 'FechaVenc', 'CodCliente',
+                'NombreCliente', 'Nit', 'Poblacion', 'Provincia', 'Tel1', 'Tel2',
+                'Vendedor', 'Entidad', 'Email', 'Importe', 'Descuento',
+                'Cupo', 'DiasVencido'
             ]
-
-            df = pd.read_csv(io.StringIO(contenido_csv), header=None, names=nombres_columnas_originales, sep='|', engine='python')
             
-            # --- LIMPIEZA BÁSICA ---
-            # Normalizar NIT para cruce (Quitar puntos, espacios)
-            df['cliente_id'] = df['Nit'].apply(normalizar_texto)
+            df = pd.read_csv(io.StringIO(contenido_csv), header=None, names=cols, sep='|', engine='python')
             
-            # Convertir numéricos clave
+            # LIMPIEZA CRÍTICA PARA EL CRUCE
+            # Usamos limpiar_nit para dejar solo números puros (ej: 890900123)
+            df['Key_Nit'] = df['Nit'].apply(limpiar_nit)
+            
+            # Convertir numéricos
             df['Importe'] = pd.to_numeric(df['Importe'], errors='coerce').fillna(0)
-            df['Dias Vencido'] = pd.to_numeric(df['Dias Vencido'], errors='coerce').fillna(0)
+            df['DiasVencido'] = pd.to_numeric(df['DiasVencido'], errors='coerce').fillna(0)
             
-            # Agrupar por Cliente para el cruce (Necesitamos 1 registro por cliente con sus datos logísticos)
-            # Lógica: Tomamos la Población más frecuente y el Máximo de Días Vencidos
-            df_maestro = df.groupby('cliente_id').agg({
-                'Poblacion': lambda x: x.mode()[0] if not x.mode().empty else 'SIN POBLACION',
-                'Dias Vencido': 'max', # El peor día de vencimiento define el riesgo
-                'Importe': 'sum'       # Deuda Total
+            # --- AGRUPACIÓN POR CLIENTE ---
+            # Un cliente tiene muchas facturas. Necesitamos SU UBICACIÓN ÚNICA.
+            # Lógica: Tomamos la población más frecuente (Moda) y el riesgo máximo.
+            
+            def obtener_moda(x):
+                m = pd.Series.mode(x)
+                return m.values[0] if not m.empty else "SIN_INFO"
+
+            df_agrupado = df.groupby('Key_Nit').agg({
+                'Poblacion': obtener_moda,     # Ubicación logística
+                'DiasVencido': 'max',          # Peor día de mora (Riesgo)
+                'Importe': 'sum',              # Deuda total actual
+                'Cupo': 'max'                  # Cupo asignado
             }).reset_index()
             
-            df_maestro.rename(columns={'Dias Vencido': 'Max_Dias_Mora', 'Importe': 'Deuda_Total'}, inplace=True)
-            df_maestro['Poblacion'] = df_maestro['Poblacion'].apply(normalizar_texto)
+            # Normalizar población para filtros
+            df_agrupado['Poblacion'] = df_agrupado['Poblacion'].apply(normalizar_texto)
+            df_agrupado.rename(columns={'DiasVencido': 'Dias_Mora_Real', 'Importe': 'Deuda_Total'}, inplace=True)
             
-            return df_maestro
+            return df_agrupado
 
     except Exception as e:
-        st.error(f"Error leyendo Dropbox con la lógica exacta: {e}")
+        st.error(f"❌ Error conectando con Dropbox: {e}")
         return pd.DataFrame()
 
 # ==============================================================================
-# 1. PROCESAMIENTO Y FUSIÓN DE DATOS
+# 🚀 LOGICA PRINCIPAL DE DATOS
 # ==============================================================================
+
+# Verificar si hay datos de ventas previos
 if 'df_ventas' not in st.session_state:
-    st.warning("⚠️ Por favor inicia sesión en el 'Resumen Mensual' primero para cargar las ventas.")
+    st.warning("⚠️ Por favor carga el archivo de ventas en la página de inicio primero.")
     st.stop()
 
-# --- A. PREPARACIÓN VENTAS ---
+# 1. PREPARAR VENTAS
 df_raw = st.session_state.df_ventas.copy()
-filtro_neto = 'FACTURA|NOTA.*CREDITO'
+
+# Filtro solo Facturas y Notas Crédito (Venta Neta)
+filtro_docs = 'FACTURA|NOTA.*CREDITO'
 df_raw['TipoDocumento'] = df_raw['TipoDocumento'].astype(str)
-df = df_raw[df_raw['TipoDocumento'].str.contains(filtro_neto, na=False, case=False, regex=True)].copy()
+df = df_raw[df_raw['TipoDocumento'].str.contains(filtro_docs, case=False, regex=True)].copy()
 
-# Conversiones
-for col in ['valor_venta', 'unidades_vendidas', 'costo_unitario']:
-    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+# Conversiones numéricas
+cols_num = ['valor_venta', 'unidades_vendidas', 'costo_unitario']
+for c in cols_num:
+    df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
 
+# Calcular Margen
 df['Margen_Pesos'] = df['valor_venta'] - (df['unidades_vendidas'] * df['costo_unitario'])
 
-# --- B. APLICAR CATEGORIZACIÓN "LISTA BLANCA O PINTUCO" ---
-df['Marca_Master'] = df.apply(clasificar_marca_estricta, axis=1)
+# Crear llave de cruce limpia en Ventas
+df['Key_Nit'] = df['cliente_id'].apply(limpiar_nit)
 
-# --- C. CRUCE CON CARTERA (USANDO TU LÓGICA) ---
-with st.spinner("🔄 Conectando con Dropbox y cruzando datos..."):
-    df_cartera = cargar_cartera_dropbox_exacta()
+# 2. APLICAR NUEVA CLASIFICACIÓN DE MARCAS (ULTRA)
+df['Marca_Analisis'] = df.apply(clasificar_marca_ultra, axis=1)
 
-# Normalizar llave en ventas
-df['cliente_id'] = df['cliente_id'].apply(normalizar_texto)
+# 3. TRAER DATOS DE DROPBOX Y CRUZAR
+with st.spinner("🔄 Sincronizando con Dropbox (Logística y Riesgo)..."):
+    df_cartera = cargar_cartera_logistica()
 
-# Left Join: Ventas es la base, traemos datos de cartera si existen
 if not df_cartera.empty:
-    df_full = pd.merge(df, df_cartera, on='cliente_id', how='left')
-    df_full['Poblacion'] = df_full['Poblacion'].fillna('SIN INFO LOGISTICA')
-    df_full['Max_Dias_Mora'] = df_full['Max_Dias_Mora'].fillna(0)
-    df_full['Deuda_Total'] = df_full['Deuda_Total'].fillna(0)
+    # LEFT JOIN: Mantenemos todas las ventas, pegamos info de cartera donde coincida el NIT
+    df_full = pd.merge(df, df_cartera, on='Key_Nit', how='left')
+    
+    # Llenar huecos de clientes que compraron pero no tienen deuda actual (o no están en cartera)
+    df_full['Poblacion'] = df_full['Poblacion'].fillna('MOSTRADOR / SIN INFO')
+    df_full['Dias_Mora_Real'] = df_full['Dias_Mora_Real'].fillna(0)
 else:
+    st.warning("⚠️ No se pudo cargar Cartera. Usando datos solo de ventas (Sin población/riesgo).")
     df_full = df.copy()
-    df_full['Poblacion'] = 'ERROR CARGA'
-    df_full['Max_Dias_Mora'] = 0
+    df_full['Poblacion'] = 'SIN CONEXION'
+    df_full['Dias_Mora_Real'] = 0
 
 # ==============================================================================
-# 2. CONTROL DE MANDO (SIDEBAR)
+# 🎛️ SIDEBAR DE CONTROL
 # ==============================================================================
-st.sidebar.header("🎛️ Filtros Maestros")
+st.sidebar.header("🎛️ Panel de Control Master")
 st.sidebar.markdown("---")
 
-anios = sorted(df_full['anio'].unique(), reverse=True)
-anio_act = st.sidebar.selectbox("Año Análisis (Actual)", anios, index=0)
-anio_ant = st.sidebar.selectbox("Año Comparativo (Base)", [a for a in anios if a != anio_act] + ["Ninguno"], index=0)
+# Filtro de Años
+lista_anios = sorted(df_full['anio'].unique(), reverse=True)
+anio_actual = st.sidebar.selectbox("Año Principal (Análisis)", lista_anios, index=0)
+anio_base = st.sidebar.selectbox("Año Base (Comparativo)", [a for a in lista_anios if a != anio_actual] + ["Ninguno"], index=0)
 
-# Filtro Categorías
-cats = sorted(df_full['Marca_Master'].unique())
-sel_cats = st.sidebar.multiselect("Seleccionar Marcas/Categorías", cats, default=cats)
+st.sidebar.markdown("---")
 
-# Filtro Zonas
-zonas = ["TODAS"] + sorted(df_full['Poblacion'].unique())
-sel_zona = st.sidebar.selectbox("Filtrar por Población", zonas)
+# Filtro de Marcas (Usando la nueva clasificación)
+opciones_marcas = sorted(df_full['Marca_Analisis'].unique())
+sel_marcas = st.sidebar.multiselect("Filtrar Marcas", opciones_marcas, default=opciones_marcas)
 
-# --- APLICAR FILTROS ---
-df_fil = df_full[df_full['Marca_Master'].isin(sel_cats)].copy()
+# Filtro de Población (Logística)
+opciones_zonas = ["TODAS"] + sorted(df_full['Poblacion'].unique())
+sel_zona = st.sidebar.selectbox("Filtrar por Población (Logística)", opciones_zonas)
+
+# Filtro Vendedor
+opciones_vend = ["TODOS"] + sorted(df_full['nombre_vendedor'].astype(str).unique())
+sel_vend = st.sidebar.selectbox("Filtrar por Vendedor", opciones_vend)
+
+# APLICAR FILTROS
+df_filtrado = df_full[df_full['Marca_Analisis'].isin(sel_marcas)].copy()
+
 if sel_zona != "TODAS":
-    df_fil = df_fil[df_fil['Poblacion'] == sel_zona]
+    df_filtrado = df_filtrado[df_filtrado['Poblacion'] == sel_zona]
+if sel_vend != "TODOS":
+    df_filtrado = df_filtrado[df_filtrado['nombre_vendedor'] == sel_vend]
 
-df_act = df_fil[df_fil['anio'] == anio_act].copy()
-df_prev = df_fil[df_fil['anio'] == anio_ant].copy() if anio_ant != "Ninguno" else pd.DataFrame()
-
-# ==============================================================================
-# 3. TABLERO EJECUTIVO (KPIs)
-# ==============================================================================
-st.title("♟️ Master Brain: Análisis de Crecimiento Real")
-st.markdown(f"**Diagnóstico Estratégico:** {anio_act} vs {anio_ant if anio_ant != 'Ninguno' else 'N/A'}")
-
-col1, col2, col3, col4 = st.columns(4)
-
-v_act = df_act['valor_venta'].sum()
-v_prev = df_prev['valor_venta'].sum() if not df_prev.empty else 0
-crecimiento_abs = v_act - v_prev
-crecimiento_pct = (crecimiento_abs / v_prev * 100) if v_prev else 0
-
-m_act = df_act['Margen_Pesos'].sum()
-m_prev = df_prev['Margen_Pesos'].sum() if not df_prev.empty else 0
-margen_pct_act = (m_act / v_act * 100) if v_act else 0
-
-# Días Mora Ponderado (Solo de clientes con venta actual)
-dias_mora_prom = df_act[df_act['valor_venta']>0]['Max_Dias_Mora'].mean()
-
-with col1: 
-    st.metric("Ventas Totales", f"${v_act:,.0f}", f"{crecimiento_pct:+.1f}% ({crecimiento_abs/1e6:+.1f}M)")
-with col2: 
-    st.metric("Margen Bruto", f"${m_act:,.0f}", f"{(m_act - m_prev)/1e6:+.1f}M vs Año Ant")
-with col3: 
-    st.metric("Rentabilidad %", f"{margen_pct_act:.1f}%", f"{(margen_pct_act - (m_prev/v_prev*100 if v_prev else 0)):+.1f} pp")
-with col4: 
-    delta_color = "inverse" if dias_mora_prom > 30 else "normal"
-    st.metric("Días Mora Promedio", f"{dias_mora_prom:.0f} días", "Riesgo Cartera", delta_color=delta_color)
+# Separar DataFrames por año
+df_now = df_filtrado[df_filtrado['anio'] == anio_actual]
+df_hist = df_filtrado[df_filtrado['anio'] == anio_base] if anio_base != "Ninguno" else pd.DataFrame()
 
 # ==============================================================================
-# 4. ANÁLISIS PROFUNDO (PESTAÑAS)
+# 📊 TABLERO KPI EJECUTIVO
 # ==============================================================================
-tab1, tab2, tab3, tab4 = st.tabs([
-    "🚀 Anatomía del Crecimiento", 
-    "🗺️ Logística & Costo x Servir",
-    "💎 Share & Rentabilidad",
-    "🩸 Salud Financiera (Riesgo)"
+st.title("♟️ Master Brain: Crecimiento & Estrategia Real")
+st.markdown(f"**Diagnóstico:** {anio_actual} vs {anio_base if anio_base != 'Ninguno' else 'N/A'} | **Foco:** {sel_zona}")
+
+# Cálculos KPI
+venta_now = df_now['valor_venta'].sum()
+venta_hist = df_hist['valor_venta'].sum() if not df_hist.empty else 0
+diff_venta = venta_now - venta_hist
+perc_venta = (diff_venta / venta_hist * 100) if venta_hist else 0
+
+margen_now = df_now['Margen_Pesos'].sum()
+margen_hist = df_hist['Margen_Pesos'].sum() if not df_hist.empty else 0
+rent_now = (margen_now / venta_now * 100) if venta_now else 0
+rent_hist = (margen_hist / venta_hist * 100) if venta_hist else 0
+
+# Riesgo (Promedio ponderado de días mora de los clientes que compraron este año)
+riesgo_pond = df_now[df_now['valor_venta'] > 0]['Dias_Mora_Real'].mean()
+
+c1, c2, c3, c4 = st.columns(4)
+with c1: st.metric("Ventas Totales", f"${venta_now:,.0f}", f"{perc_venta:+.1f}% ({diff_venta/1e6:+.1f}M)")
+with c2: st.metric("Margen Bruto", f"${margen_now:,.0f}", f"{(margen_now - margen_hist)/1e6:+.1f}M vs Base")
+with c3: st.metric("Rentabilidad Real", f"{rent_now:.1f}%", f"{(rent_now - rent_hist):+.1f} pp")
+with c4: 
+    color_riesgo = "inverse" if riesgo_pond > 45 else "normal"
+    st.metric("Riesgo Cartera (Días)", f"{riesgo_pond:.0f} días", "Promedio Clientes Activos", delta_color=color_riesgo)
+
+# ==============================================================================
+# 📑 ANÁLISIS PROFUNDO (TABS)
+# ==============================================================================
+tab_growth, tab_log, tab_mix, tab_risk = st.tabs([
+    "🚀 Crecimiento Real (Sin Ruido)", 
+    "🗺️ Logística & Costo x Servir", 
+    "💎 Mix & Share", 
+    "🩸 Salud Financiera"
 ])
 
-# --- TAB 1: ANATOMÍA DEL CRECIMIENTO (LO MÁS IMPORTANTE) ---
-with tab1:
-    st.subheader("¿Qué impulsó (o frenó) realmente el crecimiento?")
-    st.markdown("Este gráfico desglosa el cambio en ventas. Muestra exactamente cuánto dinero aportó cada marca al resultado final.")
+# --- TAB 1: CRECIMIENTO REAL (WATERFALL) ---
+with tab_growth:
+    st.subheader("¿Quién está poniendo el dinero realmente?")
+    st.markdown("Este gráfico aísla **Pintuco Real** de las marcas **Estratégicas** y la bolsa de **Otros**.")
     
-    if not df_prev.empty:
-        # 1. Calcular ventas por marca ambos años
-        g_act = df_act.groupby('Marca_Master')['valor_venta'].sum().reset_index().rename(columns={'valor_venta':'Venta_Actual'})
-        g_prev = df_prev.groupby('Marca_Master')['valor_venta'].sum().reset_index().rename(columns={'valor_venta':'Venta_Anterior'})
+    if not df_hist.empty:
+        # Agrupar
+        g_now = df_now.groupby('Marca_Analisis')['valor_venta'].sum().reset_index().rename(columns={'valor_venta':'Venta_Act'})
+        g_hist = df_hist.groupby('Marca_Analisis')['valor_venta'].sum().reset_index().rename(columns={'valor_venta':'Venta_Ant'})
         
-        # 2. Merge y Calculo de Variación Absoluta
-        df_waterfall = pd.merge(g_act, g_prev, on='Marca_Master', how='outer').fillna(0)
-        df_waterfall['Variacion'] = df_waterfall['Venta_Actual'] - df_waterfall['Venta_Anterior']
-        df_waterfall['Contribucion_Pts'] = (df_waterfall['Variacion'] / v_prev) * 100 # Puntos porcentuales de crecimiento
+        df_w = pd.merge(g_now, g_hist, on='Marca_Analisis', how='outer').fillna(0)
+        df_w['Variacion'] = df_w['Venta_Act'] - df_w['Venta_Ant']
+        df_w = df_w.sort_values('Variacion', ascending=False)
         
-        # Ordenar por impacto absoluto
-        df_waterfall = df_waterfall.sort_values('Variacion', ascending=False)
+        col_g1, col_g2 = st.columns([2, 1])
         
-        col_w1, col_w2 = st.columns([2, 1])
-        
-        with col_w1:
-            # Gráfico Waterfall
+        with col_g1:
             fig_water = go.Figure(go.Waterfall(
                 name="Variación", orientation="v",
-                measure=["relative"] * len(df_waterfall),
-                x=df_waterfall['Marca_Master'],
+                measure=["relative"] * len(df_w),
+                x=df_w['Marca_Analisis'],
                 textposition="outside",
-                text=[f"${v/1e6:+.0f}M" for v in df_waterfall['Variacion']],
-                y=df_waterfall['Variacion'],
+                text=[f"${v/1e6:+.0f}M" for v in df_w['Variacion']],
+                y=df_w['Variacion'],
                 connector={"line":{"color":"rgb(63, 63, 63)"}},
                 decreasing={"marker":{"color":"#E74C3C"}},
-                increasing={"marker":{"color":"#2ECC71"}},
-                totals={"marker":{"color":"#3498DB"}}
+                increasing={"marker":{"color":"#2ECC71"}}
             ))
-            fig_water.update_layout(
-                title="Puente de Variación de Ventas (Millones $)",
-                showlegend=False,
-                yaxis_title="Impacto en Dinero ($)"
-            )
+            fig_water.update_layout(title="Impacto en Dinero por Marca Real ($)", showlegend=False)
             st.plotly_chart(fig_water, use_container_width=True)
             
-        with col_w2:
-            st.markdown("##### 🧠 Insights de Crecimiento")
-            
-            top_driver = df_waterfall.iloc[0]
-            top_detractor = df_waterfall.iloc[-1]
-            
-            st.info(f"🏆 **Motor Principal:** **{top_driver['Marca_Master']}** aportó **${top_driver['Variacion']/1e6:,.1f}M** al crecimiento.")
-            if top_detractor['Variacion'] < 0:
-                st.error(f"📉 **Freno Principal:** **{top_detractor['Marca_Master']}** cayó **${abs(top_detractor['Variacion'])/1e6:,.1f}M**. Requiere revisión estratégica.")
-            else:
-                st.success("✅ Todas las categorías crecieron.")
-
+        with col_g2:
+            st.markdown("#### 📝 Detalles")
             st.dataframe(
-                df_waterfall[['Marca_Master', 'Variacion', 'Contribucion_Pts']],
-                column_config={
-                    "Variacion": st.column_config.NumberColumn("Var $", format="$%d"),
-                    "Contribucion_Pts": st.column_config.NumberColumn("Impacto Crecimiento", format="%+.2f pp")
-                },
-                hide_index=True
+                df_w[['Marca_Analisis', 'Variacion']],
+                column_config={"Variacion": st.column_config.NumberColumn("Crecimiento $", format="$%d")},
+                hide_index=True,
+                use_container_width=True
             )
+            # Insight automático
+            mejor = df_w.iloc[0]
+            st.info(f"🌟 **{mejor['Marca_Analisis']}** es el motor principal (creció ${mejor['Variacion']/1e6:,.1f}M).")
     else:
-        st.warning("Selecciona un Año Comparativo en el menú lateral para ver el análisis de crecimiento.")
+        st.info("Selecciona un año base para ver el análisis de crecimiento.")
 
-# --- TAB 2: LOGÍSTICA Y COSTO POR SERVIR ---
-with tab2:
-    st.subheader("📍 Mapa de Eficiencia Logística")
-    st.markdown("**Eje X: Ticket Promedio** (Eficiencia) | **Eje Y: Población** | **Color: Rentabilidad**")
-    st.caption("Un Ticket Promedio bajo en una población lejana implica un alto costo logístico oculto (fletes, tiempo).")
+# --- TAB 2: LOGÍSTICA & COSTO ---
+with tab_log:
+    st.subheader("📍 Eficiencia Logística por Población")
+    st.markdown("""
+    **Análisis de Costo por Servir:** - **Eje X:** Ticket Promedio (¿Cuánto compran por pedido?). Tickets bajos en zonas lejanas = Pérdida.
+    - **Eje Y:** Rentabilidad %.
+    - **Tamaño:** Volumen de Ventas.
+    """)
     
     # Agrupar por Población
-    df_log = df_act.groupby('Poblacion').agg(
-        Ventas=('valor_venta', 'sum'),
-        Pedidos=('Serie', 'nunique'),
-        Margen=('Margen_Pesos', 'sum')
+    # Nota: 'Serie' suele ser el número de factura para contar pedidos únicos
+    df_mapa = df_now.groupby('Poblacion').agg(
+        Venta=('valor_venta', 'sum'),
+        Margen=('Margen_Pesos', 'sum'),
+        Pedidos=('Serie', 'nunique')
     ).reset_index()
     
-    df_log['Ticket_Promedio'] = df_log['Ventas'] / df_log['Pedidos']
-    df_log['Rentabilidad_Pct'] = (df_log['Margen'] / df_log['Ventas']) * 100
+    df_mapa['Ticket_Promedio'] = df_mapa['Venta'] / df_mapa['Pedidos']
+    df_mapa['Rentabilidad'] = (df_mapa['Margen'] / df_mapa['Venta']) * 100
     
-    # Filtrar ruido (Poblaciones con ventas insignificantes)
-    df_log_viz = df_log[df_log['Ventas'] > df_log['Ventas'].quantile(0.2)]
+    # Filtro visual para quitar ruido (poblaciones con ventas < 0.1% del total)
+    umbral_min = df_mapa['Venta'].sum() * 0.001
+    df_mapa_viz = df_mapa[df_mapa['Venta'] > umbral_min]
     
-    fig_scatter = px.scatter(
-        df_log_viz,
+    fig_sc = px.scatter(
+        df_mapa_viz,
         x="Ticket_Promedio",
-        y="Rentabilidad_Pct",
-        size="Ventas",
-        color="Rentabilidad_Pct",
+        y="Rentabilidad",
+        size="Venta",
+        color="Rentabilidad",
         hover_name="Poblacion",
         text="Poblacion",
         color_continuous_scale="RdYlGn",
-        title="Matriz de Eficiencia: Ticket vs Rentabilidad"
+        title="Mapa de Eficiencia Logística"
     )
-    
-    # Líneas de referencia
-    avg_ticket = df_log['Ticket_Promedio'].mean()
-    fig_scatter.add_vline(x=avg_ticket, line_dash="dash", annotation_text="Ticket Promedio General")
-    fig_scatter.update_traces(textposition='top center')
-    
-    st.plotly_chart(fig_scatter, use_container_width=True)
-    
-    st.markdown("##### 🚨 Top Poblaciones Ineficientes (Bajo Ticket = Alto Costo x Servir)")
-    st.dataframe(
-        df_log_viz.nsmallest(10, 'Ticket_Promedio')[['Poblacion', 'Ticket_Promedio', 'Rentabilidad_Pct', 'Ventas']],
-        column_config={"Ticket_Promedio": st.column_config.NumberColumn(format="$%d"), "Rentabilidad_Pct": st.column_config.NumberColumn(format="%.1f%%")},
-        hide_index=True,
-        use_container_width=True
-    )
+    fig_sc.add_vline(x=df_mapa['Ticket_Promedio'].mean(), line_dash="dash", annotation_text="Ticket Promedio Global")
+    st.plotly_chart(fig_sc, use_container_width=True)
 
-# --- TAB 3: SHARE Y RENTABILIDAD ---
-with tab3:
-    st.subheader("Posicionamiento de Marcas")
+# --- TAB 3: MIX & SHARE ---
+with tab_mix:
+    col_m1, col_m2 = st.columns(2)
     
-    col_s1, col_s2 = st.columns([2, 1])
-    
-    # Datos agrupados
-    df_share = df_act.groupby('Marca_Master').agg(
-        Venta=('valor_venta', 'sum'),
-        Margen=('Margen_Pesos', 'sum')
-    ).reset_index()
+    # Agrupación
+    df_share = df_now.groupby('Marca_Analisis').agg(Venta=('valor_venta', 'sum'), Margen=('Margen_Pesos', 'sum')).reset_index()
     df_share['Rentabilidad'] = (df_share['Margen'] / df_share['Venta']) * 100
     
-    with col_s1:
-        st.markdown("##### 📦 Distribución de la Venta (Treemap)")
+    with col_m1:
+        st.subheader("📦 Participación (Treemap)")
         fig_tree = px.treemap(
-            df_share,
-            path=[px.Constant("FERREINOX"), 'Marca_Master'],
+            df_share, 
+            path=[px.Constant("TOTAL"), 'Marca_Analisis'], 
             values='Venta',
             color='Rentabilidad',
             color_continuous_scale='RdYlGn',
-            title="Tamaño = Venta | Color = Rentabilidad %"
+            title="Tamaño = Venta | Color = Rentabilidad"
         )
         st.plotly_chart(fig_tree, use_container_width=True)
         
-    with col_s2:
-        st.markdown("##### 💎 Matriz Estratégica")
-        fig_bubble = px.scatter(
+    with col_m2:
+        st.subheader("💎 Matriz Rentabilidad vs Volumen")
+        fig_bub = px.scatter(
             df_share,
-            x="Venta",
-            y="Rentabilidad",
-            size="Venta",
-            color="Rentabilidad",
-            text="Marca_Master",
-            title="Volumen vs Margen"
+            x="Venta", y="Rentabilidad",
+            size="Venta", color="Rentabilidad",
+            text="Marca_Analisis",
+            title="Posicionamiento Estratégico"
         )
-        st.plotly_chart(fig_bubble, use_container_width=True)
+        st.plotly_chart(fig_bub, use_container_width=True)
 
-# --- TAB 4: SALUD FINANCIERA (RIESGO) ---
-with tab4:
+# --- TAB 4: RIESGO & CARTERA ---
+with tab_risk:
     st.subheader("💳 Ventas vs Riesgo de Cobro")
-    st.markdown("Analiza a quién le estamos vendiendo y qué tan rápido pagan (Datos de Cartera Actual).")
+    st.markdown("Este módulo cruza lo que vendemos HOY con cómo nos están pagando (Dato Máximo de Días de Mora).")
     
-    # Agrupamos por Cliente
-    df_risk = df_act.groupby(['nombre_cliente', 'Poblacion']).agg(
-        Venta_Anual=('valor_venta', 'sum'),
-        Dias_Mora_Max=('Max_Dias_Mora', 'max') # Dato traído del cruce exacto
+    # Agrupar por Cliente
+    df_cli = df_now.groupby(['nombre_cliente', 'Poblacion']).agg(
+        Compra_Anual=('valor_venta', 'sum'),
+        Dias_Mora=('Dias_Mora_Real', 'max') # Dato que viene del Dropbox
     ).reset_index()
     
-    # Filtro para ver clientes relevantes
-    df_risk = df_risk[df_risk['Venta_Anual'] > 2000000] # Solo clientes > 2M
+    # Top Clientes (> 1M ventas) para no saturar el gráfico
+    df_cli_top = df_cli[df_cli['Compra_Anual'] > 1000000]
     
     col_r1, col_r2 = st.columns([3, 1])
     
     with col_r1:
         fig_risk = px.scatter(
-            df_risk,
-            x="Dias_Mora_Max",
-            y="Venta_Anual",
+            df_cli_top,
+            x="Dias_Mora",
+            y="Compra_Anual",
             color="Poblacion",
-            size="Venta_Anual",
+            size="Compra_Anual",
             hover_name="nombre_cliente",
-            title="Matriz de Riesgo: Exposición ($) vs Días Mora Real",
-            labels={"Dias_Mora_Max": "Días de Mora (Cartera Actual)", "Venta_Anual": "Venta Acumulada Periodo"}
+            title="Clientes: Volumen de Compra vs Días de Atraso"
         )
-        # Zona Peligrosa
-        fig_risk.add_vline(x=60, line_dash="dash", line_color="red", annotation_text="Límite 60 Días")
-        fig_risk.add_hrect(y0=0, y1=df_risk['Venta_Anual'].max(), x0=60, fillcolor="red", opacity=0.1)
-        
+        # Línea de peligro (60 días)
+        fig_risk.add_vline(x=60, line_dash="dash", line_color="red", annotation_text="Zona Crítica (>60 días)")
         st.plotly_chart(fig_risk, use_container_width=True)
         
     with col_r2:
-        st.error("🚨 Clientes Críticos")
-        st.caption("Ventas altas + Mora > 60 días")
-        
-        criticos = df_risk[df_risk['Dias_Mora_Max'] > 60].sort_values('Venta_Anual', ascending=False)
+        st.error("🚨 Top Morosos Activos")
+        criticos = df_cli_top[df_cli_top['Dias_Mora'] > 60].sort_values('Dias_Mora', ascending=False).head(10)
         st.dataframe(
-            criticos[['nombre_cliente', 'Dias_Mora_Max']],
-            column_config={"Dias_Mora_Max": st.column_config.NumberColumn("Días Mora", format="%d")},
+            criticos[['nombre_cliente', 'Dias_Mora']],
+            column_config={"Dias_Mora": st.column_config.NumberColumn("Días", format="%d")},
             hide_index=True
         )
