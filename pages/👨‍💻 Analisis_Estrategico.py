@@ -32,6 +32,9 @@ st.markdown("""
     }
     .metric-val { font-size: 2rem; font-weight: 800; color: var(--primary); }
     .metric-lbl { font-size: 0.8rem; text-transform: uppercase; font-weight: 700; color: #64748b; }
+    .metric-delta { font-size: 0.9rem; font-weight: 600; margin-top: 5px; }
+    .pos { color: var(--success); }
+    .neg { color: var(--danger); }
     
     /* Cajas de Análisis */
     .analysis-box {
@@ -85,11 +88,29 @@ def clasificar_estrategia_master(row):
 
 def asignar_hub_logistico(ciudad):
     c = normalizar_texto(ciudad)
-    if c in ['PEREIRA', 'DOSQUEBRADAS', 'SANTA ROSA DE CABAL', 'LA VIRGINIA']: return 'HUB PEREIRA/DOSQ'
-    if c in ['MANIZALES', 'VILLAMARIA', 'CHINCHINA', 'NEIRA']: return 'HUB MANIZALES'
-    if c in ['ARMENIA', 'CALARCA', 'CIRCASIA', 'TEBAIDA', 'MONTENEGRO', 'QUIMBAYA']: return 'HUB ARMENIA'
-    if c in ['CARTAGO', 'ANSERMA', 'RIOSUCIO', 'VITERBO']: return 'ZONA CERCANA'
-    return 'NACIONAL / FORANEO'
+    
+    # --- DEFINICIÓN ZONA LOGÍSTICA (TIENEN COSTO) ---
+    # 1. RISARALDA (Hub Local)
+    risaralda = ['PEREIRA', 'DOSQUEBRADAS', 'SANTA ROSA DE CABAL', 'LA VIRGINIA', 'MARSELLA', 'BELEN DE UMBRIA', 'APIA', 'SANTUARIO']
+    if c in risaralda: return 'HUB RISARALDA'
+
+    # 2. CALDAS (Hub Manizales)
+    caldas = ['MANIZALES', 'VILLAMARIA', 'CHINCHINA', 'NEIRA', 'RIOSUCIO', 'ANSERMA', 'VITERBO', 'SUPIA', 'FILADELFIA', 'PALESTINA']
+    if c in caldas: return 'HUB CALDAS'
+
+    # 3. QUINDIO (Hub Armenia)
+    quindio = ['ARMENIA', 'CALARCA', 'CIRCASIA', 'TEBAIDA', 'MONTENEGRO', 'QUIMBAYA', 'FILANDIA', 'SALENTO', 'PIJAO', 'GENOVA']
+    if c in quindio: return 'HUB QUINDIO'
+
+    # 4. VALLE DEL CAUCA Y NORTE DEL VALLE
+    valle = ['CARTAGO', 'OBANDO', 'ZARZAL', 'ROLDANILLO', 'LA UNION', 'SEVILLA', 'CAICEDONIA', 
+             'CALI', 'PALMIRA', 'BUGA', 'TULUA', 'YUMBO', 'JAMUNDI', 'CANDELARIA', 'BUENAVENTURA', 
+             'ANSERMANUEVO', 'ALCALA', 'ULLOA', 'EL AGUILA', 'EL CAIRO', 'ARGELIA', 'VERSALLES', 'EL DOVIO']
+    if c in valle: return 'HUB VALLE'
+
+    # --- ZONA MOSTRADOR (SIN COSTO LOGÍSTICO) ---
+    # Todo lo que no sea Risaralda, Caldas, Quindío o Valle
+    return 'MOSTRADOR / SIN LOGISTICA'
 
 # ==============================================================================
 # 3. CARGA DE DATOS (DROPBOX + VENTAS)
@@ -154,11 +175,15 @@ with st.spinner("🧠 Analizando Operación..."):
     if not df_cli.empty:
         df_full = pd.merge(df_raw, df_cli, on='Key_Nit', how='left')
         df_full['Poblacion_Real'] = df_full['Poblacion_Real'].fillna('NO IDENTIFICADO')
-        df_full['Hub_Logistico'] = df_full['Hub_Logistico'].fillna('NACIONAL')
+        # Si no cruzó, recalcular Hub basado en poblacion (aunque sea None, irá a Mostrador si no se sabe)
+        mask_null = df_full['Hub_Logistico'].isna()
+        df_full.loc[mask_null, 'Hub_Logistico'] = df_full.loc[mask_null, 'Poblacion_Real'].apply(asignar_hub_logistico)
         df_full['Vendedor'] = df_full['Vendedor'].fillna('GENERAL')
     else:
         df_full = df_raw.copy()
-        df_full['Poblacion_Real'] = 'SIN DATA'; df_full['Hub_Logistico']='SIN DATA'; df_full['Vendedor']='GENERAL'
+        df_full['Poblacion_Real'] = 'SIN DATA'
+        df_full['Hub_Logistico'] = 'MOSTRADOR / SIN LOGISTICA'
+        df_full['Vendedor'] = 'GENERAL'
 
 hoy = date.today()
 def ytd(row):
@@ -180,15 +205,16 @@ with st.sidebar:
     
     st.subheader("1. Estructura de Costos")
     margen_pct = st.slider("Margen Bruto (%)", 10, 60, 25) / 100
-    costo_local = st.number_input("Costo Envío Local ($)", 10000, 50000, 12000)
-    costo_nal = st.number_input("Costo Envío Nacional ($)", 20000, 100000, 45000)
+    st.info("ℹ️ Costos aplican solo a: Eje Cafetero y Valle.")
+    costo_local = st.number_input("Costo Envío Local/Cercano ($)", 10000, 50000, 12000)
+    costo_nal = st.number_input("Costo Envío Regional ($)", 20000, 100000, 45000)
     
     st.subheader("2. Segmentación")
     anios = sorted(df_master['anio'].unique(), reverse=True)
     anio_obj = st.selectbox("Año Objetivo", anios, 0)
     anio_base = st.selectbox("Año Base", [a for a in anios if a!=anio_obj], 0)
     
-    sel_hubs = st.multiselect("Hubs Logísticos", df_master['Hub_Logistico'].unique(), default=df_master['Hub_Logistico'].unique())
+    sel_hubs = st.multiselect("Hubs Logísticos", sorted(df_master['Hub_Logistico'].unique()), default=sorted(df_master['Hub_Logistico'].unique()))
     sel_city = st.multiselect("Poblaciones", sorted(df_master['Poblacion_Real'].unique()))
     sel_brand = st.multiselect("Marcas", sorted(df_master['Marca_Master'].unique()))
     sel_cat = st.multiselect("Categorías", sorted(df_master['CATEGORIA'].astype(str).unique()))
@@ -202,12 +228,24 @@ if sel_cat: df_f = df_f[df_f['CATEGORIA'].isin(sel_cat)]
 df_act = df_f[df_f['anio'] == anio_obj].copy()
 df_ant = df_f[df_f['anio'] == anio_base].copy()
 
-# --- CÁLCULOS "COST-TO-SERVE" ---
+# --- CÁLCULOS "COST-TO-SERVE" (LOGICA CORREGIDA) ---
 df_act['Pedido_ID'] = df_act['Key_Nit'].astype(str)+'-'+df_act['mes'].astype(str)+'-'+df_act['dia'].astype(str)
 n_pedidos = df_act['Pedido_ID'].nunique()
 venta = df_act['VALOR'].sum()
 
-def calc_costo(row): return costo_local if 'HUB' in row['Hub_Logistico'] or 'CERCANA' in row['Hub_Logistico'] else costo_nal
+def calc_costo(row):
+    hub = row['Hub_Logistico']
+    # REGLA DE ORO: Si es MOSTRADOR (fuera de cobertura logística), costo es CERO.
+    if 'MOSTRADOR' in hub:
+        return 0
+    
+    # Si está dentro de la cobertura (Risaralda, Caldas, Quindio, Valle)
+    # Asumimos Pereira/Dosq como 'Local' y el resto como 'Regional' (Nacional en contexto variable)
+    # O si prefieres: Risaralda = Local, Resto = Nacional.
+    if 'RISARALDA' in hub: # Pereira, Dosquebradas, etc.
+        return costo_local
+    else: # Caldas, Quindio, Valle
+        return costo_nal
 
 df_pedidos_unicos = df_act[['Pedido_ID', 'Hub_Logistico']].drop_duplicates()
 df_pedidos_unicos['Costo'] = df_pedidos_unicos.apply(calc_costo, axis=1)
@@ -261,76 +299,62 @@ with tabs[0]:
     
     col_r1, col_r2 = st.columns([2,1])
     with col_r1:
-        fig = px.scatter(df_city, x="Costo_Total", y="Utilidad", size="Venta", color="Hub_Logistico", 
-                         hover_name="Poblacion_Real", title="Matriz Eficiencia", height=450)
-        fig.add_hline(y=0, line_dash="dash", line_color="red")
-        st.plotly_chart(fig, use_container_width=True)
+        if not df_city.empty:
+            fig = px.scatter(df_city, x="Costo_Total", y="Utilidad", size="Venta", color="Hub_Logistico", 
+                             hover_name="Poblacion_Real", title="Matriz Eficiencia", height=450)
+            fig.add_hline(y=0, line_dash="dash", line_color="red")
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No hay datos para graficar.")
     with col_r2:
         st.markdown("**Detalle Financiero**")
-        # CORRECCIÓN DEL ERROR: Formato específico por columna numérica solamente
         format_dict = {"Venta": "${:,.0f}", "Costo_Total": "${:,.0f}", "Utilidad": "${:,.0f}"}
         st.dataframe(df_city[['Poblacion_Real', 'Venta', 'Costo_Total', 'Utilidad']]
                      .sort_values('Utilidad')
                      .style.format(format_dict).background_gradient(cmap='RdYlGn', subset=['Utilidad']), 
                      use_container_width=True)
 
-# --- TAB 2: PESO CATEGORÍAS (NUEVO REQUERIMIENTO) ---
+# --- TAB 2: PESO CATEGORÍAS ---
 with tabs[1]:
     st.markdown("""
     <div class="analysis-box">
     <span class="analysis-title">ANÁLISIS DE IMPACTO POR CATEGORÍA</span>
     Aquí analizamos minuciosamente si una categoría está "poniendo" o "quitando" valor al crecimiento global.
-    <br>• <strong>Var $:</strong> Dinero real crecido o perdido vs año anterior.
-    <br>• <strong>Incidencia:</strong> Qué porcentaje del crecimiento total de la empresa explica esta categoría.
     </div>
     """, unsafe_allow_html=True)
 
-    # Preparar datos
     cat_act = df_act.groupby('CATEGORIA')['VALOR'].sum()
     cat_ant = df_ant.groupby('CATEGORIA')['VALOR'].sum()
     
     df_cat_analysis = pd.DataFrame({'Venta_Actual': cat_act, 'Venta_Anterior': cat_ant}).fillna(0)
-    
-    # Métricas Clave
     df_cat_analysis['Var_Pesos'] = df_cat_analysis['Venta_Actual'] - df_cat_analysis['Venta_Anterior']
     df_cat_analysis['Var_Pct'] = (df_cat_analysis['Var_Pesos'] / df_cat_analysis['Venta_Anterior']).replace([np.inf, -np.inf], 0)
     
     total_growth_abs = df_cat_analysis['Var_Pesos'].sum()
-    # Incidencia: Cuánto aporta esta categoría al crecimiento total (ponderado)
     df_cat_analysis['Incidencia_Peso'] = df_cat_analysis.apply(
         lambda row: (row['Var_Pesos'] / abs(total_growth_abs)) if total_growth_abs != 0 else 0, axis=1
     )
     
     df_cat_analysis = df_cat_analysis.sort_values('Var_Pesos', ascending=False)
 
-    # Gráfico Waterfall
     fig_cat = go.Figure(go.Waterfall(
         orientation="v",
         measure=["relative"] * len(df_cat_analysis),
         x=df_cat_analysis.index,
         y=df_cat_analysis['Var_Pesos'],
         connector={"line": {"color": "rgb(63, 63, 63)"}},
-        decreasing={"marker": {"color": "#ef4444"}}, # Rojo para lo que resta
-        increasing={"marker": {"color": "#10b981"}}, # Verde para lo que suma
+        decreasing={"marker": {"color": "#ef4444"}}, 
+        increasing={"marker": {"color": "#10b981"}}, 
     ))
     fig_cat.update_layout(title="Contribution Chart: ¿Quién aporta y quién resta al crecimiento?", height=450)
     st.plotly_chart(fig_cat, use_container_width=True)
 
-    # Tabla Detallada
     st.markdown("### 📋 Detalle Minucioso de Aporte")
-    
-    # Formateo para tabla
     format_cat = {
-        "Venta_Actual": "${:,.0f}",
-        "Venta_Anterior": "${:,.0f}",
-        "Var_Pesos": "${:,.0f}",
-        "Var_Pct": "{:+.1%}",
-        "Incidencia_Peso": "{:+.2%}"
+        "Venta_Actual": "${:,.0f}", "Venta_Anterior": "${:,.0f}",
+        "Var_Pesos": "${:,.0f}", "Var_Pct": "{:+.1%}", "Incidencia_Peso": "{:+.2%}"
     }
-    
-    # Mostramos columnas renombradas para claridad
     df_show = df_cat_analysis[['Venta_Actual', 'Venta_Anterior', 'Var_Pesos', 'Var_Pct', 'Incidencia_Peso']].copy()
-    
     st.dataframe(
         df_show.style.format(format_cat)
         .background_gradient(cmap='RdYlGn', subset=['Var_Pesos', 'Incidencia_Peso'])
@@ -376,11 +400,11 @@ with tabs[3]:
         df_diff = df_diff.sort_values('Diff', ascending=False)
         
         best = df_diff.index[0] if not df_diff.empty else "N/A"
-        val_best = df_diff['Diff'].iloc[0]
+        val_best = df_diff['Diff'].iloc[0] if not df_diff.empty else 0
         st.markdown(f"<div class='analysis-box'>Mayor impulsor: **{best}** (+${val_best/1e6:,.1f}M).</div>", unsafe_allow_html=True)
 
         fig_d = go.Figure(go.Waterfall(orientation="v", measure=["relative"]*len(df_diff), x=df_diff.index, y=df_diff['Diff'],
-                                     decreasing={"marker":{"color":"#ef4444"}}, increasing={"marker":{"color":"#10b981"}}))
+                                      decreasing={"marker":{"color":"#ef4444"}}, increasing={"marker":{"color":"#10b981"}}))
         st.plotly_chart(fig_d, use_container_width=True)
     
     with col_d2:
@@ -401,26 +425,33 @@ with tabs[4]:
     
     if lost:
         st.markdown("**Clientes Perdidos (Top 10)**")
-        # Corrección formato
         df_lost = df_ant[df_ant['Key_Nit'].isin(lost)].groupby(['CLIENTE','Poblacion_Real'])['VALOR'].sum().sort_values(ascending=False).head(10).to_frame()
         st.dataframe(df_lost.style.format({"VALOR": "${:,.0f}"}), use_container_width=True)
 
-# --- TAB 6: GEO ESTRATEGIA ---
+# --- TAB 6: GEO ESTRATEGIA (CORREGIDO TYPEERROR) ---
 with tabs[5]:
     st.markdown(f"""<div class="analysis-box">
     <strong>Volumen (Tamaño)</strong> vs <strong>Rentabilidad (Color)</strong>.
     <br>• <strong style='color:green'>VERDE:</strong> Ganancia. <strong style='color:red'>ROJO:</strong> Pérdida operativa.
+    <br>ℹ️ Nota: Las zonas en <strong>'MOSTRADOR'</strong> tendrán $0 costo y alta utilidad (verde intenso).
     </div>""", unsafe_allow_html=True)
     
+    # Preparación de datos segura para evitar TypeError
     df_tree = df_city.copy()
     df_tree = df_tree[df_tree['Venta'] > 0]
-    df_tree['Hub_Logistico'] = df_tree['Hub_Logistico'].astype(str)
-    df_tree['Poblacion_Real'] = df_tree['Poblacion_Real'].astype(str)
+    
+    # Asegurar tipos de datos y eliminar NaNs críticos
+    df_tree['Hub_Logistico'] = df_tree['Hub_Logistico'].fillna('SIN DEFINIR').astype(str)
+    df_tree['Poblacion_Real'] = df_tree['Poblacion_Real'].fillna('SIN DEFINIR').astype(str)
+    df_tree['Utilidad'] = pd.to_numeric(df_tree['Utilidad'], errors='coerce').fillna(0)
     
     if not df_tree.empty:
+        # Solo graficar si hay datos
         fig_t = px.treemap(df_tree, path=[px.Constant("Colombia"), 'Hub_Logistico', 'Poblacion_Real'], 
                            values='Venta', color='Utilidad', color_continuous_scale='RdYlGn', midpoint=0)
         st.plotly_chart(fig_t, use_container_width=True)
+    else:
+        st.warning("No hay datos suficientes para generar el mapa geográfico.")
 
 # --- TAB 7: CONCLUSIÓN ---
 with tabs[6]:
