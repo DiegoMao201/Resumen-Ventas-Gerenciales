@@ -52,7 +52,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. FUNCIONES DE LÓGICA DE NEGOCIO (MODIFICADAS)
+# 2. FUNCIONES DE LÓGICA DE NEGOCIO Y UTILIDADES
 # ==============================================================================
 
 def normalizar_texto(texto):
@@ -106,6 +106,51 @@ def clasificar_marca_unificada(row):
 
     # 4. DEFAULT
     return 'OTRAS MARCAS', 'OTROS'
+
+def generar_excel_profesional(df, sheet_name="Data"):
+    """
+    Genera un archivo Excel con formato profesional:
+    - Encabezados en negrita y color.
+    - Columnas autoajustadas.
+    - Formato de moneda para columnas numéricas.
+    """
+    output = io.BytesIO()
+    # Usamos xlsxwriter como motor para formateo avanzado
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name=sheet_name)
+        workbook = writer.book
+        worksheet = writer.sheets[sheet_name]
+        
+        # Definir formatos
+        header_format = workbook.add_format({
+            'bold': True,
+            'text_wrap': True,
+            'valign': 'top',
+            'fg_color': '#4F46E5', # Color Indigo profesional
+            'font_color': '#FFFFFF',
+            'border': 1
+        })
+        
+        currency_format = workbook.add_format({'num_format': '$ #,##0'})
+        text_format = workbook.add_format({'text_wrap': False})
+        
+        # Aplicar formato a los encabezados y columnas
+        for col_num, value in enumerate(df.columns.values):
+            worksheet.write(0, col_num, value, header_format)
+            
+            # Ajustar ancho basado en contenido o tipo
+            col_width = 20
+            # Detectar si es columna numérica para aplicar formato moneda
+            is_numeric = pd.api.types.is_numeric_dtype(df[value])
+            
+            if is_numeric:
+                worksheet.set_column(col_num, col_num, 15, currency_format)
+            else:
+                max_len = df[value].astype(str).map(len).max()
+                col_width = min(max_len + 2, 40) if pd.notna(max_len) else 20
+                worksheet.set_column(col_num, col_num, col_width, text_format)
+                
+    return output.getvalue()
 
 # ==============================================================================
 # 3. CARGA DE DATOS
@@ -263,7 +308,7 @@ card(c5, "Mix de Marcas", f"{df_act['Marca_Master'].nunique()}", "Activas", "Por
 # ==============================================================================
 # 6. TABS DE ANÁLISIS PROFUNDO (GROWTH & OPPORTUNITY)
 # ==============================================================================
-tabs = st.tabs(["📊 DNA Crecimiento", "📍 Geo-Oportunidad", "👥 Clientes Top", "📦 Producto Estrella", "📉 Riesgo/Fugas", "📝 AI Conclusiones"])
+tabs = st.tabs(["📊 DNA Crecimiento", "📍 Geo-Oportunidad", "👥 Clientes Top 50", "📦 Producto Estrella", "📉 Riesgo/Fugas", "📝 AI Conclusiones"])
 
 # --- TAB 1: DNA DE CRECIMIENTO (Marca/Categoria) ---
 with tabs[0]:
@@ -347,34 +392,56 @@ with tabs[1]:
 
 # --- TAB 3: CLIENTES TOP OPORTUNIDAD ---
 with tabs[2]:
-    st.subheader("🎯 Cazador de Oportunidades: Clientes")
+    st.subheader("🎯 Cazador de Oportunidades: Top 50 Clientes")
     
-    # Análisis Cliente x Cliente
+    # Análisis Cliente x Cliente x Vendedor
     cl_act = df_act.groupby(['Key_Nit', 'CLIENTE', 'Vendedor'])['VALOR'].sum()
     cl_ant = df_ant.groupby(['Key_Nit', 'CLIENTE', 'Vendedor'])['VALOR'].sum()
     df_cl = pd.DataFrame({'Venta_Actual': cl_act, 'Venta_Anterior': cl_ant}).fillna(0)
     df_cl['Var_Pesos'] = df_cl['Venta_Actual'] - df_cl['Venta_Anterior']
     df_cl = df_cl.reset_index()
     
-    # Oportunidad 1: Clientes que DECRECEN (Riesgo)
-    df_risk = df_cl[df_cl['Var_Pesos'] < -500000].sort_values('Var_Pesos', ascending=True).head(15)
+    # Oportunidad 1: Clientes que DECRECEN (Riesgo) - TOP 50
+    df_risk = df_cl[df_cl['Var_Pesos'] < 0].sort_values('Var_Pesos', ascending=True).head(50)
     
-    # Oportunidad 2: Clientes con CRECIMIENTO MASIVO (Fidelizar)
-    df_star = df_cl.sort_values('Var_Pesos', ascending=False).head(15)
+    # Oportunidad 2: Clientes con CRECIMIENTO MASIVO (Fidelizar) - TOP 50
+    df_star = df_cl.sort_values('Var_Pesos', ascending=False).head(50)
     
     c_cli1, c_cli2 = st.columns(2)
     
     with c_cli1:
-        st.markdown("### 📉 ALERTA: Clientes cayendo (Recuperación)")
-        st.markdown("Estos clientes compran menos que el año pasado. **Acción: Llamada de servicio.**")
-        st.dataframe(df_risk[['CLIENTE', 'Venta_Actual', 'Venta_Anterior', 'Var_Pesos', 'Vendedor']]
+        st.markdown("### 📉 TOP 50 Caídas (Recuperación)")
+        st.markdown("Prioridad máxima: Clientes con mayor pérdida de valor respecto al año anterior.")
+        
+        # Botón de Descarga
+        excel_risk = generar_excel_profesional(df_risk, "Top_50_Caidas")
+        st.download_button(
+            label="📥 Descargar Top 50 Caídas (Excel)",
+            data=excel_risk,
+            file_name=f"Top_50_Clientes_Caida_{hoy}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="btn_risk"
+        )
+        
+        st.dataframe(df_risk[['CLIENTE', 'Vendedor', 'Venta_Actual', 'Venta_Anterior', 'Var_Pesos']]
                      .style.format({'Venta_Actual': '${:,.0f}', 'Venta_Anterior': '${:,.0f}', 'Var_Pesos': '${:,.0f}'})
                      .background_gradient(cmap='Reds_r', subset=['Var_Pesos']), use_container_width=True)
         
     with c_cli2:
-        st.markdown("### 🚀 ESTRELLAS: Mayor Crecimiento")
-        st.markdown("Clientes desarrollando el portafolio. **Acción: Ofrecer nuevos productos.**")
-        st.dataframe(df_star[['CLIENTE', 'Venta_Actual', 'Venta_Anterior', 'Var_Pesos', 'Vendedor']]
+        st.markdown("### 🚀 TOP 50 Crecimiento")
+        st.markdown("Clientes desarrollando el portafolio agresivamente.")
+        
+        # Botón de Descarga
+        excel_star = generar_excel_profesional(df_star, "Top_50_Crecimiento")
+        st.download_button(
+            label="📥 Descargar Top 50 Crecimiento (Excel)",
+            data=excel_star,
+            file_name=f"Top_50_Clientes_Crecimiento_{hoy}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="btn_star"
+        )
+        
+        st.dataframe(df_star[['CLIENTE', 'Vendedor', 'Venta_Actual', 'Venta_Anterior', 'Var_Pesos']]
                      .style.format({'Venta_Actual': '${:,.0f}', 'Venta_Anterior': '${:,.0f}', 'Var_Pesos': '${:,.0f}'})
                      .background_gradient(cmap='Greens', subset=['Var_Pesos']), use_container_width=True)
 
@@ -388,8 +455,8 @@ with tabs[3]:
     df_prod['Var_Pesos'] = df_prod['Venta_Actual'] - df_prod['Venta_Anterior']
     df_prod = df_prod.reset_index()
     
-    best_sku = df_prod.sort_values('Var_Pesos', ascending=False).head(10)
-    worst_sku = df_prod.sort_values('Var_Pesos', ascending=True).head(10)
+    best_sku = df_prod.sort_values('Var_Pesos', ascending=False).head(50)
+    worst_sku = df_prod.sort_values('Var_Pesos', ascending=True).head(50)
     
     st.markdown(f"""
     <div class="ai-box">
@@ -401,11 +468,27 @@ with tabs[3]:
     
     col_p1, col_p2 = st.columns(2)
     with col_p1:
-        st.markdown("**Top 10: Productos Ganadores**")
-        st.dataframe(best_sku.style.format({'Venta_Actual':'${:,.0f}','Var_Pesos':'${:,.0f}'}).background_gradient(cmap='Greens'), use_container_width=True)
+        st.markdown("**Top 50: Productos Ganadores**")
+        excel_best_sku = generar_excel_profesional(best_sku, "Top_Prod_Ganadores")
+        st.download_button(
+            label="📥 Descargar Productos Ganadores",
+            data=excel_best_sku,
+            file_name=f"Top_Productos_Ganadores_{hoy}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="btn_best_sku"
+        )
+        st.dataframe(best_sku.head(20).style.format({'Venta_Actual':'${:,.0f}','Var_Pesos':'${:,.0f}'}).background_gradient(cmap='Greens'), use_container_width=True)
     with col_p2:
-        st.markdown("**Bottom 10: Productos Perdiendo Terreno**")
-        st.dataframe(worst_sku.style.format({'Venta_Actual':'${:,.0f}','Var_Pesos':'${:,.0f}'}).background_gradient(cmap='Reds_r'), use_container_width=True)
+        st.markdown("**Top 50: Productos Perdiendo Terreno**")
+        excel_worst_sku = generar_excel_profesional(worst_sku, "Top_Prod_Perdidas")
+        st.download_button(
+            label="📥 Descargar Productos en Baja",
+            data=excel_worst_sku,
+            file_name=f"Top_Productos_Baja_{hoy}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="btn_worst_sku"
+        )
+        st.dataframe(worst_sku.head(20).style.format({'Venta_Actual':'${:,.0f}','Var_Pesos':'${:,.0f}'}).background_gradient(cmap='Reds_r'), use_container_width=True)
 
 # --- TAB 5: RIESGO / FUGAS ---
 with tabs[4]:
@@ -431,6 +514,16 @@ with tabs[4]:
         st.markdown("Estos clientes compraban el año pasado y este año no han comprado nada.")
         df_fugados = df_ant[df_ant['Key_Nit'].isin(lost_ids)].groupby(['CLIENTE', 'Poblacion_Real', 'Vendedor'])['VALOR'].sum().reset_index()
         df_fugados = df_fugados.rename(columns={'VALOR': 'Venta_Perdida_Total'}).sort_values('Venta_Perdida_Total', ascending=False)
+        
+        excel_churn = generar_excel_profesional(df_fugados, "Clientes_Fugados")
+        st.download_button(
+            label="📥 Descargar Lista de Fugados (Excel)",
+            data=excel_churn,
+            file_name=f"Clientes_Fugados_{hoy}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="btn_churn"
+        )
+        
         st.dataframe(df_fugados.style.format({'Venta_Perdida_Total': '${:,.0f}'}), use_container_width=True)
     else:
         st.success("¡Increíble! No hay clientes perdidos con los filtros actuales.")
