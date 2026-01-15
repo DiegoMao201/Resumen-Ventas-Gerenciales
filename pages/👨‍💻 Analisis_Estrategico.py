@@ -3,21 +3,55 @@
 Versión 2.0 - Arquitectura Modular Profesional
 """
 
+import sys
+import os
+from pathlib import Path
+
+# Agregar la carpeta 'pages' al path de Python
+current_dir = Path(__file__).parent
+if str(current_dir) not in sys.path:
+    sys.path.insert(0, str(current_dir))
+
 import streamlit as st
-from analisis_estrategico import (
-    configurar_pagina,
-    cargar_y_validar_datos,
-    renderizar_sidebar,
-    aplicar_filtros,
-    validar_datos_filtrados,
-    TabADNCrecimiento,
-    TabOportunidadGeografica,
-    TabTopClientes,
-    TabProductosEstrella,
-    TabGestionRiesgo,
-    TabAnalisisIA,
-    TabProyeccion2026
-)
+
+# Importar módulos del paquete analisis_estrategico
+try:
+    from analisis_estrategico import (
+        configurar_pagina,
+        cargar_y_validar_datos,
+        renderizar_sidebar,
+        aplicar_filtros,
+        validar_datos_filtrados,
+        TabADNCrecimiento,
+        TabOportunidadGeografica,
+        TabTopClientes,
+        TabProductosEstrella,
+        TabGestionRiesgo,
+        TabAnalisisIA,
+        TabProyeccion2026
+    )
+except ImportError as e:
+    st.error(f"""
+    ❌ **Error de importación:** {e}
+    
+    **Diagnóstico:**
+    - Verifica que la carpeta `pages/analisis_estrategico/` existe
+    - Verifica que `__init__.py` está presente en esa carpeta
+    - Estructura esperada:
+      ```
+      pages/
+        analisis_estrategico/
+          __init__.py
+          config.py
+          data_loader.py
+          ui_components.py
+          processors.py
+          projections.py
+          visualizations.py
+          pdf_generator.py
+      ```
+    """)
+    st.stop()
 
 # ===== CONFIGURACIÓN DE PÁGINA =====
 configurar_pagina()

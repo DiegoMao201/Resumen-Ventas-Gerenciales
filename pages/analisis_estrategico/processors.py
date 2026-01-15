@@ -4,8 +4,11 @@ import pandas as pd
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
-from typing import Dict
 import numpy as np
+from typing import Dict
+
+# Importar módulos internos
+from .projections import proyectar_ventas_2026, proyectar_por_vendedor, proyectar_por_ciudad
 
 class BaseTab(ABC):
     """Clase base abstracta para tabs de análisis"""
