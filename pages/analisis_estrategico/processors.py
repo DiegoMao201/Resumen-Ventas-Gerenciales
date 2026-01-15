@@ -9,6 +9,7 @@ from typing import Dict
 
 # Importar módulos internos
 from .projections import proyectar_ventas_2026, proyectar_por_vendedor, proyectar_por_ciudad
+from .pdf_generator import generar_reporte_completo  # ✅ AGREGAR AQUÍ
 
 class BaseTab(ABC):
     """Clase base abstracta para tabs de análisis"""
@@ -81,7 +82,6 @@ class TabADNCrecimiento(BaseTab):
         # NUEVO: Botón de descarga PDF
         st.markdown("---")
         if st.button("📥 Descargar Reporte PDF", key="btn_pdf_adn"):
-            from .pdf_generator import generar_reporte_completo
             
             # Preparar datos para PDF
             df_marcas = self.df_actual.groupby('Marca_Master')['VALOR'].sum().reset_index()

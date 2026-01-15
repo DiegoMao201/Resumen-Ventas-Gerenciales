@@ -1,6 +1,6 @@
 """Componentes de interfaz de usuario reutilizables"""
-import streamlit as st
-import pandas as pd
+import streamlit as st  # ✅ AGREGAR
+import pandas as pd     # ✅ AGREGAR
 from typing import Dict
 
 def renderizar_sidebar(df_master: pd.DataFrame, config: Dict) -> Dict:
