@@ -7,47 +7,265 @@ import unicodedata
 import io
 import dropbox
 from datetime import datetime, date
+import calendar
+from functools import reduce
+import warnings
+warnings.filterwarnings('ignore')
+
+# ===== NUEVAS IMPORTACIONES PARA IA Y ANÁLISIS AVANZADO =====
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import StandardScaler
+import json
+import requests  # Para API de GPT
+
+# ===== CONFIGURACIÓN DE CACHÉ MEJORADA =====
+@st.cache_resource(show_spinner=False)
+def get_dropbox_client():
+    """Cliente Dropbox singleton"""
+    return dropbox.Dropbox(
+        app_key=st.secrets.dropbox.app_key,
+        app_secret=st.secrets.dropbox.app_secret,
+        oauth2_refresh_token=st.secrets.dropbox.refresh_token
+    )
+
+@st.cache_data(ttl=7200, show_spinner=False)
+def cargar_poblaciones_dropbox_excel_optimizado():
+    """Versión optimizada con mejor manejo de errores"""
+    try:
+        dbx = get_dropbox_client()
+        rutas = ['/clientes_detalle.xlsx', '/data/clientes_detalle.xlsx', '/Master/clientes_detalle.xlsx']
+        res = None
+        for r in rutas:
+            try:
+                _, res = dbx.files_download(path=r)
+                break
+            except: 
+                continue
+        
+        if not res: 
+            return pd.DataFrame()
+        
+        with io.BytesIO(res.content) as stream:
+            df = pd.read_excel(stream, engine='openpyxl')
+        
+        cols = {c.strip().lower(): c for c in df.columns}
+        
+        if 'nit' in cols and 'poblacion' in cols:
+            df_clean = df[[cols['nit'], cols['poblacion']]].copy()
+            df_clean.columns = ['Key_Nit', 'Poblacion_Real']
+            df_clean['Key_Nit'] = df_clean['Key_Nit'].apply(limpiar_codigo_master)
+            return df_clean
+        
+        return pd.DataFrame()
+    except Exception as e:
+        st.warning(f"No se pudo cargar datos geográficos: {e}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=7200, show_spinner=False)
+def procesar_datos_maestros(_df_raw):
+    """Procesamiento optimizado de datos maestros con tipos eficientes"""
+    df = _df_raw.copy()
+    
+    # Optimización de tipos de datos
+    df['VALOR'] = pd.to_numeric(df['VALOR'], errors='coerce').fillna(0).astype('float32')
+    df['anio'] = pd.to_numeric(df['anio'], errors='coerce').fillna(date.today().year).astype('int16')
+    df['mes'] = pd.to_numeric(df['mes'], errors='coerce').fillna(1).astype('int8')
+    
+    if 'dia' not in df.columns:
+        df['dia'] = 15
+    else:
+        df['dia'] = pd.to_numeric(df['dia'], errors='coerce').fillna(15).astype('int8')
+    
+    df['Key_Nit'] = df['COD'].apply(limpiar_codigo_master)
+    
+    # Clasificación vectorizada
+    df[['Marca_Master', 'Categoria_Master']] = df.apply(
+        lambda x: pd.Series(clasificar_marca_unificada(x)), axis=1
+    )
+    
+    return df
 
 # ==============================================================================
 # 1. CONFIGURACIÓN VISUAL (UI/UX PREMIUM)
 # ==============================================================================
 st.set_page_config(
-    page_title="Master Brain Ultra | Growth Intelligence",
+    page_title="Análisis Estratégico | Ferreinox",
     page_icon="🚀",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
+# === HEADER EMPRESARIAL ===
+st.markdown("""
+<div class="strategic-header">
+    <h1>🚀 Análisis Estratégico de Crecimiento</h1>
+    <p>Ferreinox S.A.S. BIC | Inteligencia de Negocios con IA | <a href="https://www.ferreinox.co" target="_blank" style="color: white; text-decoration: underline;">www.ferreinox.co</a></p>
+</div>
+""", unsafe_allow_html=True)
+
+# Logo en sidebar
+st.sidebar.image("https://raw.githubusercontent.com/DiegoMao2021/Resumen-Ventas-Gerenciales/main/LOGO%20FERREINOX%20SAS%20BIC%202024.png", use_container_width=True)
+st.sidebar.markdown("---")
+
 st.markdown("""
 <style>
-    :root { --primary: #0f172a; --accent: #6366f1; --success: #10b981; --danger: #ef4444; --bg-light: #f8fafc; }
-    .main { background-color: #ffffff; }
+    /* === PALETA FERREINOX === */
+    :root {
+        --ferreinox-primary: #1e3a8a;
+        --ferreinox-secondary: #3b82f6;
+        --ferreinox-accent: #f59e0b;
+        --ferreinox-success: #10b981;
+        --ferreinox-danger: #ef4444;
+        --ferreinox-dark: #1f2937;
+    }
     
-    /* KPI Cards */
+    /* === HEADER EMPRESARIAL === */
+    .strategic-header {
+        background: linear-gradient(135deg, var(--ferreinox-primary) 0%, var(--ferreinox-secondary) 100%);
+        padding: 2.5rem;
+        border-radius: 15px;
+        margin-bottom: 2rem;
+        box-shadow: 0 10px 40px rgba(30, 58, 138, 0.3);
+        text-align: center;
+    }
+    
+    .strategic-header h1 {
+        color: white;
+        font-size: 2.8rem;
+        font-weight: 900;
+        margin: 0 0 0.5rem 0;
+        text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        letter-spacing: -1px;
+    }
+    
+    .strategic-header p {
+        color: rgba(255, 255, 255, 0.95);
+        font-size: 1.2rem;
+        margin: 0;
+        font-weight: 500;
+    }
+    
+    /* === KPI CARDS PREMIUM === */
     .metric-card {
-        background: white; border-left: 4px solid var(--accent);
-        padding: 15px; border-radius: 8px;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.04); margin-bottom: 15px;
+        background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
+        border-left: 5px solid var(--ferreinox-secondary);
+        padding: 1.5rem;
+        border-radius: 12px;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+        transition: all 0.3s ease;
+        margin-bottom: 1rem;
     }
-    .metric-val { font-size: 1.8rem; font-weight: 800; color: var(--primary); }
-    .metric-lbl { font-size: 0.75rem; text-transform: uppercase; font-weight: 700; color: #64748b; letter-spacing: 1px; }
-    .metric-delta { font-size: 0.85rem; font-weight: 600; margin-top: 5px; }
-    .pos { color: var(--success); }
-    .neg { color: var(--danger); }
     
-    /* AI Insight Box */
+    .metric-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+        border-left-color: var(--ferreinox-accent);
+    }
+    
     .ai-box {
-        background-color: #fdf4ff; border: 1px solid #f0abfc;
-        border-left: 5px solid #d946ef;
-        padding: 20px; border-radius: 8px;
-        margin: 15px 0;
-        color: #701a75; font-size: 1rem;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+        border-left: 4px solid var(--ferreinox-accent);
+        padding: 1.5rem;
+        border-radius: 12px;
+        box-shadow: 0 4px 15px rgba(245, 158, 11, 0.1);
+        margin: 1rem 0;
     }
-    .ai-title { font-weight: 800; display: block; margin-bottom: 8px; text-transform: uppercase; font-size: 0.85rem; letter-spacing: 1px;}
     
-    /* Tables */
-    .stDataFrame { border-radius: 10px; overflow: hidden; }
+    .ai-title {
+        font-weight: 800;
+        display: block;
+        margin-bottom: 0.75rem;
+        text-transform: uppercase;
+        font-size: 0.9rem;
+        letter-spacing: 1.2px;
+        color: var(--ferreinox-accent);
+    }
+    
+    /* === TABS MODERNOS === */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        background-color: #f8fafc;
+        padding: 0.5rem;
+        border-radius: 10px;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        background-color: white;
+        border-radius: 8px;
+        color: var(--ferreinox-dark);
+        font-weight: 600;
+        font-size: 1rem;
+        border: 2px solid transparent;
+        transition: all 0.3s;
+    }
+    
+    .stTabs [data-baseweb="tab"]:hover {
+        background-color: #e0f2fe;
+        border-color: var(--ferreinox-secondary);
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background: linear-gradient(135deg, var(--ferreinox-primary) 0%, var(--ferreinox-secondary) 100%) !important;
+        color: white !important;
+        border-color: var(--ferreinox-primary) !important;
+    }
+    
+    /* === ALERTAS === */
+    div[data-testid="stAlert"] {
+        border-radius: 10px;
+        border-left: 5px solid;
+        padding: 1rem 1.5rem;
+    }
+    
+    /* === DATAFRAMES === */
+    .stDataFrame {
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+    }
+    
+    /* === PROGRESS BARS === */
+    .stProgress > div > div {
+        background: linear-gradient(90deg, var(--ferreinox-secondary) 0%, var(--ferreinox-accent) 100%);
+        border-radius: 10px;
+    }
+    
+    /* === SIDEBAR === */
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+        border-right: 2px solid #e5e7eb;
+    }
+    
+    section[data-testid="stSidebar"] .stSelectbox label {
+        color: var(--ferreinox-primary);
+        font-weight: 700;
+    }
+    
+    /* === FOOTER === */
+    .strategic-footer {
+        text-align: center;
+        padding: 2rem;
+        margin-top: 3rem;
+        border-top: 2px solid #e5e7eb;
+        background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    }
+    
+    .strategic-footer a {
+        color: var(--ferreinox-primary);
+        text-decoration: none;
+        font-weight: 700;
+    }
+    
+    /* === ANIMACIONES === */
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    
+    .animated-section {
+        animation: fadeIn 0.6s ease-out;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -308,7 +526,15 @@ card(c5, "Mix de Marcas", f"{df_act['Marca_Master'].nunique()}", "Activas", "Por
 # ==============================================================================
 # 6. TABS DE ANÁLISIS PROFUNDO (GROWTH & OPPORTUNITY)
 # ==============================================================================
-tabs = st.tabs(["📊 DNA Crecimiento", "📍 Geo-Oportunidad", "👥 Clientes Top 50", "📦 Producto Estrella", "📉 Riesgo/Fugas", "📝 AI Conclusiones"])
+tabs = st.tabs([
+    "📊 DNA Crecimiento", 
+    "📍 Geo-Oportunidad", 
+    "👥 Clientes Top 50", 
+    "📦 Producto Estrella", 
+    "📉 Riesgo/Fugas", 
+    "🤖 AI Análisis", 
+    "📈 Proyección Ventas"  # NUEVO TAB
+])
 
 # --- TAB 1: DNA DE CRECIMIENTO (Marca/Categoria) ---
 with tabs[0]:
@@ -558,3 +784,272 @@ with tabs[5]:
     """)
     
     st.info("💡 Tip: Usa los filtros de la izquierda para generar este mismo diagnóstico para una Ciudad o Marca específica.")
+
+# --- TAB 7: PROYECCIÓN Y FORECASTING ---
+with tabs[6]:
+    st.header("📈 Proyección de Ventas y Tendencias")
+    
+    col_proj1, col_proj2 = st.columns([2, 1])
+    
+    with col_proj1:
+        st.subheader("Forecast de Ventas (Regresión Lineal)")
+        
+        # Calcular proyección
+        meses_a_proyectar = st.slider("Meses a proyectar:", 1, 6, 3)
+        
+        resultado_proyeccion = calcular_proyeccion_ventas(df_full, meses_proyectar=meses_a_proyectar)
+        
+        if resultado_proyeccion[0] is not None:
+            df_proyeccion, confianza, r2 = resultado_proyeccion
+            
+            # Gráfico de proyección
+            fig_proj = go.Figure()
+            
+            # Histórico
+            df_historico = df_proyeccion[df_proyeccion['tipo'] == 'Histórico']
+            fig_proj.add_trace(go.Scatter(
+                x=df_historico['periodo'],
+                y=df_historico['venta_proyectada'],
+                mode='lines+markers',
+                name='Histórico',
+                line=dict(color='#3b82f6', width=3),
+                marker=dict(size=8)
+            ))
+            
+            # Proyección
+            df_futuro = df_proyeccion[df_proyeccion['tipo'] == 'Proyección']
+            fig_proj.add_trace(go.Scatter(
+                x=df_futuro['periodo'],
+                y=df_futuro['venta_proyectada'],
+                mode='lines+markers',
+                name='Proyección',
+                line=dict(color='#f59e0b', width=3, dash='dash'),
+                marker=dict(size=10, symbol='diamond')
+            ))
+            
+            fig_proj.update_layout(
+                title=f"Proyección de Ventas - Próximos {meses_a_proyectar} Meses",
+                xaxis_title="Periodo",
+                yaxis_title="Ventas ($)",
+                hovermode='x unified',
+                height=450
+            )
+            
+            st.plotly_chart(fig_proj, use_container_width=True)
+            
+        else:
+            st.warning("⚠️ No hay suficientes datos históricos para generar proyección confiable (mínimo 6 meses)")
+    
+    with col_proj2:
+        st.subheader("Nivel de Confianza")
+        
+        if resultado_proyeccion[0] is not None:
+            # Gauge de confianza
+            color_confianza = "#10b981" if confianza == "Alta" else "#f59e0b" if confianza == "Media" else "#ef4444"
+            
+            st.markdown(f"""
+            <div style="
+                background: linear-gradient(135deg, {color_confianza}15 0%, {color_confianza}30 100%);
+                border-left: 5px solid {color_confianza};
+                padding: 1.5rem;
+                border-radius: 12px;
+                text-align: center;
+                margin-bottom: 1rem;
+            ">
+                <h2 style="color: {color_confianza}; margin: 0;">{confianza}</h2>
+                <p style="margin: 0.5rem 0 0 0; color: #64748b;">R² = {r2:.3f}</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            st.info(f"""
+            **Interpretación:**
+            - R² = {r2:.1%} de la variación está explicada por el modelo
+            - Confianza **{confianza}** en la proyección
+            - {"Proyección muy confiable para planificación" if confianza == "Alta" else "Usar con precaución, considerar factores externos" if confianza == "Media" else "Baja confiabilidad, alta variabilidad histórica"}
+            """)
+            
+            # Proyección en tabla
+            st.subheader("Valores Proyectados")
+            if not df_futuro.empty:
+                df_futuro_display = df_futuro[['anio', 'mes', 'venta_proyectada']].copy()
+                df_futuro_display['venta_proyectada'] = df_futuro_display['venta_proyectada'].apply(lambda x: f"${x:,.0f}")
+                df_futuro_display.columns = ['Año', 'Mes', 'Venta Estimada']
+                
+                st.dataframe(df_futuro_display, use_container_width=True, hide_index=True)
+    
+    # Análisis de Estacionalidad
+    st.markdown("---")
+    st.subheader("📅 Análisis de Estacionalidad")
+    
+    df_estacional = analisis_estacionalidad(df_full)
+    
+    if not df_estacional.empty:
+        col_est1, col_est2 = st.columns([3, 1])
+        
+        with col_est1:
+            # Gráfico de índice estacional
+            fig_estacional = go.Figure()
+            
+            colores = []
+            for idx in df_estacional['indice_estacional']:
+                if idx >= 110:
+                    colores.append('#10b981')
+                elif idx >= 95:
+                    colores.append('#3b82f6')
+                else:
+                    colores.append('#ef4444')
+            
+            fig_estacional.add_trace(go.Bar(
+                x=df_estacional['mes'],
+                y=df_estacional['indice_estacional'],
+                marker_color=colores,
+                text=df_estacional['indice_estacional'].apply(lambda x: f"{x:.1f}"),
+                textposition='outside'
+            ))
+            
+            fig_estacional.add_hline(
+                y=100, 
+                line_dash="dash", 
+                line_color="gray",
+                annotation_text="Línea Base (100)"
+            )
+            
+            fig_estacional.update_layout(
+                title="Índice Estacional por Mes (Base 100 = Promedio)",
+                xaxis_title="Mes",
+                yaxis_title="Índice Estacional",
+                height=400
+            )
+            
+            st.plotly_chart(fig_estacional, use_container_width=True)
+        
+        with col_est2:
+            st.subheader("Clasificación")
+            
+            for _, row in df_estacional.iterrows():
+                mes_nombre = {1:"Ene", 2:"Feb", 3:"Mar", 4:"Abr", 5:"May", 6:"Jun", 
+                             7:"Jul", 8:"Ago", 9:"Sep", 10:"Oct", 11:"Nov", 12:"Dic"}
+                
+                st.markdown(f"""
+                **{mes_nombre.get(row['mes'], row['mes'])}:** {row['clasificacion']}  
+                Índice: {row['indice_estacional']:.1f}
+                """)
+def generar_reporte_ejecutivo_pdf(
+    df_act, df_ant, metricas, analisis_ia, 
+    top_marca, top_ciudad, producto_estrella
+):
+    """
+    Genera un reporte ejecutivo completo en formato Markdown para exportar
+    """
+    from datetime import datetime
+    fecha_reporte = datetime.now().strftime("%d de %B de %Y, %H:%M")
+    
+    val_act = df_act['VALOR'].sum()
+    val_ant = df_ant['VALOR'].sum()
+    variacion = ((val_act - val_ant) / val_ant * 100) if val_ant > 0 else 0
+    
+    reporte = f"""
+# 📊 REPORTE EJECUTIVO DE VENTAS
+## Ferreinox S.A.S. BIC | www.ferreinox.co
+
+**Generado:** {fecha_reporte}
+
+---
+
+## 🎯 RESUMEN EJECUTIVO
+
+| Métrica | Valor Actual | Valor Anterior | Variación |
+|---------|--------------|----------------|-----------|
+| **Ventas Totales** | ${val_act:,.0f} | ${val_ant:,.0f} | {variacion:+.1f}% |
+| **Marca Líder** | {top_marca} | - | - |
+| **Ciudad Estrella** | {top_ciudad} | - | - |
+| **Producto Estrella** | {producto_estrella} | - | - |
+
+---
+
+## 💎 MÉTRICAS PREMIUM
+
+- **Tasa de Retención de Clientes:** {metricas['tasa_retencion']:.1f}%
+- **Customer Lifetime Value (CLV):** ${metricas['clv_estimado']:,.0f}
+- **Ticket Promedio:** ${metricas['ticket_promedio']:,.0f}
+- **Frecuencia de Compra:** {metricas['frecuencia_compra']:.1f} transacciones/cliente
+- **Growth Rate:** {metricas['growth_rate']:+.1f}%
+- **Concentración de Ventas:** {metricas['concentracion_ventas']} (HHI: {metricas['indice_herfindahl']:.0f})
+- **Penetración de Marcas:** {metricas['marcas_promedio_cliente']:.2f} marcas/cliente
+
+---
+
+## 🤖 ANÁLISIS ESTRATÉGICO CON IA
+
+{analisis_ia}
+
+---
+
+## 📈 TOP 10 CLIENTES EN CRECIMIENTO
+
+"""
+    
+    # Agregar top clientes
+    if not df_act.empty and not df_ant.empty:
+        cl_act = df_act.groupby(['Key_Nit', 'CLIENTE'])['VALOR'].sum()
+        cl_ant = df_ant.groupby(['Key_Nit', 'CLIENTE'])['VALOR'].sum()
+        df_cl = pd.DataFrame({'Actual': cl_act, 'Anterior': cl_ant}).fillna(0)
+        df_cl['Variacion'] = df_cl['Actual'] - df_cl['Anterior']
+        
+        top_10 = df_cl.nlargest(10, 'Variacion').reset_index()
+        
+        reporte += "| # | Cliente | Venta Actual | Venta Anterior | Crecimiento |\n"
+        reporte += "|---|---------|--------------|----------------|-------------|\n"
+        
+        for idx, row in top_10.iterrows():
+            reporte += f"| {idx+1} | {row['CLIENTE']} | ${row['Actual']:,.0f} | ${row['Anterior']:,.0f} | ${row['Variacion']:,.0f} |\n"
+    
+    reporte += f"""
+
+---
+
+**Reporte generado automáticamente por el Sistema de Inteligencia de Negocios Ferreinox**  
+**Confidencial - Solo para uso interno**
+"""
+    
+    return reporte
+
+
+# AGREGAR botón de descarga en el TAB principal o al final del dashboard
+st.markdown("---")
+st.subheader("📥 Exportar Reporte Completo")
+
+col_export1, col_export2 = st.columns(2)
+
+with col_export1:
+    if st.button("📄 Generar Reporte Ejecutivo", type="primary", use_container_width=True):
+        with st.spinner("Generando reporte completo..."):
+            metricas_calc = calcular_metricas_avanzadas(df_act, df_ant)
+            
+            analisis_ia_export = ""
+            if 'analisis_ia_generado' in st.session_state:
+                analisis_ia_export = st.session_state.analisis_ia_generado
+            else:
+                analisis_ia_export = "Análisis IA no generado en esta sesión"
+            
+            top_marca_exp = df_act.groupby('Marca_Master')['VALOR'].sum().idxmax() if not df_act.empty else "N/A"
+            top_ciudad_exp = df_act.groupby('Poblacion_Real')['VALOR'].sum().idxmax() if not df_act.empty else "N/A"
+            producto_exp = df_act.groupby('NOMBRE_PRODUCTO_K')['VALOR'].sum().idxmax() if not df_act.empty else "N/A"
+            
+            reporte_completo = generar_reporte_ejecutivo_pdf(
+                df_act, df_ant, metricas_calc, analisis_ia_export,
+                top_marca_exp, top_ciudad_exp, producto_exp
+            )
+            
+            st.session_state.reporte_completo_generado = reporte_completo
+
+with col_export2:
+    if 'reporte_completo_generado' in st.session_state:
+        st.download_button(
+            label="⬇️ Descargar Reporte (Markdown)",
+            data=st.session_state.reporte_completo_generado,
+            file_name=f"Reporte_Ejecutivo_Ferreinox_{datetime.now().strftime('%Y%m%d_%H%M')}.md",
+            mime="text/markdown",
+            use_container_width=True
+        )
+        st.success("✅ Reporte generado con éxito")
