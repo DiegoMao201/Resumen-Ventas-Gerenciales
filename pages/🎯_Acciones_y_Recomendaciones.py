@@ -210,8 +210,11 @@ if df_tipo_raw.empty:
     st.error("❌ CLIENTE_TIPO no se pudo cargar o está vacío. Verifica Dropbox y formato.")
     st.stop()
 
+META_CANAL = 590_000_000  # Meta global para el canal (DETALLISTAS + FERRETERIA)
+
+meta_total = META_CANAL  # asegura que meta_total esté definido siempre
 canales_objetivo = ["DETALLISTAS", "FERRETERIA"]
-df_det = asignar_presupuesto_detallista(df_tipo_raw, meta_total=590_000_000, canales=canales_objetivo)
+df_det = asignar_presupuesto_detallista(df_tipo_raw, meta_total=meta_total, canales=canales_objetivo)
 if df_det.empty:
     st.error(f"❌ No hay registros para los canales {canales_objetivo} en CLIENTE_TIPO.")
     st.dataframe(df_tipo_raw.head(50), use_container_width=True)
