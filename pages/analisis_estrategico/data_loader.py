@@ -132,12 +132,24 @@ def cargar_y_validar_datos() -> Tuple[pd.DataFrame, Dict]:
             st.info(f"Años disponibles: {anios_disponibles}")
             st.stop()
         
+        # ✅ SOLUCIÓN: Convertir a string antes de ordenar
+        def obtener_lista_ordenada(serie):
+            """Obtiene lista ordenada limpiando tipos mixtos"""
+            try:
+                valores = serie.dropna().unique()
+                # Convertir todo a string y limpiar
+                valores_str = [str(v).strip() for v in valores if v != '' and str(v).strip() != '']
+                # Eliminar duplicados y ordenar
+                return sorted(list(set(valores_str)))
+            except Exception as e:
+                return []
+        
         config_filtros = {
             'anios_disponibles': anios_disponibles,
-            'ciudades_disponibles': sorted(df_clean['Poblacion_Real'].dropna().unique()) if 'Poblacion_Real' in df_clean.columns else [],
-            'lineas_disponibles': sorted(df_clean['Linea_Estrategica'].dropna().unique()) if 'Linea_Estrategica' in df_clean.columns else [],
-            'marcas_disponibles': sorted(df_clean['marca_producto'].dropna().unique()) if 'marca_producto' in df_clean.columns else [],
-            'vendedores_disponibles': sorted(df_clean['nomvendedor'].dropna().unique()) if 'nomvendedor' in df_clean.columns else []
+            'ciudades_disponibles': obtener_lista_ordenada(df_clean['Poblacion_Real']) if 'Poblacion_Real' in df_clean.columns else [],
+            'lineas_disponibles': obtener_lista_ordenada(df_clean['Linea_Estrategica']) if 'Linea_Estrategica' in df_clean.columns else [],
+            'marcas_disponibles': obtener_lista_ordenada(df_clean['marca_producto']) if 'marca_producto' in df_clean.columns else [],
+            'vendedores_disponibles': obtener_lista_ordenada(df_clean['nomvendedor']) if 'nomvendedor' in df_clean.columns else []
         }
         
         st.success(f"✅ **Datos cargados exitosamente:** {len(df_clean):,} registros")
@@ -168,10 +180,10 @@ def _limpiar_tipos_datos(df: pd.DataFrame) -> pd.DataFrame:
     
     # Asegurar que las columnas de texto no sean nulas
     if 'nombre_cliente' in df.columns:
-        df['nombre_cliente'] = df['nombre_cliente'].fillna('Sin Cliente')
+        df['nombre_cliente'] = df['nombre_cliente'].fillna('Sin Cliente').astype(str)
     
     if 'nomvendedor' in df.columns:
-        df['nomvendedor'] = df['nomvendedor'].fillna('GENERAL')
+        df['nomvendedor'] = df['nomvendedor'].fillna('GENERAL').astype(str)
     
     return df
 
@@ -184,7 +196,7 @@ def _clasificar_lineas_estrategicas(df: pd.DataFrame) -> pd.DataFrame:
     
     # Si ya existe la columna linea_producto, usarla
     if 'linea_producto' in df.columns:
-        df['Linea_Estrategica'] = df['linea_producto'].fillna('Otros')
+        df['Linea_Estrategica'] = df['linea_producto'].fillna('Otros').astype(str)
     else:
         # Si no existe, intentar clasificar por nombre_articulo
         if 'nombre_articulo' in df.columns:
@@ -200,6 +212,9 @@ def _clasificar_lineas_estrategicas(df: pd.DataFrame) -> pd.DataFrame:
             df['Linea_Estrategica'] = df['nombre_articulo'].apply(clasificar_por_nombre)
         else:
             df['Linea_Estrategica'] = 'Sin Clasificar'
+    
+    # Asegurar que sea string
+    df['Linea_Estrategica'] = df['Linea_Estrategica'].astype(str).str.strip()
     
     # Clasificar categoría (Premium, Estandar, etc.)
     if 'marca_producto' in df.columns:
@@ -225,7 +240,7 @@ def _enriquecer_geografia(df: pd.DataFrame) -> pd.DataFrame:
     if 'nomvendedor' not in df.columns:
         df['nomvendedor'] = 'GENERAL'
     else:
-        df['nomvendedor'] = df['nomvendedor'].fillna('GENERAL')
+        df['nomvendedor'] = df['nomvendedor'].fillna('GENERAL').astype(str)
     
     # Cargar poblaciones
     df_poblaciones = cargar_poblaciones()
@@ -237,7 +252,7 @@ def _enriquecer_geografia(df: pd.DataFrame) -> pd.DataFrame:
     
     # Hacer merge solo si hay datos
     df = pd.merge(df, df_poblaciones, on='cliente_id', how='left')
-    df['Poblacion_Real'] = df['Poblacion_Real'].fillna('Sin Geo')
+    df['Poblacion_Real'] = df['Poblacion_Real'].fillna('Sin Geo').astype(str)
     
     return df
 
