@@ -35,8 +35,39 @@ def preparar_df(df: pd.DataFrame) -> pd.DataFrame:
     if 'nomvendedor' in dfc.columns:
         dfc['nomvendedor'] = dfc['nomvendedor'].fillna('SIN VENDEDOR')
     if 'linea_producto' in dfc.columns:
-        dfc['linea_producto'] = dfc['linea_producto'].fillna('Sin Línea')
+        dfc['linea_producto'] = dfc['linea_producto'].fillna('Sin Línea').astype(str)
     return dfc
+
+def _lista_lineas(df: pd.DataFrame) -> List[str]:
+    return sorted({str(v).strip() for v in df['linea_producto'].dropna() if str(v).strip()})
+
+def calcular_pesos_mensuales(df_hist: pd.DataFrame, vendedor: str, col_valor: str = "valor_venta") -> np.ndarray:
+    """Devuelve vector de 12 pesos por vendedor; fallback a pesos globales si no hay datos."""
+    df_vend = df_hist[df_hist['nomvendedor'] == vendedor]
+    df_base = df_vend if not df_vend.empty else df_hist
+    pesos = df_base.groupby('mes')[col_valor].sum()
+    pesos = pesos.reindex(range(1, 13), fill_value=0)
+    total = pesos.sum()
+    if total > 0:
+        return (pesos / total).values
+    # fallback uniforme
+    return np.array([1/12.0] * 12)
+
+def distribuir_presupuesto_mensual(df_asignado: pd.DataFrame, df_hist: pd.DataFrame) -> pd.DataFrame:
+    """Expande presupuesto_2026 a 12 meses por vendedor usando estacionalidad histórica (prioriza 2025)."""
+    df_hist_2025 = df_hist[df_hist['anio'] == 2025]
+    df_hist_base = df_hist_2025 if not df_hist_2025.empty else df_hist[df_hist['anio'] == df_hist['anio'].max()]
+    registros = []
+    for _, row in df_asignado.iterrows():
+        pesos = calcular_pesos_mensuales(df_hist_base, row['nomvendedor'])
+        for mes_idx, peso in enumerate(pesos, start=1):
+            registros.append({
+                "nomvendedor": row["nomvendedor"],
+                "grupo": row["grupo"],
+                "mes": mes_idx,
+                "presupuesto_mensual": row["presupuesto_2026"] * peso
+            })
+    return pd.DataFrame(registros)
 
 def construir_grupo(vendedor: str, grupos: Dict[str, List[str]]) -> str:
     vend_norm = normalizar_texto(vendedor)
@@ -100,12 +131,12 @@ DATA_CONFIG = st.session_state.DATA_CONFIG
 grupos_cfg = DATA_CONFIG.get('grupos_vendedores', {})
 
 st.title("💰 Presupuesto 2026 | Ferreinox")
-st.caption("Asignación ejecutiva de presupuesto basada en histórico, crecimiento, profundidad de portafolio e impactos por vendedor y grupos MOSTRADOR.")
+st.caption("Asignación ejecutiva anual y plan mensual por vendedor/grupo basada en histórico, crecimiento, portafolio y estacionalidad.")
 
 col_a, col_b, col_c = st.columns([1.2, 1, 1])
 escenario = col_a.selectbox("Escenario de Proyección", ["Conservador", "Realista", "Optimista"], index=1)
 anio_base = col_b.selectbox("Año Base", sorted(df_raw['anio'].dropna().unique(), reverse=True), index=0)
-kpi_lineas = col_c.multiselect("Líneas estratégicas foco (opcional)", sorted(df_raw['linea_producto'].dropna().unique()), default=[])
+kpi_lineas = col_c.multiselect("Líneas estratégicas foco (opcional)", _lista_lineas(df_raw), default=[])
 
 # Filtro opcional de líneas
 df_master = df_raw[df_raw['anio'] >= 2023].copy()
@@ -125,6 +156,7 @@ k4.metric("Vendedores activos", f"{df_master['nomvendedor'].nunique():,}")
 
 df_asignado = asignar_presupuesto(df_master, grupos_cfg, total_2026)
 df_grupos = tabla_grupos(df_asignado)
+df_mensual = distribuir_presupuesto_mensual(df_asignado, df_master)
 
 st.markdown("---")
 st.subheader("🧭 Asignación por Vendedor (ponderada)")
@@ -146,6 +178,22 @@ st.dataframe(
         "marcas": st.column_config.NumberColumn("Marcas", format="%d"),
     }
 )
+
+st.markdown("### 🗓️ Plan Mensual por Vendedor (2026)")
+with st.expander("Ver detalle mensual por vendedor", expanded=False):
+    st.dataframe(
+        df_mensual.pivot_table(index=["nomvendedor", "grupo"], columns="mes", values="presupuesto_mensual", aggfunc="sum").fillna(0),
+        use_container_width=True
+    )
+
+st.markdown("### 🗺️ Distribución Mensual (heatmap)")
+fig_heat = px.imshow(
+    df_mensual.pivot_table(index="nomvendedor", columns="mes", values="presupuesto_mensual", aggfunc="sum").fillna(0),
+    labels={"x": "Mes", "y": "Vendedor", "color": "Presupuesto"},
+    aspect="auto", color_continuous_scale="Blues"
+)
+fig_heat.update_layout(height=500, template="plotly_white")
+st.plotly_chart(fig_heat, use_container_width=True)
 
 st.markdown("### 🏢 Consolidado por Grupo MOSTRADOR")
 st.dataframe(
@@ -189,5 +237,8 @@ st.download_button("📥 Descargar CSV Vendedores", data=csv_bytes, file_name="p
 csv_bytes_g = df_grupos.to_csv(index=False).encode('utf-8')
 st.download_button("📥 Descargar CSV Grupos", data=csv_bytes_g, file_name="presupuesto_2026_grupos.csv", mime="text/csv", use_container_width=True)
 
+csv_bytes_m = df_mensual.to_csv(index=False).encode('utf-8')
+st.download_button("📥 Descargar CSV Plan Mensual", data=csv_bytes_m, file_name="presupuesto_2026_mensual.csv", mime="text/csv", use_container_width=True)
+
 st.markdown("---")
-st.caption("Sistema de Inteligencia Comercial | Presupuesto 2026 construido con histórico 2024-2025, crecimiento, profundidad de portafolio e impactos por cliente.")
+st.caption("Sistema de Inteligencia Comercial | Presupuesto anual 2026 con distribución mensual por estacionalidad 2025 (o último año disponible).")
