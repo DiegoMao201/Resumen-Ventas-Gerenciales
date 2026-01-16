@@ -83,9 +83,9 @@ def cargar_y_validar_datos() -> Tuple[pd.DataFrame, Dict]:
         # Enriquecer geografía
         df_clean = _enriquecer_geografia(df_clean)
         
-        # Aplicar filtro YTD
-        df_clean = _aplicar_filtro_ytd(df_clean)
-        
+        # >>> No recortar con YTD; mantener todo el histórico
+        # df_clean = _aplicar_filtro_ytd(df_clean)
+
         if df_clean.empty:
             st.error("❌ No hay datos después del procesamiento")
             st.stop()
