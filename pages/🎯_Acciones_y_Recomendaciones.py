@@ -98,10 +98,6 @@ def cargar_cliente_tipo() -> pd.DataFrame:
         _, res = dbx.files_download(path=ruta)
         df = pd.read_excel(io.BytesIO(res.content))
         df = preparar_cliente_tipo(df)
-        if df.empty:
-            st.error("CLIENTE_TIPO.xlsx se leyó, pero quedó vacío. Revisa columnas y datos.")
-        else:
-            st.info(f"CLIENTE_TIPO.xlsx cargado: {df.shape[0]:,} filas, {df.shape[1]} cols")
         return df
     except Exception as e:
         st.error(f"No se pudo leer {ruta}: {e}")
@@ -338,12 +334,16 @@ canales_objetivo = ["DETALLISTAS", "FERRETERIA"]
 df_det = asignar_presupuesto_detallista(df_tipo_raw, meta_total=meta_total, canales=canales_objetivo)
 if df_det.empty:
     st.error(f"❌ No hay registros para los canales {canales_objetivo} en CLIENTE_TIPO.")
-    st.dataframe(df_tipo_raw.head(50), use_container_width=True)
     st.stop()
 
 df_meta_vendedor = resumen_por_vendedor(df_det)
 df_real_periodo = ventas_reales_periodo(df_ventas, df_det, canales=canales_objetivo)
+df_seg_vend = tabla_seguimiento_vendedor(df_meta_vendedor, df_real_periodo)
+df_seg_cli = tabla_seguimiento_cliente(df_det, df_real_periodo)
 df_ventas_foco = filtrar_ventas_foco(df_ventas, df_det)
+
+avance_total = df_seg_vend["venta_real"].sum() if not df_seg_vend.empty else 0
+avance_pct = (avance_total / meta_total * 100) if meta_total > 0 else 0
 
 # ---------------- UI ----------------
 st.title("🎯 Acciones y Recomendaciones | Seguimiento Pintuco")
