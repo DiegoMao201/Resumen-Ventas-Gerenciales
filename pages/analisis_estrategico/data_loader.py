@@ -68,16 +68,27 @@ def obtener_lista_ordenada(serie: pd.Series) -> list:
     return sorted(serie.dropna().astype(str).unique())
 
 def _unificar_lineas_marcas(df: pd.DataFrame) -> pd.DataFrame:
-    # Toma la mejor fuente disponible para la línea (CAT_PRODUCTO)
-    if 'categoria_producto' in df.columns:
-        df['Linea_Estrategica'] = df['categoria_producto'].fillna('')
-    elif 'linea_producto' in df.columns:
-        df['Linea_Estrategica'] = df['linea_producto'].fillna('')
+    def _fmt_linea(val):
+        # si es número (1.0, 2.0), lo vuelve entero sin .0; si no, texto limpio
+        try:
+            if pd.notna(val) and str(val).strip() != "" and float(val).is_integer():
+                return str(int(float(val)))
+        except Exception:
+            pass
+        return str(val).strip()
+
+    # Preferir nombres reales en linea_producto; si está vacío, usar categoria_producto
+    if 'linea_producto' in df.columns and df['linea_producto'].notna().any():
+        df['Linea_Estrategica'] = df['linea_producto'].apply(_fmt_linea)
+    elif 'categoria_producto' in df.columns:
+        df['Linea_Estrategica'] = df['categoria_producto'].apply(_fmt_linea)
     elif 'nombre_articulo' in df.columns:
-        df['Linea_Estrategica'] = df['nombre_articulo'].fillna('')
+        df['Linea_Estrategica'] = df['nombre_articulo'].apply(_fmt_linea)
     else:
-        df['Linea_Estrategica'] = ''
+        df['Linea_Estrategica'] = ""
+
     df['Linea_Estrategica'] = df['Linea_Estrategica'].apply(_normalizar_txt)
+
     if 'marca_producto' in df.columns:
         df['marca_producto'] = df['marca_producto'].fillna('').apply(_normalizar_txt)
     return df
