@@ -8,48 +8,42 @@ from sklearn.linear_model import LinearRegression
 def proyectar_ventas_2026(df_2024, df_2025, metodo='conservador'):
     """Proyecta ventas 2026 según método seleccionado"""
     
-    venta_2024 = df_2024['VALOR'].sum()
-    venta_2025 = df_2025['VALOR'].sum()
-    
-    if venta_2024 == 0:
-        return None, "No hay datos de 2024"
-    
-    tasa_crecimiento_24_25 = ((venta_2025 - venta_2024) / venta_2024) * 100
-    
-    if metodo == 'conservador':
-        tasa_aplicada = tasa_crecimiento_24_25 * 0.8
-        proyeccion = venta_2025 * (1 + tasa_aplicada / 100)
-        confianza = "Alta (Conservadora)"
-    
-    elif metodo == 'optimista':
-        tasa_aplicada = tasa_crecimiento_24_25 * 1.2
-        proyeccion = venta_2025 * (1 + tasa_aplicada / 100)
-        confianza = "Media (Optimista)"
-    
-    elif metodo == 'promedio':
-        tasa_aplicada = tasa_crecimiento_24_25
-        proyeccion = venta_2025 * (1 + tasa_aplicada / 100)
-        confianza = "Alta (Promedio)"
-    
-    else:  # lineal
-        X = np.array([[2024], [2025]])
-        y = np.array([venta_2024, venta_2025])
-        modelo = LinearRegression()
-        modelo.fit(X, y)
-        proyeccion = modelo.predict([[2026]])[0]
-        tasa_aplicada = ((proyeccion - venta_2025) / venta_2025) * 100
-        confianza = "Alta (Modelo Lineal)"
-    
-    return {
-        'metodo': metodo,
-        'proyeccion_2026': proyeccion,
-        'tasa_crecimiento_24_25': tasa_crecimiento_24_25,
-        'tasa_aplicada_26': tasa_aplicada,
-        'venta_2024': venta_2024,
-        'venta_2025': venta_2025,
-        'nivel_confianza': confianza,
-        'incremento_absoluto': proyeccion - venta_2025
-    }, "OK"
+    try:
+        venta_2024 = df_2024['VALOR'].sum() if not df_2024.empty else 0
+        venta_2025 = df_2025['VALOR'].sum() if not df_2025.empty else 0
+        
+        if venta_2024 == 0 or venta_2025 == 0:
+            return None, "Datos insuficientes para proyectar"
+        
+        tasa_crecimiento_24_25 = ((venta_2025 - venta_2024) / venta_2024) * 100
+        
+        if metodo == 'conservador':
+            tasa_aplicada = tasa_crecimiento_24_25 * 0.8
+            proyeccion = venta_2025 * (1 + tasa_aplicada / 100)
+            confianza = "Alta (Conservadora)"
+        
+        elif metodo == 'optimista':
+            tasa_aplicada = tasa_crecimiento_24_25 * 1.2
+            proyeccion = venta_2025 * (1 + tasa_aplicada / 100)
+            confianza = "Media (Optimista)"
+        
+        else:  # realista
+            tasa_aplicada = tasa_crecimiento_24_25
+            proyeccion = venta_2025 * (1 + tasa_aplicada / 100)
+            confianza = "Alta (Realista)"
+        
+        return {
+            'proyeccion_2026': proyeccion,
+            'tasa_aplicada': tasa_aplicada,
+            'venta_2024': venta_2024,
+            'venta_2025': venta_2025,
+            'tasa_historica': tasa_crecimiento_24_25,
+            'confianza': confianza,
+            'metodo': metodo.capitalize()
+        }, None
+        
+    except Exception as e:
+        return None, f"Error al proyectar: {str(e)}"
 
 
 @st.cache_data(ttl=3600)

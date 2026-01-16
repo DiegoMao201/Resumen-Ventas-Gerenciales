@@ -66,46 +66,106 @@ def cargar_y_validar_datos() -> Tuple[pd.DataFrame, Dict]:
         st.info("👉 Ve a **🏠 Resumen Mensual** para cargar los datos")
         st.stop()
     
-    df_raw = st.session_state.df_ventas.copy()
-    
-    df_clean = (
-        df_raw
-        .pipe(_mapear_columnas)
-        .pipe(_limpiar_tipos_datos)
-        .pipe(_clasificar_marcas)
-        .pipe(_enriquecer_geografia)
-        .pipe(_aplicar_filtro_ytd)
-    )
-    
-    config_filtros = {
-        'anios_disponibles': sorted([int(a) for a in df_clean['anio'].unique() if pd.notna(a) and a > 2000], reverse=True),
-        'ciudades_disponibles': sorted(df_clean['Poblacion_Real'].dropna().unique()),
-        'marcas_disponibles': sorted(df_clean['Marca_Master'].dropna().unique()),
-        'categorias_disponibles': sorted(df_clean['Categoria_Master'].dropna().unique())
-    }
-    
-    return df_clean, config_filtros
+    try:
+        df_raw = st.session_state.df_ventas.copy()
+        
+        # Validar que hay datos
+        if df_raw.empty:
+            st.error("❌ El DataFrame está vacío")
+            st.stop()
+        
+        # Pipeline de transformación con manejo de errores
+        df_clean = df_raw.copy()
+        
+        with st.spinner("🔄 Procesando datos..."):
+            df_clean = _mapear_columnas(df_clean)
+            df_clean = _limpiar_tipos_datos(df_clean)
+            df_clean = _clasificar_marcas(df_clean)
+            df_clean = _enriquecer_geografia(df_clean)
+            df_clean = _aplicar_filtro_ytd(df_clean)
+        
+        # Validar resultado final
+        if df_clean.empty:
+            st.error("❌ No hay datos después del procesamiento")
+            st.stop()
+        
+        # Extraer años válidos
+        anios_disponibles = sorted([
+            int(a) for a in df_clean['anio'].unique() 
+            if pd.notna(a) and a > 2000
+        ], reverse=True)
+        
+        if len(anios_disponibles) < 2:
+            st.error("❌ Se necesitan al menos 2 años de datos para análisis comparativo")
+            st.info(f"Años disponibles: {anios_disponibles}")
+            st.stop()
+        
+        config_filtros = {
+            'anios_disponibles': anios_disponibles,
+            'ciudades_disponibles': sorted(df_clean['Poblacion_Real'].dropna().unique()),
+            'marcas_disponibles': sorted(df_clean['Marca_Master'].dropna().unique()),
+            'categorias_disponibles': sorted(df_clean['Categoria_Master'].dropna().unique())
+        }
+        
+        return df_clean, config_filtros
+        
+    except Exception as e:
+        st.error(f"❌ Error en pipeline de datos: {str(e)}")
+        st.exception(e)  # Mostrar traceback completo
+        st.stop()
 
 def _mapear_columnas(df: pd.DataFrame) -> pd.DataFrame:
     """Mapea columnas a nombres estándar"""
     config = AppConfig()
-    rename_dict = {df.columns[idx]: new_name for idx, new_name in config.COLUMNAS_MAESTRAS.items() if idx < len(df.columns)}
+    
+    # Mapear solo las columnas que existen
+    rename_dict = {}
+    for idx, new_name in config.COLUMNAS_MAESTRAS.items():
+        if idx < len(df.columns):
+            rename_dict[df.columns[idx]] = new_name
+    
     df = df.rename(columns=rename_dict)
     
+    # Asegurar columna 'dia' existe
     if 'dia' not in df.columns:
         df['dia'] = 15
+    
+    # Asegurar columnas críticas existen
+    columnas_requeridas = ['anio', 'mes', 'VALOR', 'CLIENTE', 'COD']
+    for col in columnas_requeridas:
+        if col not in df.columns:
+            if col == 'VALOR':
+                df[col] = 0
+            elif col in ['anio', 'mes']:
+                from datetime import date
+                df[col] = date.today().year if col == 'anio' else 1
+            else:
+                df[col] = 'N/A'
     
     return df
 
 def _limpiar_tipos_datos(df: pd.DataFrame) -> pd.DataFrame:
     """Convierte columnas a tipos correctos"""
+    from datetime import date
     hoy = date.today()
     
-    df['VALOR'] = pd.to_numeric(df['VALOR'], errors='coerce').fillna(0)
-    df['anio'] = pd.to_numeric(df['anio'], errors='coerce').fillna(hoy.year).astype(int)
-    df['mes'] = pd.to_numeric(df['mes'], errors='coerce').fillna(1).astype(int)
-    df['dia'] = pd.to_numeric(df['dia'], errors='coerce').fillna(15).astype(int)
-    df['Key_Nit'] = df['COD'].astype(str).str.strip().str.replace('.0', '', regex=False)
+    # Limpiar valores antes de convertir
+    if 'VALOR' in df.columns:
+        df['VALOR'] = pd.to_numeric(df['VALOR'], errors='coerce').fillna(0)
+    
+    if 'anio' in df.columns:
+        df['anio'] = pd.to_numeric(df['anio'], errors='coerce').fillna(hoy.year).astype(int)
+    
+    if 'mes' in df.columns:
+        df['mes'] = pd.to_numeric(df['mes'], errors='coerce').fillna(1).astype(int)
+        df['mes'] = df['mes'].clip(1, 12)  # Asegurar rango válido
+    
+    if 'dia' in df.columns:
+        df['dia'] = pd.to_numeric(df['dia'], errors='coerce').fillna(15).astype(int)
+        df['dia'] = df['dia'].clip(1, 31)  # Asegurar rango válido
+    
+    if 'COD' in df.columns:
+        df['Key_Nit'] = df['COD'].astype(str).str.strip().str.replace('.0', '', regex=False)
     
     return df
 
@@ -114,13 +174,25 @@ def _clasificar_marcas(df: pd.DataFrame) -> pd.DataFrame:
     config = AppConfig()
     
     def clasificar_fila(codigo_marca):
-        codigo = int(codigo_marca) if pd.notna(codigo_marca) else 0
+        try:
+            codigo = int(codigo_marca) if pd.notna(codigo_marca) else 0
+        except (ValueError, TypeError):
+            codigo = 0
+        
         marca = config.MAPEO_MARCAS.get(codigo, f"Código {codigo}")
         prefijo = marca.split('-')[0] if '-' in marca else marca[:3]
         categoria = config.CATEGORIAS_MARCA.get(prefijo, "Otros")
-        return pd.Series([marca, categoria])
+        return marca, categoria  # Retornar tupla, no Series
     
-    df[['Marca_Master', 'Categoria_Master']] = df['CODIGO_MARCA_N'].apply(clasificar_fila)
+    # Aplicar y desempaquetar
+    if 'CODIGO_MARCA_N' in df.columns:
+        resultados = df['CODIGO_MARCA_N'].apply(clasificar_fila)
+        df['Marca_Master'] = [r[0] for r in resultados]
+        df['Categoria_Master'] = [r[1] for r in resultados]
+    else:
+        df['Marca_Master'] = 'Sin Marca'
+        df['Categoria_Master'] = 'Sin Categoría'
+    
     return df
 
 def _enriquecer_geografia(df: pd.DataFrame) -> pd.DataFrame:
