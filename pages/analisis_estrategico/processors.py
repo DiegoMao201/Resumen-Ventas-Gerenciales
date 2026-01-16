@@ -174,14 +174,14 @@ class TabAnalisisIA(BaseTab):
         
         with st.spinner("🧠 Generando análisis estratégico completo..."):
             metricas = self.calcular_metricas_basicas()
-            
-            # Análisis avanzado
+
             lineas_presentes = sorted(self.df['Linea_Estrategica'].dropna().unique()) if 'Linea_Estrategica' in self.df.columns else []
             if not lineas_presentes:
                 st.warning("No se encontraron líneas estratégicas en los datos.")
                 return
 
-            analisis_completo = generar_analisis_ia(self.df_actual, self.df_anterior, lineas_presentes)
+            # corregir llamada
+            analisis_completo = analizar_con_ia_avanzado(self.df_actual, self.df_anterior, metricas, lineas_presentes)
         
         # Análisis Ejecutivo IA
         st.markdown("---")
