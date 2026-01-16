@@ -68,29 +68,39 @@ def obtener_lista_ordenada(serie: pd.Series) -> list:
     return sorted(serie.dropna().astype(str).unique())
 
 def _unificar_lineas_marcas(df: pd.DataFrame) -> pd.DataFrame:
-    def _fmt_linea(val):
-        # si es número (1.0, 2.0), lo vuelve entero sin .0; si no, texto limpio
-        try:
-            if pd.notna(val) and str(val).strip() != "" and float(val).is_integer():
-                return str(int(float(val)))
-        except Exception:
-            pass
-        return str(val).strip()
+    import re
 
-    # Preferir nombres reales en linea_producto; si está vacío, usar categoria_producto
-    if 'linea_producto' in df.columns and df['linea_producto'].notna().any():
-        df['Linea_Estrategica'] = df['linea_producto'].apply(_fmt_linea)
-    elif 'categoria_producto' in df.columns:
-        df['Linea_Estrategica'] = df['categoria_producto'].apply(_fmt_linea)
-    elif 'nombre_articulo' in df.columns:
-        df['Linea_Estrategica'] = df['nombre_articulo'].apply(_fmt_linea)
+    def _fmt_linea(val: Any) -> str:
+        if pd.isna(val):
+            return ""
+        s = str(val).strip()
+        # Si es solo numérico (incluye “1.0”), descártalo para forzar fallback
+        if re.fullmatch(r"\d+(\.0+)?", s):
+            return ""
+        return s
+
+    # 1) Preferir linea_producto con nombres reales
+    if "linea_producto" in df.columns:
+        df["Linea_Estrategica"] = df["linea_producto"].apply(_fmt_linea)
     else:
-        df['Linea_Estrategica'] = ""
+        df["Linea_Estrategica"] = ""
 
-    df['Linea_Estrategica'] = df['Linea_Estrategica'].apply(_normalizar_txt)
+    # 2) Fallback a categoria_producto solo donde quedó vacío
+    if "categoria_producto" in df.columns:
+        mask = df["Linea_Estrategica"].eq("")
+        df.loc[mask, "Linea_Estrategica"] = df.loc[mask, "categoria_producto"].apply(_fmt_linea)
 
-    if 'marca_producto' in df.columns:
-        df['marca_producto'] = df['marca_producto'].fillna('').apply(_normalizar_txt)
+    # 3) Último fallback a nombre_articulo
+    if "nombre_articulo" in df.columns:
+        mask = df["Linea_Estrategica"].eq("")
+        df.loc[mask, "Linea_Estrategica"] = df.loc[mask, "nombre_articulo"].apply(_fmt_linea)
+
+    # Normalizar texto final (mayúsculas, sin tildes)
+    df["Linea_Estrategica"] = df["Linea_Estrategica"].apply(_normalizar_txt)
+
+    # Marcas
+    if "marca_producto" in df.columns:
+        df["marca_producto"] = df["marca_producto"].fillna("").apply(_normalizar_txt)
     return df
 
 def cargar_y_validar_datos() -> Tuple[pd.DataFrame, Dict]:
