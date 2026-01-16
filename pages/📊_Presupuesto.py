@@ -295,13 +295,37 @@ with st.expander("Ver detalle mensual consolidado", expanded=False):
         values="presupuesto_mensual",
         aggfunc="sum"
     ).fillna(0)
-    # Columna total anual por vendedor/grupo
     tabla_mensual["Total_2026"] = tabla_mensual.sum(axis=1)
-    # Fila total por mes (Total 1=Ene, Total 2=Feb, ..., Total 12=Dic, Total_2026)
+
+    # Fila total por mes (Total 1=Ene, ..., Total 12=Dic, Total_2026)
     fila_total = tabla_mensual.sum(axis=0)
     fila_total.name = "TOTAL_MES"
     tabla_mensual = pd.concat([tabla_mensual, fila_total.to_frame().T])
-    st.dataframe(tabla_mensual, use_container_width=True)
+
+    # Redondear y usar solo enteros
+    tabla_mensual = tabla_mensual.round(0).astype(int)
+
+    # Renombrar columnas de mes a nombre
+    mapeo_meses = {1:"Enero", 2:"Febrero", 3:"Marzo", 4:"Abril", 5:"Mayo", 6:"Junio",
+                   7:"Julio", 8:"Agosto", 9:"Septiembre", 10:"Octubre", 11:"Noviembre", 12:"Diciembre"}
+    tabla_mensual.rename(columns={k: v for k, v in mapeo_meses.items()}, inplace=True)
+
+    # Preparar configuración de columnas
+    tabla_mensual_reset = tabla_mensual.reset_index().rename(columns={"vendedor_unificado": "Vendedor/Grupo"})
+    col_config = {
+        "Vendedor/Grupo": "Vendedor/Grupo",
+        "Total_2026": st.column_config.NumberColumn("Total 2026", format="$ %d"),
+    }
+    for num, nombre in mapeo_meses.items():
+        if nombre in tabla_mensual_reset.columns:
+            col_config[nombre] = st.column_config.NumberColumn(f"Total {nombre}", format="$ %d")
+
+    st.dataframe(
+        tabla_mensual_reset,
+        use_container_width=True,
+        hide_index=True,
+        column_config=col_config
+    )
 
 # --- Visualizaciones ejecutivas mejoradas ---
 st.markdown("### 📊 Visualizaciones Ejecutivas")
