@@ -290,8 +290,13 @@ st.dataframe(
 st.markdown("### 🗓️ Plan Mensual unificado (agrupa mostradores)")
 with st.expander("Ver detalle mensual consolidado", expanded=False):
     tabla_mensual = df_mensual_unificado.pivot_table(
-        index="vendedor_unificado", columns="mes", values="presupuesto_mensual", aggfunc="sum"
+        index="vendedor_unificado",
+        columns="mes",
+        values="presupuesto_mensual",
+        aggfunc="sum"
     ).fillna(0)
+    # NUEVO: columna Total (suma 12 meses por vendedor/grupo)
+    tabla_mensual["Total_2026"] = tabla_mensual.sum(axis=1)
     st.dataframe(tabla_mensual, use_container_width=True)
 
 # --- Visualizaciones ejecutivas mejoradas ---
