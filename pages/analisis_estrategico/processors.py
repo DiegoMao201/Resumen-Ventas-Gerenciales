@@ -23,11 +23,11 @@ class BaseTab(ABC):
         def pick(names):
             return next((c for c in names if c in df.columns), names[-1])
 
-        self.col_valor = pick(["valor_venta", "VALOR"])
+        self.col_valor = "valor_venta" if "valor_venta" in df.columns else pick(["VALOR"])
+        self.col_linea = "Linea_Estrategica" if "Linea_Estrategica" in df.columns else pick(["linea_producto"])
+        self.col_marca = "marca_producto" if "marca_producto" in df.columns else pick(["Marca_Master"])
         self.col_cliente = pick(["nombre_cliente", "CLIENTE"])
         self.col_producto = pick(["nombre_articulo", "NOMBRE_PRODUCTO"])
-        self.col_marca = pick(["marca_producto", "Marca_Master"])
-        self.col_linea = pick(["Linea_Estrategica", "linea_producto"])
         self.col_vendedor = pick(["nomvendedor", "Vendedor"])
         self.col_ciudad = pick(["Poblacion_Real", "Ciudad"])
     

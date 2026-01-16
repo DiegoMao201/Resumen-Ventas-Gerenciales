@@ -6,6 +6,7 @@ import io
 from datetime import date
 from typing import Tuple, Dict
 from .config import AppConfig
+import unicodedata
 
 @st.cache_resource
 def get_dropbox_client():
@@ -123,6 +124,18 @@ def cargar_y_validar_datos() -> Tuple[pd.DataFrame, Dict]:
         st.exception(e)
         st.stop()
 
+def _normalizar_txt(txt: str) -> str:
+    if pd.isna(txt): return ""
+    t = "".join(c for c in unicodedata.normalize("NFD", str(txt)) if unicodedata.category(c) != "Mn")
+    return t.strip().upper()
+
+def _unificar_lineas_marcas(df: pd.DataFrame) -> pd.DataFrame:
+    df['Linea_Estrategica'] = df.get('Linea_Estrategica', df.get('linea_producto', '')).fillna('')
+    df['marca_producto'] = df.get('marca_producto', '').fillna('')
+    df['Linea_Estrategica'] = df['Linea_Estrategica'].apply(_normalizar_txt)
+    df['marca_producto'] = df['marca_producto'].apply(_normalizar_txt)
+    return df
+
 def _limpiar_tipos_datos(df: pd.DataFrame) -> pd.DataFrame:
     """Convierte columnas a tipos correctos SIN perder datos"""
     from datetime import date
@@ -143,6 +156,7 @@ def _limpiar_tipos_datos(df: pd.DataFrame) -> pd.DataFrame:
         df['nombre_cliente'] = df['nombre_cliente'].fillna('Sin Cliente').astype(str)
     if 'nomvendedor' in df.columns:
         df['nomvendedor'] = df['nomvendedor'].fillna('SIN VENDEDOR').astype(str)
+    df = _unificar_lineas_marcas(df)
     return df
 
 def _clasificar_lineas_estrategicas(df: pd.DataFrame) -> pd.DataFrame:
