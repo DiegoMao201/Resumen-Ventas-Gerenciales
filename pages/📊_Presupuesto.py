@@ -295,8 +295,12 @@ with st.expander("Ver detalle mensual consolidado", expanded=False):
         values="presupuesto_mensual",
         aggfunc="sum"
     ).fillna(0)
-    # NUEVO: columna Total (suma 12 meses por vendedor/grupo)
+    # Columna total anual por vendedor/grupo
     tabla_mensual["Total_2026"] = tabla_mensual.sum(axis=1)
+    # Fila total por mes (Total 1=Ene, Total 2=Feb, ..., Total 12=Dic, Total_2026)
+    fila_total = tabla_mensual.sum(axis=0)
+    fila_total.name = "TOTAL_MES"
+    tabla_mensual = pd.concat([tabla_mensual, fila_total.to_frame().T])
     st.dataframe(tabla_mensual, use_container_width=True)
 
 # --- Visualizaciones ejecutivas mejoradas ---
