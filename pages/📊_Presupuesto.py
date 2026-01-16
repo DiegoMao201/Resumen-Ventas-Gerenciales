@@ -207,40 +207,49 @@ def exportar_excel_mensual_unificado(tabla_mensual: pd.DataFrame) -> bytes:
     """Genera Excel profesional para la tabla mensual unificada."""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-        tabla_mensual.to_excel(writer, index=False, sheet_name="Plan_Mensual_2026")
+        tabla_mensual.to_excel(writer, index=False, sheet_name="Plan_Mensual_2026", startrow=3)
         wb = writer.book
         ws = writer.sheets["Plan_Mensual_2026"]
 
+        # Formatos
+        title_fmt = wb.add_format({
+            "bold": True, "font_size": 16, "font_color": "white",
+            "align": "center", "valign": "vcenter", "fg_color": "#1e3a8a"
+        })
         header_fmt = wb.add_format({
             "bold": True, "font_color": "white", "align": "center", "valign": "vcenter",
-            "fg_color": "#1e3a8a", "border": 1
+            "fg_color": "#3b82f6", "border": 1
         })
         money_fmt = wb.add_format({"num_format": "$#,##0", "border": 1})
         total_fmt = wb.add_format({"num_format": "$#,##0", "border": 1, "bold": True, "fg_color": "#fef3c7"})
         index_fmt = wb.add_format({"border": 1, "bold": True, "bg_color": "#eef2ff"})
 
-        # Detectar columna índice (primera columna del DF)
-        idx_col = tabla_mensual.columns[0]
+        # Título corporativo
+        num_cols = len(tabla_mensual.columns)
+        ws.merge_range(0, 0, 1, num_cols - 1, "PRESUPUESTO FERREINOX SAS BIC 2026", title_fmt)
 
+        # Encabezados
         for col, name in enumerate(tabla_mensual.columns):
-            ws.write(0, col, name, header_fmt)
-        for row_idx in range(1, len(tabla_mensual) + 1):
+            ws.write(3, col, name, header_fmt)
+
+        # Filas
+        for row_idx in range(4, len(tabla_mensual) + 4):
             ws.set_row(row_idx, None, money_fmt)
 
-        # Primera columna (vendedor/grupo) con formato de índice
-        ws.set_column(0, 0, 30, index_fmt)
-        # Resto de columnas numéricas
-        ws.set_column(1, len(tabla_mensual.columns) - 2, 14, money_fmt)
-        ws.set_column(len(tabla_mensual.columns) - 1, len(tabla_mensual.columns) - 1, 16, total_fmt)
+        # Columna índice y totales
+        ws.set_column(0, 0, 32, index_fmt)
+        ws.set_column(1, num_cols - 2, 16, money_fmt)
+        ws.set_column(num_cols - 1, num_cols - 1, 18, total_fmt)
 
-        # Fila total con formato destacado si existe
+        # Fila TOTAL_MES destacada
+        idx_col = tabla_mensual.columns[0]
         if idx_col in tabla_mensual.columns and (tabla_mensual[idx_col] == "TOTAL_MES").any():
-            r = tabla_mensual.index[tabla_mensual[idx_col] == "TOTAL_MES"][0] + 1
+            r = tabla_mensual.index[tabla_mensual[idx_col] == "TOTAL_MES"][0] + 4
             ws.set_row(r, None, total_fmt)
 
-        ws.freeze_panes(1, 1)
-        ws.autofilter(0, 0, len(tabla_mensual), len(tabla_mensual.columns) - 1)
-        ws.merge_range("A1:A1", "Plan Mensual 2026 Ferreinox", header_fmt)
+        # Congelar y autofiltro
+        ws.freeze_panes(4, 1)
+        ws.autofilter(3, 0, len(tabla_mensual) + 3, num_cols - 1)
 
     return output.getvalue()
 
