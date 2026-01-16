@@ -7,10 +7,10 @@ from sklearn.linear_model import LinearRegression
 @st.cache_data(ttl=3600)
 def proyectar_ventas_2026(df_2024, df_2025, metodo='conservador'):
     """Proyecta ventas 2026 según método seleccionado"""
-    
     try:
-        venta_2024 = df_2024['VALOR'].sum() if not df_2024.empty else 0
-        venta_2025 = df_2025['VALOR'].sum() if not df_2025.empty else 0
+        col_valor = "valor_venta" if "valor_venta" in df_2024.columns else "VALOR"
+        venta_2024 = df_2024[col_valor].sum() if not df_2024.empty else 0
+        venta_2025 = df_2025[col_valor].sum() if not df_2025.empty else 0
         
         if venta_2024 == 0 or venta_2025 == 0:
             return None, "Datos insuficientes para proyectar"

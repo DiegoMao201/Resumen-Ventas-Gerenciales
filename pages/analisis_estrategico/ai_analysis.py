@@ -76,94 +76,73 @@ def analizar_con_ia_avanzado(
         return _analisis_manual_avanzado(df_actual, df_anterior, metricas, lineas_estrategicas)
 
 
-def _analizar_lineas_estrategicas(
-    df_actual: pd.DataFrame,
-    df_anterior: pd.DataFrame,
-    lineas_estrategicas: List[str]
-) -> Dict:
-    """Análisis profundo de cada línea estratégica"""
-    
+def _resolver_columnas(df: pd.DataFrame) -> Dict[str, str]:
+    """Mapea nombres reales desde Resumen_Mensual."""
+    col_cliente = (
+        "nombre_cliente" if "nombre_cliente" in df.columns else
+        "CLIENTE" if "CLIENTE" in df.columns else
+        next((c for c in df.columns if "cliente" in c.lower()), None)
+    )
+    col_valor = (
+        "valor_venta" if "valor_venta" in df.columns else
+        "VALOR" if "VALOR" in df.columns else
+        next((c for c in df.columns if "valor" in c.lower()), None)
+    )
+    col_linea = (
+        "Linea_Estrategica" if "Linea_Estrategica" in df.columns else
+        "linea_producto" if "linea_producto" in df.columns else
+        next((c for c in df.columns if "linea" in c.lower()), None)
+    )
+    return {"cliente": col_cliente, "valor": col_valor, "linea": col_linea}
+
+def _analizar_lineas_estrategicas(df_actual, df_anterior, lineas_estrategicas):
+    cols = _resolver_columnas(df_actual)
+    columna_linea, columna_valor, columna_cliente = cols["linea"], cols["valor"], cols["cliente"]
     resultados = {}
-    
-    # ✅ USAR LA COLUMNA CORRECTA
-    columna_linea = 'Linea_Estrategica' if 'Linea_Estrategica' in df_actual.columns else 'linea_producto'
-    columna_valor = 'valor_venta' if 'valor_venta' in df_actual.columns else 'VALOR'
-    columna_cliente = 'nombre_cliente' if 'nombre_cliente' in df_actual.columns else 'CLIENTE'
-    
     for linea in lineas_estrategicas:
-        # Filtrar por línea
-        ventas_actual = df_actual[df_actual[columna_linea].str.upper() == linea.upper()][columna_valor].sum()
-        ventas_anterior = df_anterior[df_anterior[columna_linea].str.upper() == linea.upper()][columna_valor].sum()
-        
-        if ventas_anterior > 0:
-            variacion_abs = ventas_actual - ventas_anterior
-            variacion_pct = (variacion_abs / ventas_anterior) * 100
-        else:
-            variacion_abs = ventas_actual
-            variacion_pct = 100.0 if ventas_actual > 0 else 0.0
-        
-        # Clientes únicos
-        clientes_actual = df_actual[df_actual[columna_linea].str.upper() == linea.upper()][columna_cliente].nunique()
-        clientes_anterior = df_anterior[df_anterior[columna_linea].str.upper() == linea.upper()][columna_cliente].nunique()
-        
+        mask_a = df_actual[columna_linea].astype(str).str.upper() == linea.upper()
+        mask_b = df_anterior[columna_linea].astype(str).str.upper() == linea.upper()
+        ventas_a = df_actual.loc[mask_a, columna_valor].sum()
+        ventas_b = df_anterior.loc[mask_b, columna_valor].sum()
+        variacion_abs = ventas_a - ventas_b
+        variacion_pct = (variacion_abs / ventas_b * 100) if ventas_b > 0 else (100.0 if ventas_a > 0 else 0.0)
+        clientes_a = df_actual.loc[mask_a, columna_cliente].nunique()
+        clientes_b = df_anterior.loc[mask_b, columna_cliente].nunique()
         resultados[linea] = {
-            'ventas_actual': ventas_actual,
-            'ventas_anterior': ventas_anterior,
-            'variacion_abs': variacion_abs,
-            'variacion_pct': variacion_pct,
-            'clientes_actual': clientes_actual,
-            'clientes_anterior': clientes_anterior,
-            'impacto': 'MOTOR' if variacion_pct > 10 else 'FRENO' if variacion_pct < -10 else 'ESTABLE'
+            "ventas_actual": ventas_a,
+            "ventas_anterior": ventas_b,
+            "variacion_abs": variacion_abs,
+            "variacion_pct": variacion_pct,
+            "clientes_actual": clientes_a,
+            "clientes_anterior": clientes_b,
+            "impacto": "MOTOR" if variacion_pct > 10 else "FRENO" if variacion_pct < -10 else "ESTABLE",
         }
-    
     return resultados
 
-
-def _analizar_retencion_clientes(
-    df_actual: pd.DataFrame,
-    df_anterior: pd.DataFrame
-) -> Dict:
-    """Análisis de retención y captación de clientes"""
-    
-    clientes_actual = set(df_actual['CLIENTE'].unique())
-    clientes_anterior = set(df_anterior['CLIENTE'].unique())
-    
-    # Clientes retenidos
+def _analizar_retencion_clientes(df_actual, df_anterior):
+    cols = _resolver_columnas(df_actual)
+    col_cliente, col_valor = cols["cliente"], cols["valor"]
+    clientes_actual = set(df_actual[col_cliente].unique())
+    clientes_anterior = set(df_anterior[col_cliente].unique())
     clientes_retenidos = clientes_actual & clientes_anterior
-    
-    # Clientes nuevos
     clientes_nuevos = clientes_actual - clientes_anterior
-    
-    # Clientes perdidos
     clientes_perdidos = clientes_anterior - clientes_actual
-    
-    # Ventas por segmento
-    ventas_retenidos = df_actual[df_actual['CLIENTE'].isin(clientes_retenidos)]['VALOR'].sum()
-    ventas_nuevos = df_actual[df_actual['CLIENTE'].isin(clientes_nuevos)]['VALOR'].sum()
-    
-    # Top clientes retenidos
-    top_retenidos = df_actual[df_actual['CLIENTE'].isin(clientes_retenidos)] \
-        .groupby('CLIENTE')['VALOR'].sum() \
-        .nlargest(10)
-    
-    # Top clientes nuevos
-    top_nuevos = df_actual[df_actual['CLIENTE'].isin(clientes_nuevos)] \
-        .groupby('CLIENTE')['VALOR'].sum() \
-        .nlargest(10)
-    
+    ventas_retenidos = df_actual[df_actual[col_cliente].isin(clientes_retenidos)][col_valor].sum()
+    ventas_nuevos = df_actual[df_actual[col_cliente].isin(clientes_nuevos)][col_valor].sum()
+    top_retenidos = df_actual[df_actual[col_cliente].isin(clientes_retenidos)].groupby(col_cliente)[col_valor].sum().nlargest(10)
+    top_nuevos = df_actual[df_actual[col_cliente].isin(clientes_nuevos)].groupby(col_cliente)[col_valor].sum().nlargest(10)
     tasa_retencion = (len(clientes_retenidos) / len(clientes_anterior) * 100) if len(clientes_anterior) > 0 else 0
-    
     return {
-        'total_clientes_actual': len(clientes_actual),
-        'total_clientes_anterior': len(clientes_anterior),
-        'clientes_retenidos': len(clientes_retenidos),
-        'clientes_nuevos': len(clientes_nuevos),
-        'clientes_perdidos': len(clientes_perdidos),
-        'ventas_retenidos': ventas_retenidos,
-        'ventas_nuevos': ventas_nuevos,
-        'tasa_retencion': tasa_retencion,
-        'top_retenidos': top_retenidos.to_dict(),
-        'top_nuevos': top_nuevos.to_dict()
+        "total_clientes_actual": len(clientes_actual),
+        "total_clientes_anterior": len(clientes_anterior),
+        "clientes_retenidos": len(clientes_retenidos),
+        "clientes_nuevos": len(clientes_nuevos),
+        "clientes_perdidos": len(clientes_perdidos),
+        "ventas_retenidos": ventas_retenidos,
+        "ventas_nuevos": ventas_nuevos,
+        "tasa_retencion": tasa_retencion,
+        "top_retenidos": top_retenidos.to_dict(),
+        "top_nuevos": top_nuevos.to_dict(),
     }
 
 

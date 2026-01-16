@@ -18,17 +18,16 @@ class BaseTab(ABC):
     def __init__(self, df: pd.DataFrame, filtros: Dict):
         self.df = df
         self.filtros = filtros
-        self.df_actual = df[df['anio'] == filtros['anio_objetivo']]
-        self.df_anterior = df[df['anio'] == filtros['anio_base']]
-        
-        # ✅ MAPEO AUTOMÁTICO DE COLUMNAS
-        self.col_valor = 'valor_venta' if 'valor_venta' in df.columns else 'VALOR'
-        self.col_cliente = 'nombre_cliente' if 'nombre_cliente' in df.columns else 'CLIENTE'
-        self.col_producto = 'nombre_articulo' if 'nombre_articulo' in df.columns else 'NOMBRE_PRODUCTO'
-        self.col_marca = 'marca_producto' if 'marca_producto' in df.columns else 'Marca_Master'
-        self.col_linea = 'Linea_Estrategica' if 'Linea_Estrategica' in df.columns else 'linea_producto'
-        self.col_vendedor = 'nomvendedor' if 'nomvendedor' in df.columns else 'Vendedor'
-        self.col_ciudad = 'Poblacion_Real' if 'Poblacion_Real' in df.columns else 'Ciudad'
+        self.df_actual = df[df["anio"] == filtros["anio_objetivo"]]
+        self.df_anterior = df[df["anio"] == filtros["anio_base"]]
+        # mapeo robusto de columnas del maestro
+        self.col_valor = "valor_venta" if "valor_venta" in df.columns else "VALOR"
+        self.col_cliente = "nombre_cliente" if "nombre_cliente" in df.columns else "CLIENTE"
+        self.col_producto = "nombre_articulo" if "nombre_articulo" in df.columns else "NOMBRE_PRODUCTO"
+        self.col_marca = "marca_producto" if "marca_producto" in df.columns else "Marca_Master"
+        self.col_linea = "Linea_Estrategica" if "Linea_Estrategica" in df.columns else "linea_producto"
+        self.col_vendedor = "nomvendedor" if "nomvendedor" in df.columns else "Vendedor"
+        self.col_ciudad = "Poblacion_Real" if "Poblacion_Real" in df.columns else "Ciudad"
     
     @abstractmethod
     def render(self):
