@@ -103,10 +103,18 @@ def cargar_cliente_tipo() -> pd.DataFrame:
         st.error(f"No se pudo leer {ruta}: {e}")
         return pd.DataFrame()
 
-def asignar_presupuesto_detallista(df_tipo: pd.DataFrame, meta_total: float, canal="DETALLISTA") -> pd.DataFrame:
-    df_det = df_tipo[df_tipo["nombre_tipo_negocio"] == _normalizar_txt(canal)].copy()
+def asignar_presupuesto_detallista(df_tipo: pd.DataFrame, meta_total: float, canales=None) -> pd.DataFrame:
+    canales = canales or ["DETALLISTAS", "FERRETERIA"]
+    canales_norm = [_normalizar_txt(c) for c in canales]
+    df_tipo["nombre_tipo_negocio_norm"] = df_tipo["nombre_tipo_negocio"].apply(_normalizar_txt)
+    mask_eq = df_tipo["nombre_tipo_negocio_norm"].isin(canales_norm)
+    mask_ct = df_tipo["nombre_tipo_negocio_norm"].apply(lambda x: any(c in x for c in canales_norm))
+    df_det = df_tipo[mask_eq | mask_ct].copy()
     if df_det.empty:
-        st.error(f"❌ No hay registros de canal {canal} en CLIENTE_TIPO (columna NOMBRE_TIPO_NEGOCIO). Ejemplos encontrados: {df_tipo['nombre_tipo_negocio'].dropna().unique()[:10]}")
+        st.error(
+            f"❌ No hay registros de canal {canales} en CLIENTE_TIPO (NOMBRE_TIPO_NEGOCIO). "
+            f"Ejemplos: {df_tipo['nombre_tipo_negocio'].dropna().unique()[:10]}"
+        )
         return pd.DataFrame()
     ventas_2025 = df_det[df_det["anio"] == 2025]
     base_sum = ventas_2025["valor_total_item_vendido"].sum()
@@ -180,9 +188,10 @@ if df_tipo_raw.empty:
     st.error("❌ CLIENTE_TIPO no se pudo cargar o está vacío. Verifica Dropbox y formato.")
     st.stop()
 
-df_det = asignar_presupuesto_detallista(df_tipo_raw, meta_total=590_000_000, canal="DETALLISTA")
+canales_objetivo = ["DETALLISTAS", "FERRETERIA"]
+df_det = asignar_presupuesto_detallista(df_tipo_raw, meta_total=590_000_000, canales=canales_objetivo)
 if df_det.empty:
-    st.error("❌ No hay registros de canal DETALLISTA en CLIENTE_TIPO (nombre_tipo_negocio).")
+    st.error(f"❌ No hay registros para los canales {canales_objetivo} en CLIENTE_TIPO.")
     st.dataframe(df_tipo_raw.head(50), use_container_width=True)
     st.stop()
 
@@ -196,7 +205,7 @@ avance_pct = (avance_total / meta_total * 100) if meta_total > 0 else 0
 
 # ---------------- UI ----------------
 st.title("🎯 Acciones y Recomendaciones | Seguimiento Pintuco")
-st.caption("Actividad Pintuco (16-31 Ene 2026) | Meta $590M canal DETALLISTA | Bono 0.5% fuerza comercial")
+st.caption("Actividad Pintuco (16-31 Ene 2026) | Meta $590M canales DETALLISTAS + FERRETERIA | Bono 0.5% fuerza comercial")
 
 tabs = st.tabs(["Actividad Pintuco", "Seguimiento Clientes", "Foco de Crecimiento"])
 
