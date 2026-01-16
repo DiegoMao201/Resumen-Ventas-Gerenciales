@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 from typing import Dict, List
 import io
 import datetime
+from xlsxwriter.utility import xl_col_to_name  # añade esta importación
 
 st.set_page_config(page_title="💰 Presupuesto 2026 | Ferreinox", page_icon="💰", layout="wide")
 
@@ -340,20 +341,22 @@ def exportar_excel_ejecutivo(df_mensual_unificado: pd.DataFrame, df_coment: pd.D
 
         # Fila de Totales Generales al final
         ws.write(curr_row, 0, "TOTAL COMPAÑÍA", fmt_header)
-        # Sumar columnas verticales
+        # Sumar Ene-Dic (cols 2..13) y Total (col 14)
         for m_idx in range(1, 13):
-            # Formula excel: =SUM(C7:C_last)
-            col_letter = chr(65 + m_idx + 1) # C es col 2, pero offset +1 por sparkline = D? No, wait.
-            # A=0, B=1, C=2. Ene esta en col 2.
-            # chr(65+2) = C.
-            xls_col =  pd.io.excel.ExcelWriter(io.BytesIO(), engine='xlsxwriter').book.add_format()._get_color
-            # Mejor usar indices numericos de xlsxwriter
-            ws.write_formula(curr_row, m_idx + 1, f"=SUM({chr(67+m_idx-1)}{start_row+2}:{chr(67+m_idx-1)}{curr_row})", fmt_curr_tot)
-
-        ws.write_formula(curr_row, 14, f"=SUM(O{start_row+2}:O{curr_row})", fmt_curr_tot)
+            col_letter = xl_col_to_name(m_idx + 1)  # col 2 -> C
+            ws.write_formula(
+                curr_row, m_idx + 1,
+                f"=SUM({col_letter}{start_row+2}:{col_letter}{curr_row})",
+                fmt_curr_tot
+            )
+        total_col_letter = xl_col_to_name(14)
+        ws.write_formula(
+            curr_row, 14,
+            f"=SUM({total_col_letter}{start_row+2}:{total_col_letter}{curr_row})",
+            fmt_curr_tot
+        )
 
         # --- SECCIÓN 4: FORMATO CONDICIONAL Y VISUALES ---
-        # Rango de datos numéricos (Meses): C7 a N_last
         last_data_row = curr_row - 1
         rng_months = f"C{start_row+2}:N{last_data_row+1}"
         rng_totals = f"O{start_row+2}:O{last_data_row+1}"
