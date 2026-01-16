@@ -7,6 +7,8 @@ import unicodedata
 import plotly.express as px
 import plotly.graph_objects as go
 
+META_CANAL = 590_000_000  # meta global canales DETALLISTAS + FERRETERIA
+
 st.set_page_config(page_title="🎯 Acciones y Recomendaciones | Pintuco", page_icon="🎯", layout="wide")
 
 # ---------------- Utilidades ----------------
