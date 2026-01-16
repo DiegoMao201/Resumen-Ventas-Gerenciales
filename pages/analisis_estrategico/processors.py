@@ -9,7 +9,8 @@ from typing import Dict
 
 from .projections import proyectar_ventas_2026, proyectar_por_vendedor, proyectar_por_ciudad
 from .pdf_generator import generar_reporte_completo
-from .ai_analysis import analizar_con_ia  # ✅ NUEVO
+from .ai_analysis import analizar_con_ia_avanzado
+from .config import AppConfig
 
 class BaseTab(ABC):
     """Clase base abstracta para tabs de análisis"""
@@ -148,45 +149,114 @@ class TabADNCrecimiento(BaseTab):
 
 
 class TabAnalisisIA(BaseTab):
-    """Tab de análisis con Inteligencia Artificial"""
+    """Tab de análisis ejecutivo con IA avanzada"""
     
     def render(self):
-        st.header("🤖 Análisis con Inteligencia Artificial")
-        st.markdown("**Análisis ejecutivo generado por GPT-4 Mini**")
+        st.header("🤖 Análisis Estratégico Ejecutivo con IA")
+        st.markdown("**Análisis profundo generado por GPT-4 Mini + Análisis Cuantitativo**")
         
-        with st.spinner("🧠 Generando análisis estratégico con IA..."):
+        config = AppConfig()
+        
+        with st.spinner("🧠 Generando análisis estratégico completo..."):
             metricas = self.calcular_metricas_basicas()
-            analisis = analizar_con_ia(self.df_actual, self.df_anterior, metricas)
+            
+            # Análisis avanzado
+            analisis_completo = analizar_con_ia_avanzado(
+                self.df_actual,
+                self.df_anterior,
+                metricas,
+                config.LINEAS_ESTRATEGICAS
+            )
         
-        # Resumen Ejecutivo
-        st.subheader("📋 Resumen Ejecutivo")
-        st.markdown(analisis.get('resumen', 'No disponible'))
+        # Análisis Ejecutivo IA
+        st.markdown("---")
+        st.markdown(analisis_completo['analisis_ejecutivo'])
+        
+        # Análisis de Líneas Estratégicas
+        st.markdown("---")
+        st.subheader("📊 Análisis Detallado por Línea Estratégica")
+        
+        analisis_lineas = analisis_completo['analisis_lineas']
+        
+        # Crear DataFrame
+        df_lineas = pd.DataFrame.from_dict(analisis_lineas, orient='index')
+        df_lineas = df_lineas.sort_values('variacion_abs', ascending=False)
+        
+        st.dataframe(
+            df_lineas[['ventas_actual', 'variacion_pct', 'variacion_abs', 'clientes_actual', 'impacto']],
+            column_config={
+                "ventas_actual": st.column_config.NumberColumn("Ventas Actuales", format="$%d"),
+                "variacion_pct": st.column_config.NumberColumn("Var %", format="%.1f%%"),
+                "variacion_abs": st.column_config.NumberColumn("Var Absoluta", format="$%d"),
+                "clientes_actual": st.column_config.NumberColumn("Clientes", format="%d"),
+                "impacto": "Impacto"
+            },
+            use_container_width=True
+        )
+        
+        # Gráfico de motores vs frenos
+        st.markdown("---")
+        st.subheader("🎯 Motores vs Frenos de Crecimiento")
+        
+        import plotly.graph_objects as go
+        
+        fig = go.Figure()
+        
+        for linea in df_lineas.index:
+            data = df_lineas.loc[linea]
+            color = '#10b981' if data['impacto'] == 'MOTOR' else '#ef4444' if data['impacto'] == 'FRENO' else '#6b7280'
+            
+            fig.add_trace(go.Bar(
+                name=linea,
+                x=[linea],
+                y=[data['variacion_abs']],
+                marker_color=color,
+                text=f"${data['variacion_abs']:,.0f}",
+                textposition='outside'
+            ))
+        
+        fig.update_layout(
+            title="Impacto por Línea Estratégica",
+            showlegend=False,
+            height=500
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Análisis de Clientes
+        st.markdown("---")
+        st.subheader("👥 Análisis de Retención y Captación")
+        
+        analisis_clientes = analisis_completo['analisis_clientes']
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        col1.metric(
+            "Tasa de Retención",
+            f"{analisis_clientes['tasa_retencion']:.1f}%",
+            f"{analisis_clientes['clientes_retenidos']} clientes"
+        )
+        
+        col2.metric(
+            "Clientes Nuevos",
+            f"{analisis_clientes['clientes_nuevos']}",
+            f"${analisis_clientes['ventas_nuevos']:,.0f}"
+        )
+        
+        col3.metric(
+            "Clientes Perdidos",
+            f"{analisis_clientes['clientes_perdidos']}",
+            delta_color="inverse"
+        )
+        
+        col4.metric(
+            "Ventas Retenidos",
+            f"${analisis_clientes['ventas_retenidos']:,.0f}",
+            f"{len(analisis_clientes['top_retenidos'])} TOP"
+        )
         
         st.markdown("---")
-        
-        # Insights Clave
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("💡 Insights Clave")
-            insights = analisis.get('insights', [])
-            if insights:
-                for insight in insights:
-                    st.markdown(f"- {insight}")
-            else:
-                st.info("No se generaron insights")
-        
-        with col2:
-            st.subheader("🎯 Recomendaciones Estratégicas")
-            recomendaciones = analisis.get('recomendaciones', [])
-            if recomendaciones:
-                for rec in recomendaciones:
-                    st.markdown(f"- {rec}")
-            else:
-                st.info("No se generaron recomendaciones")
-        
-        st.markdown("---")
-        st.caption("✨ Análisis generado por OpenAI GPT-4 Mini | Revisado para Ferreinox S.A.S. BIC")
+        st.caption("✨ Análisis generado por OpenAI GPT-4 Mini + Motor Cuantitativo Ferreinox | Sistema de Inteligencia Comercial v2.0")
 
 
 class TabOportunidadGeografica(BaseTab):

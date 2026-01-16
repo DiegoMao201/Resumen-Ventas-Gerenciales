@@ -1,6 +1,6 @@
 """Configuración centralizada del módulo de análisis estratégico"""
 from dataclasses import dataclass, field
-from typing import Dict
+from typing import Dict, List
 import streamlit as st
 
 @dataclass
@@ -24,32 +24,29 @@ class AppConfig:
     LOGO_URL: str = "https://raw.githubusercontent.com/DiegoMao2021/Resumen-Ventas-Gerenciales/main/LOGO%20FERREINOX%20SAS%20BIC%202024.png"
     WEBSITE_URL: str = "https://www.ferreinox.co"
     
-    MAPEO_MARCAS: Dict[int, str] = field(default_factory=lambda: {
-        50: "P8-ASC-MEGA", 54: "MPY-International", 55: "DPP-AN Colorantes Latam",
-        56: "DPP-Pintuco Profesional", 57: "ASC-Mega", 58: "DPP-Pintuco",
-        61: "S-M Sika", 65: "HPG-Habro Pack", 66: "ASI-Anypsa Internacional",
-        67: "ASC-Anypsa", 68: "ASI-Anypsa", 69: "MPY-Master Pro",
-        73: "C&D-Corona", 74: "WEG-Weg", 75: "GEN-Generico",
-        76: "LAM-Lamosa", 77: "ABR-Abrasivos", 78: "HER-Herramientas",
-        79: "FER-Ferreteria", 80: "SEG-Seguridad", 81: "ELE-Electricos",
-        82: "TUB-Tuberia", 83: "PEG-Pegantes", 84: "IMP-Impermeabilizantes",
-        85: "DEC-Decoracion"
-    })
+    # ✅ LÍNEAS ESTRATÉGICAS CORRECTAS
+    LINEAS_ESTRATEGICAS: List[str] = field(default_factory=lambda: [
+        'ABRACOL', 'YALE', 'GOYA', 'DELTA', 'SAINT GOBAIN', 
+        'ALLEGION', 'ARTECOLA', 'INDUMA', 'ATLAS', 'SEGUREX'
+    ])
     
-    CATEGORIAS_MARCA: Dict[str, str] = field(default_factory=lambda: {
-        "P8": "Pinturas Premium", "MPY": "Pinturas Master", "DPP": "Pinturas Profesional",
-        "ASC": "Complementos", "S": "Sika", "HPG": "Empaque",
-        "ASI": "Internacional", "C&D": "Acabados", "WEG": "Electricos",
-        "GEN": "Genericos", "LAM": "Ceramica", "ABR": "Abrasivos",
-        "HER": "Herramientas", "FER": "Ferreteria", "SEG": "Seguridad",
-        "ELE": "Electricos", "TUB": "Tuberia", "PEG": "Pegantes",
-        "IMP": "Impermeabilizantes", "DEC": "Decoracion"
+    # Mapeo de marcas a líneas estratégicas
+    MAPEO_MARCAS: Dict[int, str] = field(default_factory=lambda: {
+        50: "Pintuco", 54: "MPY-International", 55: "AN Colorantes",
+        56: "Pintuco Profesional", 57: "ASC-Mega", 58: "Pintuco",
+        61: "Sika", 65: "Habro Pack", 66: "Anypsa Internacional",
+        67: "Anypsa", 68: "Anypsa", 69: "Master Pro",
+        73: "Corona", 74: "WEG", 75: "Generico",
+        76: "Lamosa", 77: "Abrasivos", 78: "Herramientas",
+        79: "Ferreteria", 80: "Seguridad", 81: "Electricos",
+        82: "Tuberia", 83: "Pegantes", 84: "Impermeabilizantes",
+        85: "Decoracion"
     })
     
     COLUMNAS_MAESTRAS: Dict[int, str] = field(default_factory=lambda: {
         0: 'anio', 1: 'mes', 2: 'dia', 7: 'COD', 8: 'CLIENTE',
-        10: 'NOMBRE_PRODUCTO_K', 11: 'CATEGORIA_L', 
-        13: 'CODIGO_MARCA_N', 14: 'VALOR'
+        10: 'NOMBRE_PRODUCTO', 11: 'CATEGORIA', 12: 'LINEA',
+        13: 'MARCA', 14: 'VALOR', 15: 'UNIDADES', 16: 'COSTO'
     })
 
 def configurar_pagina():
@@ -89,6 +86,22 @@ def configurar_pagina():
             border-left: 4px solid {colors.PRIMARY};
         }}
         
+        .insight-box {{
+            background: linear-gradient(135deg, #f8fafc, #e0e7ff);
+            padding: 1.5rem;
+            border-radius: 10px;
+            border-left: 5px solid {colors.SUCCESS};
+            margin: 1rem 0;
+        }}
+        
+        .warning-box {{
+            background: linear-gradient(135deg, #fef3c7, #fde68a);
+            padding: 1.5rem;
+            border-radius: 10px;
+            border-left: 5px solid {colors.WARNING};
+            margin: 1rem 0;
+        }}
+        
         .stTabs [aria-selected="true"] {{
             background: linear-gradient(135deg, {colors.PRIMARY}, {colors.SECONDARY}) !important;
             color: white !important;
@@ -98,7 +111,7 @@ def configurar_pagina():
     
     st.markdown(f"""
     <div class="encabezado-estrategico">
-        <h1>📊 Análisis Estratégico de Crecimiento</h1>
+        <h1>📊 Análisis Estratégico Ejecutivo</h1>
         <p style="color: white; margin: 0;">Ferreinox S.A.S. BIC | <a href="{config.WEBSITE_URL}" target="_blank" style="color: white;">www.ferreinox.co</a></p>
     </div>
     """, unsafe_allow_html=True)
