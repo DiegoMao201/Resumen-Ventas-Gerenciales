@@ -219,18 +219,23 @@ def exportar_excel_mensual_unificado(tabla_mensual: pd.DataFrame) -> bytes:
         total_fmt = wb.add_format({"num_format": "$#,##0", "border": 1, "bold": True, "fg_color": "#fef3c7"})
         index_fmt = wb.add_format({"border": 1, "bold": True, "bg_color": "#eef2ff"})
 
+        # Detectar columna índice (primera columna del DF)
+        idx_col = tabla_mensual.columns[0]
+
         for col, name in enumerate(tabla_mensual.columns):
             ws.write(0, col, name, header_fmt)
         for row_idx in range(1, len(tabla_mensual) + 1):
             ws.set_row(row_idx, None, money_fmt)
-        ws.set_column(0, 0, 30, index_fmt)  # Vendedor/Grupo
+
+        # Primera columna (vendedor/grupo) con formato de índice
+        ws.set_column(0, 0, 30, index_fmt)
+        # Resto de columnas numéricas
         ws.set_column(1, len(tabla_mensual.columns) - 2, 14, money_fmt)
         ws.set_column(len(tabla_mensual.columns) - 1, len(tabla_mensual.columns) - 1, 16, total_fmt)
 
         # Fila total con formato destacado si existe
-        total_row = tabla_mensual[tabla_mensual["Vendedor/Grupo"] == "TOTAL_MES"]
-        if not total_row.empty:
-            r = tabla_mensual.index[tabla_mensual["Vendedor/Grupo"] == "TOTAL_MES"][0] + 1
+        if idx_col in tabla_mensual.columns and (tabla_mensual[idx_col] == "TOTAL_MES").any():
+            r = tabla_mensual.index[tabla_mensual[idx_col] == "TOTAL_MES"][0] + 1
             ws.set_row(r, None, total_fmt)
 
         ws.freeze_panes(1, 1)
