@@ -63,17 +63,20 @@ def _normalizar_txt(txt: str) -> str:
     t = "".join(c for c in unicodedata.normalize("NFD", str(txt)) if unicodedata.category(c) != "Mn")
     return t.strip().upper()
 
+def obtener_lista_ordenada(serie: pd.Series) -> list:
+    """Devuelve lista ordenada y sin nulos."""
+    return sorted(serie.dropna().astype(str).unique())
+
 def _unificar_lineas_marcas(df: pd.DataFrame) -> pd.DataFrame:
-    # Toma la mejor fuente disponible para la línea
-    if 'linea_producto' in df.columns:
-        df['Linea_Estrategica'] = df['linea_producto'].fillna('')
-    elif 'categoria_producto' in df.columns:
+    # Toma la mejor fuente disponible para la línea (CAT_PRODUCTO)
+    if 'categoria_producto' in df.columns:
         df['Linea_Estrategica'] = df['categoria_producto'].fillna('')
+    elif 'linea_producto' in df.columns:
+        df['Linea_Estrategica'] = df['linea_producto'].fillna('')
     elif 'nombre_articulo' in df.columns:
         df['Linea_Estrategica'] = df['nombre_articulo'].fillna('')
     else:
         df['Linea_Estrategica'] = ''
-
     df['Linea_Estrategica'] = df['Linea_Estrategica'].apply(_normalizar_txt)
     if 'marca_producto' in df.columns:
         df['marca_producto'] = df['marca_producto'].fillna('').apply(_normalizar_txt)
