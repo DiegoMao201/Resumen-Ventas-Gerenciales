@@ -130,20 +130,19 @@ def _limpiar_tipos_datos(df: pd.DataFrame) -> pd.DataFrame:
     
     if 'valor_venta' in df.columns:
         df['valor_venta'] = pd.to_numeric(df['valor_venta'], errors='coerce').fillna(0)
-    
+
+    # Fallback de línea estratégica
+    if 'Linea_Estrategica' not in df.columns and 'linea_producto' in df.columns:
+        df['Linea_Estrategica'] = df['linea_producto']
+
     if 'anio' in df.columns:
         df['anio'] = pd.to_numeric(df['anio'], errors='coerce').fillna(hoy.year).astype(int)
-    
     if 'mes' in df.columns:
-        df['mes'] = pd.to_numeric(df['mes'], errors='coerce').fillna(1).astype(int)
-        df['mes'] = df['mes'].clip(1, 12)
-    
+        df['mes'] = pd.to_numeric(df['mes'], errors='coerce').fillna(1).astype(int).clip(1, 12)
     if 'nombre_cliente' in df.columns:
         df['nombre_cliente'] = df['nombre_cliente'].fillna('Sin Cliente').astype(str)
-    
     if 'nomvendedor' in df.columns:
-        df['nomvendedor'] = df['nomvendedor'].fillna('GENERAL').astype(str)
-    
+        df['nomvendedor'] = df['nomvendedor'].fillna('SIN VENDEDOR').astype(str)
     return df
 
 def _clasificar_lineas_estrategicas(df: pd.DataFrame) -> pd.DataFrame:

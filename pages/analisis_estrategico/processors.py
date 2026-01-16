@@ -20,16 +20,16 @@ class BaseTab(ABC):
         self.df_actual = df[df["anio"] == filtros["anio_objetivo"]]
         self.df_anterior = df[df["anio"] == filtros["anio_base"]]
 
-        def pick(colnames):
-            return next((c for c in colnames if c in df.columns), colnames[-1])
+        def pick(names):
+            return next((c for c in names if c in df.columns), names[-1])
 
-        self.col_valor = pick(["valor_venta", "VALOR", next((c for c in df.columns if "valor" in c.lower()), "valor_venta")])
-        self.col_cliente = pick(["nombre_cliente", "CLIENTE", next((c for c in df.columns if "client" in c.lower()), "nombre_cliente")])
-        self.col_producto = pick(["nombre_articulo", "NOMBRE_PRODUCTO", next((c for c in df.columns if "art" in c.lower()), "nombre_articulo")])
-        self.col_marca = pick(["marca_producto", "Marca_Master", next((c for c in df.columns if "marca" in c.lower()), "marca_producto")])
-        self.col_linea = pick(["Linea_Estrategica", "linea_producto", next((c for c in df.columns if "linea" in c.lower()), "linea_producto")])
-        self.col_vendedor = pick(["nomvendedor", "Vendedor", next((c for c in df.columns if "vendedor" in c.lower()), "nomvendedor")])
-        self.col_ciudad = pick(["Poblacion_Real", "Ciudad", next((c for c in df.columns if "ciud" in c.lower()), "Poblacion_Real")])
+        self.col_valor = pick(["valor_venta", "VALOR"])
+        self.col_cliente = pick(["nombre_cliente", "CLIENTE"])
+        self.col_producto = pick(["nombre_articulo", "NOMBRE_PRODUCTO"])
+        self.col_marca = pick(["marca_producto", "Marca_Master"])
+        self.col_linea = pick(["Linea_Estrategica", "linea_producto"])
+        self.col_vendedor = pick(["nomvendedor", "Vendedor"])
+        self.col_ciudad = pick(["Poblacion_Real", "Ciudad"])
     
     @abstractmethod
     def render(self):

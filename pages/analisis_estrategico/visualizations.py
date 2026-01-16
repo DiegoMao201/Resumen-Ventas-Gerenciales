@@ -118,7 +118,7 @@ def crear_mapa_calor_crecimiento(
 def crear_grafico_tendencia_mensual(
     df: pd.DataFrame,
     columna_fecha: str = 'mes',
-    columna_valor: str = 'VALOR',
+    columna_valor: str = 'valor_venta',
     columna_agrupacion: str = 'anio'
 ) -> go.Figure:
     """Crea gráfico de tendencia mensual por año"""
@@ -147,7 +147,7 @@ def crear_grafico_tendencia_mensual(
 def crear_grafico_pareto(
     df: pd.DataFrame,
     columna_entidad: str,
-    columna_valor: str = 'VALOR',
+    columna_valor: str = 'valor_venta',
     top_n: int = 20,
     titulo: str = "Análisis de Pareto"
 ) -> go.Figure:

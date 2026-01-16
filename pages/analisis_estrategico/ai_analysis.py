@@ -79,27 +79,12 @@ def analizar_con_ia_avanzado(
 def _resolver_columnas(df: pd.DataFrame, df_fb: pd.DataFrame | None = None) -> Dict[str, str | None]:
     def pick(cands):
         for c in cands:
-            if c and c in df.columns:
-                return c
-            if df_fb is not None and c and c in df_fb.columns:
-                return c
+            if c and c in df.columns: return c
+            if df_fb is not None and c and c in df_fb.columns: return c
         return None
-
-    col_cliente = pick([
-        "nombre_cliente", "CLIENTE",
-        next((x for x in df.columns if "client" in x.lower()), None),
-        next((x for x in df_fb.columns if "client" in x.lower()), None) if df_fb is not None else None,
-    ])
-    col_valor = pick([
-        "valor_venta", "VALOR",
-        next((x for x in df.columns if "valor" in x.lower()), None),
-        next((x for x in df_fb.columns if "valor" in x.lower()), None) if df_fb is not None else None,
-    ])
-    col_linea = pick([
-        "Linea_Estrategica", "linea_producto",
-        next((x for x in df.columns if "linea" in x.lower()), None),
-        next((x for x in df_fb.columns if "linea" in x.lower()), None) if df_fb is not None else None,
-    ])
+    col_cliente = pick(["nombre_cliente", "CLIENTE", next((x for x in df.columns if "client" in x.lower()), None)])
+    col_valor   = pick(["valor_venta", "VALOR",  next((x for x in df.columns if "valor" in x.lower()), None)])
+    col_linea   = pick(["Linea_Estrategica", "linea_producto", next((x for x in df.columns if "linea" in x.lower()), None)])
     return {"cliente": col_cliente, "valor": col_valor, "linea": col_linea}
 
 def _analizar_lineas_estrategicas(df_actual, df_anterior, lineas_estrategicas):
@@ -132,12 +117,7 @@ def _analizar_retencion_clientes(df_actual, df_anterior):
     cols = _resolver_columnas(df_actual, df_anterior)
     col_cliente, col_valor = cols["cliente"], cols["valor"]
     if None in (col_cliente, col_valor):
-        return {
-            "total_clientes_actual": 0, "total_clientes_anterior": 0,
-            "clientes_retenidos": 0, "clientes_nuevos": 0, "clientes_perdidos": 0,
-            "ventas_retenidos": 0, "ventas_nuevos": 0, "tasa_retencion": 0,
-            "top_retenidos": {}, "top_nuevos": {}
-        }
+        return {k: 0 for k in ["total_clientes_actual","total_clientes_anterior","clientes_retenidos","clientes_nuevos","clientes_perdidos","ventas_retenidos","ventas_nuevos","tasa_retencion","top_retenidos","top_nuevos"]}
     clientes_actual = set(df_actual[col_cliente].astype(str).unique())
     clientes_anterior = set(df_anterior[col_cliente].astype(str).unique())
     clientes_retenidos = clientes_actual & clientes_anterior
