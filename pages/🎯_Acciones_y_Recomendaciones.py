@@ -161,7 +161,11 @@ def ventas_reales_periodo(df_ventas: pd.DataFrame, df_det: pd.DataFrame, canal="
 def tabla_seguimiento_vendedor(df_meta_vend: pd.DataFrame, df_real: pd.DataFrame) -> pd.DataFrame:
     if df_meta_vend.empty:
         return pd.DataFrame()
-    real_vend = df_real.groupby("nomvendedor")["valor_venta"].sum().rename("venta_real") if not df_real.empty else pd.Series([], dtype=float)
+    real_vend = (
+        df_real.groupby("nomvendedor", as_index=False)["valor_venta"]
+        .sum()
+        .rename(columns={"valor_venta": "venta_real"})
+    )
     out = df_meta_vend.merge(real_vend, on="nomvendedor", how="left").fillna({"venta_real": 0})
     out["avance_pct"] = np.where(out["presupuesto"] > 0, (out["venta_real"] / out["presupuesto"]) * 100, 0)
     return out.sort_values("presupuesto", ascending=False)
