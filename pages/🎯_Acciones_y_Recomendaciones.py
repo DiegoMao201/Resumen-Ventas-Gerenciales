@@ -85,8 +85,11 @@ def cargar_cliente_tipo() -> pd.DataFrame:
                 df = pd.read_csv(io.BytesIO(res.content), encoding="latin-1", sep="|")
             else:
                 df = pd.read_excel(io.BytesIO(res.content))
-            return preparar_cliente_tipo(df)
-        except Exception:
+            df = preparar_cliente_tipo(df)
+            st.info(f"CLIENTE_TIPO cargado: {df.shape[0]:,} filas, {df.shape[1]} cols")
+            return df
+        except Exception as e:
+            st.warning(f"No se pudo leer {ruta}: {e}")
             continue
     st.error("No se encontró el archivo CLIENTE_TIPO en Dropbox.")
     return pd.DataFrame()
@@ -168,11 +171,15 @@ if "df_ventas" not in st.session_state or st.session_state.df_ventas is None or 
 df_ventas = limpiar_df_ventas(st.session_state.df_ventas)
 df_tipo_raw = cargar_cliente_tipo()
 if df_tipo_raw.empty:
-    st.warning("No se pudo cargar CLIENTE_TIPO; no hay datos para distribuir la meta.")
+    st.error("❌ CLIENTE_TIPO no se pudo cargar o está vacío. Verifica Dropbox y formato.")
     st.stop()
 
 df_det = asignar_presupuesto_detallista(df_tipo_raw, meta_total=590_000_000, canal="DETALLISTA")
-meta_total = 590_000_000
+if df_det.empty:
+    st.error("❌ No hay registros de canal DETALLISTA en CLIENTE_TIPO (nombre_tipo_negocio).")
+    st.dataframe(df_tipo_raw.head(50), use_container_width=True)
+    st.stop()
+
 df_meta_vendedor = resumen_por_vendedor(df_det)
 df_real_periodo = ventas_reales_periodo(df_ventas, df_det, canal="DETALLISTA")
 df_seg_vend = tabla_seguimiento_vendedor(df_meta_vendedor, df_real_periodo)
