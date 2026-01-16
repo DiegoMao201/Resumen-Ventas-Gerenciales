@@ -107,6 +107,7 @@ def asignar_presupuesto_detallista(df_tipo: pd.DataFrame, meta_total: float, can
     canales = canales or ["DETALLISTAS", "FERRETERIA"]
     canales_norm = [_normalizar_txt(c) for c in canales]
     df_tipo["nombre_tipo_negocio_norm"] = df_tipo["nombre_tipo_negocio"].apply(_normalizar_txt)
+
     mask_eq = df_tipo["nombre_tipo_negocio_norm"].isin(canales_norm)
     mask_ct = df_tipo["nombre_tipo_negocio_norm"].apply(lambda x: any(c in x for c in canales_norm))
     df_det = df_tipo[mask_eq | mask_ct].copy()
@@ -116,10 +117,38 @@ def asignar_presupuesto_detallista(df_tipo: pd.DataFrame, meta_total: float, can
             f"Ejemplos: {df_tipo['nombre_tipo_negocio'].dropna().unique()[:10]}"
         )
         return pd.DataFrame()
+
+    # Participación 2025 por vendedor (sobre los canales objetivo)
     ventas_2025 = df_det[df_det["anio"] == 2025]
-    base_sum = ventas_2025["valor_total_item_vendido"].sum()
-    df_det["participacion_2025"] = np.where(base_sum > 0, df_det["valor_total_item_vendido"] / base_sum, 0)
-    df_det["presupuesto_meta"] = meta_total * df_det["participacion_2025"]
+    base_vtas_vend = ventas_2025.groupby("nomvendedor")["valor_total_item_vendido"].sum().reset_index()
+    total_base = base_vtas_vend["valor_total_item_vendido"].sum()
+    if total_base <= 0:
+        st.error("❌ No hay ventas 2025 en los canales objetivo para calcular la participación.")
+        return pd.DataFrame()
+
+    base_vtas_vend["presupuesto_vendedor"] = meta_total * (base_vtas_vend["valor_total_item_vendido"] / total_base)
+
+    # Asignar presupuesto a nivel cliente proporcional a su peso dentro del vendedor
+    df_det = df_det.merge(base_vtas_vend[["nomvendedor", "presupuesto_vendedor"]], on="nomvendedor", how="left")
+    df_det["peso_cliente_vend"] = 0.0
+    df_det["presupuesto_meta"] = 0.0
+
+    # Evita división por cero por vendedor
+    ventas_2025_vend = ventas_2025.groupby("nomvendedor")["valor_total_item_vendido"].sum().to_dict()
+    df_det["peso_cliente_vend"] = df_det.apply(
+        lambda r: (r["valor_total_item_vendido"] / ventas_2025_vend.get(r["nomvendedor"], 1))
+        if ventas_2025_vend.get(r["nomvendedor"], 0) > 0 else 0,
+        axis=1,
+    )
+    df_det["presupuesto_meta"] = df_det["presupuesto_vendedor"] * df_det["peso_cliente_vend"]
+
+    # Suma total debe coincidir con meta_total (reescala por seguridad)
+    total_asignado = df_det["presupuesto_meta"].sum()
+    if total_asignado > 0:
+        factor = meta_total / total_asignado
+        df_det["presupuesto_meta"] *= factor
+        base_vtas_vend["presupuesto_vendedor"] *= factor
+
     return df_det
 
 def resumen_por_vendedor(df_det: pd.DataFrame) -> pd.DataFrame:
@@ -134,7 +163,10 @@ def resumen_por_vendedor(df_det: pd.DataFrame) -> pd.DataFrame:
     agg["participacion_2025"] = np.where(total_vta > 0, agg["venta_2025"] / total_vta, 0)
     return agg.sort_values("presupuesto", ascending=False)
 
-def ventas_reales_periodo(df_ventas: pd.DataFrame, df_det: pd.DataFrame, canal="DETALLISTA") -> pd.DataFrame:
+def ventas_reales_periodo(df_ventas: pd.DataFrame, df_det: pd.DataFrame, canales=None) -> pd.DataFrame:
+    """
+    Ventas reales Pintuco entre 16-31 enero 2026, solo clientes de los canales objetivo.
+    """
     if df_ventas.empty or df_det.empty:
         return pd.DataFrame()
     clientes_det = set(df_det["codigo_cliente"].dropna().astype(str)) | set(df_det["nit"].dropna().astype(str))
@@ -148,20 +180,27 @@ def ventas_reales_periodo(df_ventas: pd.DataFrame, df_det: pd.DataFrame, canal="
         mask_marca = df["nombre_marca"].str.upper().str.contains("PINTUCO", na=False)
     else:
         mask_marca = True
+
+    # cruzar por cliente_id o NIT
     mask_cliente = False
     if "cliente_id" in df.columns:
         mask_cliente = df["cliente_id"].astype(str).isin(clientes_det)
     if "NIT" in df.columns:
         mask_cliente = mask_cliente | df["NIT"].astype(str).isin(clientes_det)
+    if mask_cliente is False:
+        return pd.DataFrame()
+
     df = df[mask_fecha & mask_marca & mask_cliente]
     if df.empty:
         return pd.DataFrame()
+    # Normalizamos nombre de vendedor si hace falta
+    if "nomvendedor" in df_det.columns:
+        df["nomvendedor"] = df["nomvendedor"].astype(str)
     return df.groupby(["nomvendedor", "cliente_id"], as_index=False)["valor_venta"].sum()
 
 def tabla_seguimiento_vendedor(df_meta_vend: pd.DataFrame, df_real: pd.DataFrame) -> pd.DataFrame:
     if df_meta_vend.empty:
         return pd.DataFrame()
-    # Si no hay datos reales o faltan columnas, devolvemos ceros
     if df_real.empty or ("nomvendedor" not in df_real.columns) or ("valor_venta" not in df_real.columns):
         out = df_meta_vend.copy()
         out["venta_real"] = 0
@@ -182,7 +221,6 @@ def tabla_seguimiento_cliente(df_det: pd.DataFrame, df_real: pd.DataFrame) -> pd
         return pd.DataFrame()
     base = df_det[["codigo_cliente", "nombre_cliente", "nomvendedor", "presupuesto_meta"]].copy()
     base = base.rename(columns={"codigo_cliente": "cliente_id"})
-    # Si no hay datos reales o faltan columnas, devolver ceros
     if df_real.empty or ("cliente_id" not in df_real.columns) or ("valor_venta" not in df_real.columns):
         out = base.copy()
         out["venta_real"] = 0
@@ -210,9 +248,149 @@ if df_tipo_raw.empty:
     st.error("❌ CLIENTE_TIPO no se pudo cargar o está vacío. Verifica Dropbox y formato.")
     st.stop()
 
-META_CANAL = 590_000_000  # Meta global para el canal (DETALLISTAS + FERRETERIA)
+META_CANAL = 590_000_000  # Meta global para los canales DETALLISTAS + FERRETERIA
 
-meta_total = META_CANAL  # asegura que meta_total esté definido siempre
+def asignar_presupuesto_detallista(df_tipo: pd.DataFrame, meta_total: float, canales=None) -> pd.DataFrame:
+    canales = canales or ["DETALLISTAS", "FERRETERIA"]
+    canales_norm = [_normalizar_txt(c) for c in canales]
+    df_tipo["nombre_tipo_negocio_norm"] = df_tipo["nombre_tipo_negocio"].apply(_normalizar_txt)
+
+    mask_eq = df_tipo["nombre_tipo_negocio_norm"].isin(canales_norm)
+    mask_ct = df_tipo["nombre_tipo_negocio_norm"].apply(lambda x: any(c in x for c in canales_norm))
+    df_det = df_tipo[mask_eq | mask_ct].copy()
+    if df_det.empty:
+        st.error(
+            f"❌ No hay registros de canal {canales} en CLIENTE_TIPO (NOMBRE_TIPO_NEGOCIO). "
+            f"Ejemplos: {df_tipo['nombre_tipo_negocio'].dropna().unique()[:10]}"
+        )
+        return pd.DataFrame()
+
+    # Participación 2025 por vendedor (sobre los canales objetivo)
+    ventas_2025 = df_det[df_det["anio"] == 2025]
+    base_vtas_vend = ventas_2025.groupby("nomvendedor")["valor_total_item_vendido"].sum().reset_index()
+    total_base = base_vtas_vend["valor_total_item_vendido"].sum()
+    if total_base <= 0:
+        st.error("❌ No hay ventas 2025 en los canales objetivo para calcular la participación.")
+        return pd.DataFrame()
+
+    base_vtas_vend["presupuesto_vendedor"] = meta_total * (base_vtas_vend["valor_total_item_vendido"] / total_base)
+
+    # Asignar presupuesto a nivel cliente proporcional a su peso dentro del vendedor
+    df_det = df_det.merge(base_vtas_vend[["nomvendedor", "presupuesto_vendedor"]], on="nomvendedor", how="left")
+    df_det["peso_cliente_vend"] = 0.0
+    df_det["presupuesto_meta"] = 0.0
+
+    # Evita división por cero por vendedor
+    ventas_2025_vend = ventas_2025.groupby("nomvendedor")["valor_total_item_vendido"].sum().to_dict()
+    df_det["peso_cliente_vend"] = df_det.apply(
+        lambda r: (r["valor_total_item_vendido"] / ventas_2025_vend.get(r["nomvendedor"], 1))
+        if ventas_2025_vend.get(r["nomvendedor"], 0) > 0 else 0,
+        axis=1,
+    )
+    df_det["presupuesto_meta"] = df_det["presupuesto_vendedor"] * df_det["peso_cliente_vend"]
+
+    # Suma total debe coincidir con meta_total (reescala por seguridad)
+    total_asignado = df_det["presupuesto_meta"].sum()
+    if total_asignado > 0:
+        factor = meta_total / total_asignado
+        df_det["presupuesto_meta"] *= factor
+        base_vtas_vend["presupuesto_vendedor"] *= factor
+
+    return df_det
+
+def resumen_por_vendedor(df_det: pd.DataFrame) -> pd.DataFrame:
+    if df_det.empty:
+        return pd.DataFrame()
+    agg = df_det.groupby("nomvendedor").agg(
+        venta_2025=("valor_total_item_vendido", "sum"),
+        presupuesto=("presupuesto_meta", "sum"),
+        clientes=("codigo_cliente", "nunique")
+    ).reset_index()
+    total_vta = agg["venta_2025"].sum()
+    agg["participacion_2025"] = np.where(total_vta > 0, agg["venta_2025"] / total_vta, 0)
+    return agg.sort_values("presupuesto", ascending=False)
+
+def ventas_reales_periodo(df_ventas: pd.DataFrame, df_det: pd.DataFrame, canales=None) -> pd.DataFrame:
+    """
+    Ventas reales Pintuco entre 16-31 enero 2026, solo clientes de los canales objetivo.
+    """
+    if df_ventas.empty or df_det.empty:
+        return pd.DataFrame()
+    clientes_det = set(df_det["codigo_cliente"].dropna().astype(str)) | set(df_det["nit"].dropna().astype(str))
+    df = df_ventas.copy()
+    mask_fecha = (df["anio"] == 2026) & (df["mes"] == 1)
+    if "fecha_venta" in df.columns:
+        mask_fecha = mask_fecha & (df["fecha_venta"].dt.day.between(16, 31))
+    if "marca_producto" in df.columns:
+        mask_marca = df["marca_producto"].str.upper().str.contains("PINTUCO", na=False)
+    elif "nombre_marca" in df.columns:
+        mask_marca = df["nombre_marca"].str.upper().str.contains("PINTUCO", na=False)
+    else:
+        mask_marca = True
+
+    # cruzar por cliente_id o NIT
+    mask_cliente = False
+    if "cliente_id" in df.columns:
+        mask_cliente = df["cliente_id"].astype(str).isin(clientes_det)
+    if "NIT" in df.columns:
+        mask_cliente = mask_cliente | df["NIT"].astype(str).isin(clientes_det)
+    if mask_cliente is False:
+        return pd.DataFrame()
+
+    df = df[mask_fecha & mask_marca & mask_cliente]
+    if df.empty:
+        return pd.DataFrame()
+    # Normalizamos nombre de vendedor si hace falta
+    if "nomvendedor" in df_det.columns:
+        df["nomvendedor"] = df["nomvendedor"].astype(str)
+    return df.groupby(["nomvendedor", "cliente_id"], as_index=False)["valor_venta"].sum()
+
+def tabla_seguimiento_vendedor(df_meta_vend: pd.DataFrame, df_real: pd.DataFrame) -> pd.DataFrame:
+    if df_meta_vend.empty:
+        return pd.DataFrame()
+    if df_real.empty or ("nomvendedor" not in df_real.columns) or ("valor_venta" not in df_real.columns):
+        out = df_meta_vend.copy()
+        out["venta_real"] = 0
+        out["avance_pct"] = 0
+        return out.sort_values("presupuesto", ascending=False)
+
+    real_vend = (
+        df_real.groupby("nomvendedor", as_index=False)["valor_venta"]
+        .sum()
+        .rename(columns={"valor_venta": "venta_real"})
+    )
+    out = df_meta_vend.merge(real_vend, on="nomvendedor", how="left").fillna({"venta_real": 0})
+    out["avance_pct"] = np.where(out["presupuesto"] > 0, (out["venta_real"] / out["presupuesto"]) * 100, 0)
+    return out.sort_values("presupuesto", ascending=False)
+
+def tabla_seguimiento_cliente(df_det: pd.DataFrame, df_real: pd.DataFrame) -> pd.DataFrame:
+    if df_det.empty:
+        return pd.DataFrame()
+    base = df_det[["codigo_cliente", "nombre_cliente", "nomvendedor", "presupuesto_meta"]].copy()
+    base = base.rename(columns={"codigo_cliente": "cliente_id"})
+    if df_real.empty or ("cliente_id" not in df_real.columns) or ("valor_venta" not in df_real.columns):
+        out = base.copy()
+        out["venta_real"] = 0
+        out["avance_pct"] = 0
+        return out.sort_values("presupuesto_meta", ascending=False)
+
+    real_cli = (
+        df_real.groupby("cliente_id", as_index=False)["valor_venta"]
+        .sum()
+        .rename(columns={"valor_venta": "venta_real"})
+    )
+    out = base.merge(real_cli, on="cliente_id", how="left").fillna({"venta_real": 0})
+    out["avance_pct"] = np.where(out["presupuesto_meta"] > 0, (out["venta_real"] / out["presupuesto_meta"]) * 100, 0)
+    return out.sort_values("presupuesto_meta", ascending=False)
+
+# ---------------- Carga y preparación ----------------
+df_ventas = limpiar_df_ventas(st.session_state.df_ventas)
+df_tipo_raw = cargar_cliente_tipo()
+if df_tipo_raw.empty:
+    st.error("❌ CLIENTE_TIPO no se pudo cargar o está vacío. Verifica Dropbox y formato.")
+    st.stop()
+
+meta_total = META_CANAL
 canales_objetivo = ["DETALLISTAS", "FERRETERIA"]
 df_det = asignar_presupuesto_detallista(df_tipo_raw, meta_total=meta_total, canales=canales_objetivo)
 if df_det.empty:
@@ -221,7 +399,7 @@ if df_det.empty:
     st.stop()
 
 df_meta_vendedor = resumen_por_vendedor(df_det)
-df_real_periodo = ventas_reales_periodo(df_ventas, df_det, canal="DETALLISTA")
+df_real_periodo = ventas_reales_periodo(df_ventas, df_det, canales=canales_objetivo)
 df_seg_vend = tabla_seguimiento_vendedor(df_meta_vendedor, df_real_periodo)
 df_seg_cli = tabla_seguimiento_cliente(df_det, df_real_periodo)
 
