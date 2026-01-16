@@ -12,7 +12,7 @@ from datetime import datetime
 # 1. CONFIGURACIÓN Y ESTILOS (SALA DE GUERRA)
 # ==========================================
 st.set_page_config(
-    page_title="WAR ROOM | Pintuco",
+    page_title="Segumiento Actividad | Pintuco",
     page_icon="⚔️",
     layout="wide",
     initial_sidebar_state="collapsed"
