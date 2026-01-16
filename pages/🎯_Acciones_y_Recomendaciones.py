@@ -1,17 +1,20 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import io
 import dropbox
-import datetime
+import io
 
 st.set_page_config(page_title="🎯 Acciones y Recomendaciones | Pintuco", page_icon="🎯", layout="wide")
 
 # ---------------- Utilidades ----------------
 def get_dropbox_client():
+    """Usa la misma configuración de Resumen_Mensual (app_key/app_secret/refresh_token)."""
     try:
-        token = st.secrets.get("DROPBOX_ACCESS_TOKEN")
-        return dropbox.Dropbox(token) if token else None
+        return dropbox.Dropbox(
+            app_key=st.secrets.dropbox.app_key,
+            app_secret=st.secrets.dropbox.app_secret,
+            oauth2_refresh_token=st.secrets.dropbox.refresh_token,
+        )
     except Exception:
         return None
 
@@ -66,11 +69,10 @@ def preparar_cliente_tipo(df_raw: pd.DataFrame) -> pd.DataFrame:
     normalizar_num(df, ["valor_total_item_vendido", "cantidad"])
     return df
 
-@st.cache_data(ttl=1800)
 def cargar_cliente_tipo() -> pd.DataFrame:
     dbx = get_dropbox_client()
     if not dbx:
-        st.warning("No hay token de Dropbox configurado.")
+        st.error("⚠️ No hay token de Dropbox configurado. Configura st.secrets.dropbox.")
         return pd.DataFrame()
     rutas = ["/data/CLIENTE_TIPO.csv", "/data/CLIENTE_TIPO.xlsx"]
     for ruta in rutas:
@@ -162,6 +164,9 @@ if "df_ventas" not in st.session_state or st.session_state.df_ventas is None or 
 # ---------------- Carga y preparación ----------------
 df_ventas = limpiar_df_ventas(st.session_state.df_ventas)
 df_tipo_raw = cargar_cliente_tipo()
+if df_tipo_raw.empty:
+    st.stop()  # Evita continuar sin CLIENTE_TIPO
+
 df_det = asignar_presupuesto_detallista(df_tipo_raw, meta_total=590_000_000, canal="DETALLISTA")
 meta_total = 590_000_000
 df_meta_vendedor = resumen_por_vendedor(df_det)
