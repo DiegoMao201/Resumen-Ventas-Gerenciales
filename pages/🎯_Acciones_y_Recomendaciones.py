@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import dropbox
 import io
+import datetime  # añadido
 
 st.set_page_config(page_title="🎯 Acciones y Recomendaciones | Pintuco", page_icon="🎯", layout="wide")
 
@@ -29,9 +30,10 @@ def limpiar_df_ventas(df: pd.DataFrame) -> pd.DataFrame:
     if "anio" in dfc: dfc["anio"] = pd.to_numeric(dfc["anio"], errors="coerce").astype(int)
     if "mes" in dfc: dfc["mes"] = pd.to_numeric(dfc["mes"], errors="coerce").astype(int)
     if "valor_venta" in dfc: dfc["valor_venta"] = pd.to_numeric(dfc["valor_venta"], errors="coerce").fillna(0)
-    if "NIT" in dfc: dfc["NIT"] = dfc["NIT"].astype(str).str.strip()
-    if "cliente_id" in dfc: dfc["cliente_id"] = dfc["cliente_id"].astype(str).str.strip()
-    if "marca_producto" in dfc: dfc["marca_producto"] = dfc["marca_producto"].astype(str)
+    for col in ["NIT", "cliente_id", "nomvendedor", "marca_producto"]:
+        if col in dfc: dfc[col] = dfc[col].astype(str).str.strip()
+    if "nombre_marca" in dfc: dfc["nombre_marca"] = dfc["nombre_marca"].astype(str).str.strip()
+    if "fecha_venta" in dfc: dfc["fecha_venta"] = pd.to_datetime(dfc["fecha_venta"], errors="coerce")
     return dfc
 
 def preparar_cliente_tipo(df_raw: pd.DataFrame) -> pd.DataFrame:
@@ -64,11 +66,12 @@ def preparar_cliente_tipo(df_raw: pd.DataFrame) -> pd.DataFrame:
         df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
         df["anio"] = df["fecha"].dt.year
         df["mes"] = df["fecha"].dt.month
-    if "nit" in df.columns: df["nit"] = df["nit"].astype(str).str.strip()
-    if "codigo_cliente" in df.columns: df["codigo_cliente"] = df["codigo_cliente"].astype(str).str.strip()
+    for col in ["nit", "codigo_cliente", "nomvendedor", "nombre_cliente"]:
+        if col in df: df[col] = df[col].astype(str).str.strip()
     normalizar_num(df, ["valor_total_item_vendido", "cantidad"])
     return df
 
+@st.cache_data(ttl=1800)
 def cargar_cliente_tipo() -> pd.DataFrame:
     dbx = get_dropbox_client()
     if not dbx:
@@ -121,13 +124,13 @@ def ventas_reales_periodo(df_ventas: pd.DataFrame, df_det: pd.DataFrame, canal="
     df = df_ventas.copy()
     mask_fecha = (df["anio"] == 2026) & (df["mes"] == 1)
     if "fecha_venta" in df.columns:
-        df["fecha_venta"] = pd.to_datetime(df["fecha_venta"], errors="coerce")
         mask_fecha = mask_fecha & (df["fecha_venta"].dt.day.between(16, 31))
     if "marca_producto" in df.columns:
         mask_marca = df["marca_producto"].str.upper().str.contains("PINTUCO", na=False)
+    elif "nombre_marca" in df.columns:
+        mask_marca = df["nombre_marca"].str.upper().str.contains("PINTUCO", na=False)
     else:
         mask_marca = True
-    # cruzar por cliente_id o NIT
     mask_cliente = False
     if "cliente_id" in df.columns:
         mask_cliente = df["cliente_id"].astype(str).isin(clientes_det)
@@ -165,7 +168,8 @@ if "df_ventas" not in st.session_state or st.session_state.df_ventas is None or 
 df_ventas = limpiar_df_ventas(st.session_state.df_ventas)
 df_tipo_raw = cargar_cliente_tipo()
 if df_tipo_raw.empty:
-    st.stop()  # Evita continuar sin CLIENTE_TIPO
+    st.warning("No se pudo cargar CLIENTE_TIPO; no hay datos para distribuir la meta.")
+    st.stop()
 
 df_det = asignar_presupuesto_detallista(df_tipo_raw, meta_total=590_000_000, canal="DETALLISTA")
 meta_total = 590_000_000
@@ -227,7 +231,7 @@ with tabs[2]:
     st.subheader("🚀 Foco de Crecimiento")
     st.markdown("""
     - Priorizamos el canal **DETALLISTA** según participación 2025 de cada vendedor.
-    - Seguimiento diario a la ventana **16-31 Ene 2026** para la marca **Pintuco**.
+    - Seguimiento a la ventana **16-31 Ene 2026** para la marca **Pintuco**.
     - Bonificación del **0.5%** sobre el cumplimiento del presupuesto asignado.
     """)
     if not df_seg_vend.empty:
