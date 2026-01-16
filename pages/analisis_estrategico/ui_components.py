@@ -2,90 +2,77 @@
 import streamlit as st
 import pandas as pd
 from typing import Dict
-from .config import AppConfig  # ✅ MOVER AQUÍ
+from .config import AppConfig
 
 def renderizar_sidebar(df_master: pd.DataFrame, config: Dict) -> Dict:
     """Renderiza sidebar con filtros interactivos"""
+    st.sidebar.header("🎯 Filtros de Análisis")
     
-    st.sidebar.image(AppConfig.LOGO_URL, use_container_width=True)
-    st.sidebar.markdown("---")
-    st.sidebar.header("🔍 Configuración de Análisis")
-    
-    anios_validos = config['anios_disponibles']
-    
-    if len(anios_validos) < 2:
-        st.sidebar.error("⚠️ Se necesitan al menos 2 años de datos")
-        st.stop()
-    
+    # Filtro de años
     anio_objetivo = st.sidebar.selectbox(
-        "🎯 Año Objetivo",
-        anios_validos,
+        "Año Objetivo",
+        options=config['anios_disponibles'],
         index=0,
-        help="Año a analizar en detalle"
+        help="Año principal a analizar"
     )
     
-    anios_comparacion = [a for a in anios_validos if a != anio_objetivo]
     anio_base = st.sidebar.selectbox(
-        "📊 Año Base",
-        anios_comparacion,
-        index=0,
-        help="Año de comparación"
+        "Año de Comparación",
+        options=[a for a in config['anios_disponibles'] if a < anio_objetivo],
+        index=0 if len([a for a in config['anios_disponibles'] if a < anio_objetivo]) > 0 else 0,
+        help="Año contra el cual comparar"
     )
-    
-    st.sidebar.info(f"""
-    **Análisis Configurado:**
-    - 🎯 Objetivo: **{anio_objetivo}**
-    - 📊 Base: **{anio_base}**
-    """)
     
     st.sidebar.markdown("---")
-    st.sidebar.subheader("🔧 Filtros Adicionales")
+    st.sidebar.subheader("Filtros Opcionales")
     
+    # Filtro de ciudades
     ciudades = st.sidebar.multiselect(
-        "🏙️ Ciudades",
-        config['ciudades_disponibles'],
-        help="Filtrar por ciudades"
+        "Ciudades",
+        options=config['ciudades_disponibles'],
+        default=[],
+        help="Filtrar por ubicación geográfica"
     )
     
-    marcas = st.sidebar.multiselect(
-        "🏷️ Marcas",
-        config['marcas_disponibles'],
-        help="Filtrar por marcas"
+    # Filtro de líneas estratégicas
+    lineas = st.sidebar.multiselect(
+        "Líneas Estratégicas",
+        options=config['lineas_disponibles'],
+        default=[],
+        help="ABRACOL, YALE, GOYA, DELTA, etc."
     )
     
-    if marcas:
-        cats_disponibles = sorted(
-            df_master[df_master['Marca_Master'].isin(marcas)]['Categoria_Master'].dropna().unique()
-        )
-    else:
-        cats_disponibles = config['categorias_disponibles']
-    
-    categorias = st.sidebar.multiselect(
-        "📂 Categorías",
-        cats_disponibles,
-        help="Filtrar por categorías"
+    # Filtro de vendedores
+    vendedores = st.sidebar.multiselect(
+        "Vendedores",
+        options=config['vendedores_disponibles'],
+        default=[],
+        help="Filtrar por vendedor o grupo"
     )
     
     return {
         'anio_objetivo': anio_objetivo,
         'anio_base': anio_base,
         'ciudades': ciudades,
-        'marcas': marcas,
-        'categorias': categorias
+        'lineas': lineas,
+        'vendedores': vendedores
     }
 
 def aplicar_filtros(df: pd.DataFrame, filtros: Dict) -> pd.DataFrame:
     """Aplica filtros seleccionados al DataFrame"""
     df_filtrado = df.copy()
     
-    if filtros['ciudades']:
-        df_filtrado = df_filtrado[df_filtrado['Poblacion_Real'].isin(filtros['ciudades'])]
+    if filtros.get('ciudades'):
+        if 'Poblacion_Real' in df_filtrado.columns:
+            df_filtrado = df_filtrado[df_filtrado['Poblacion_Real'].isin(filtros['ciudades'])]
     
-    if filtros['marcas']:
-        df_filtrado = df_filtrado[df_filtrado['Marca_Master'].isin(filtros['marcas'])]
+    if filtros.get('lineas'):
+        if 'Linea_Estrategica' in df_filtrado.columns:
+            df_filtrado = df_filtrado[df_filtrado['Linea_Estrategica'].isin(filtros['lineas'])]
     
-    if filtros['categorias']:
-        df_filtrado = df_filtrado[df_filtrado['Categoria_Master'].isin(filtros['categorias'])]
+    if filtros.get('vendedores'):
+        if 'nomvendedor' in df_filtrado.columns:
+            df_filtrado = df_filtrado[df_filtrado['nomvendedor'].isin(filtros['vendedores'])]
     
     return df_filtrado
 
@@ -110,14 +97,14 @@ def validar_datos_filtrados(df: pd.DataFrame, filtros: Dict) -> bool:
                 st.metric(
                     f"Datos {filtros['anio_objetivo']}",
                     f"{len(df_actual):,} registros",
-                    f"${df_actual['VALOR'].sum():,.0f}" if not df_actual.empty else "Sin datos"
+                    f"${df_actual['valor_venta'].sum():,.0f}" if not df_actual.empty and 'valor_venta' in df_actual.columns else "Sin datos"
                 )
             
             with col2:
                 st.metric(
                     f"Datos {filtros['anio_base']}",
                     f"{len(df_anterior):,} registros",
-                    f"${df_anterior['VALOR'].sum():,.0f}" if not df_anterior.empty else "Sin datos"
+                    f"${df_anterior['valor_venta'].sum():,.0f}" if not df_anterior.empty and 'valor_venta' in df_anterior.columns else "Sin datos"
                 )
         
         return False
@@ -132,12 +119,12 @@ def validar_datos_filtrados(df: pd.DataFrame, filtros: Dict) -> bool:
 
 def tarjeta_metrica(etiqueta: str, valor: str, delta: str = None, color: str = "blue"):
     """Renderiza tarjeta de métrica estilizada"""
-    delta_html = f'<p style="color: {color}; margin: 0.5rem 0 0 0;">{delta}</p>' if delta else ''
+    delta_html = f'<p style="color: {"green" if "+" in str(delta) else "red"}; margin: 0;">{delta}</p>' if delta else ""
     
     st.markdown(f"""
-    <div class="metric-card">
-        <p style="font-size: 0.85rem; color: #64748b; margin: 0;">{etiqueta}</p>
-        <p style="font-size: 1.8rem; font-weight: 800; margin: 0.5rem 0;">{valor}</p>
+    <div class="metrica-card" style="border-left-color: {color};">
+        <p style="color: #64748b; margin: 0; font-size: 0.875rem;">{etiqueta}</p>
+        <h3 style="margin: 0.5rem 0; color: #1e293b;">{valor}</h3>
         {delta_html}
     </div>
     """, unsafe_allow_html=True)

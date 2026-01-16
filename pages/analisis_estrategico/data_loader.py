@@ -1,4 +1,4 @@
-"""Gestión de carga y transformación de datos"""
+"""Gestión de carga y transformación de datos - Integrado con Resumen_Mensual"""
 import streamlit as st
 import pandas as pd
 import dropbox
@@ -13,11 +13,9 @@ def get_dropbox_client():
     try:
         token = st.secrets.get("DROPBOX_ACCESS_TOKEN")
         if not token:
-            st.error("⚠️ Token de Dropbox no configurado")
             return None
         return dropbox.Dropbox(token)
     except Exception as e:
-        st.error(f"Error conectando a Dropbox: {e}")
         return None
 
 @st.cache_data(ttl=7200)
@@ -27,7 +25,7 @@ def cargar_poblaciones() -> pd.DataFrame:
     if not dbx:
         return pd.DataFrame()
     
-    rutas = ['/clientes_detalle.xlsx', '/data/clientes_detalle.xlsx', '/Master/clientes_detalle.xlsx']
+    rutas = ['/clientes_detalle.xlsx', '/data/clientes_detalle.xlsx']
     
     for ruta in rutas:
         try:
@@ -51,49 +49,59 @@ def _procesar_poblaciones(df: pd.DataFrame) -> pd.DataFrame:
             return pd.DataFrame()
         
         df_clean = df[[col_nit, col_pob]].copy()
-        df_clean.columns = ['Key_Nit', 'Poblacion_Real']
-        df_clean['Key_Nit'] = df_clean['Key_Nit'].astype(str).str.strip().str.replace('.0', '', regex=False)
+        df_clean.columns = ['cliente_id', 'Poblacion_Real']
+        df_clean['cliente_id'] = df_clean['cliente_id'].astype(str).str.strip()
         df_clean['Poblacion_Real'] = df_clean['Poblacion_Real'].astype(str).str.strip().str.upper()
         
         return df_clean.dropna()
     except Exception as e:
-        st.warning(f"Error procesando poblaciones: {e}")
         return pd.DataFrame()
 
 def cargar_y_validar_datos() -> Tuple[pd.DataFrame, Dict]:
-    """Pipeline completo de carga y limpieza de datos"""
+    """
+    Pipeline completo usando los datos de Resumen_Mensual.py
+    ✅ INTEGRACIÓN TOTAL - No pierde ningún dato
+    """
     if 'df_ventas' not in st.session_state:
         st.warning("⚠️ **Por favor, carga el archivo maestro en la página principal.**")
         st.info("👉 Ve a **🏠 Resumen Mensual** para cargar los datos")
         st.stop()
     
     try:
+        # ✅ USAR EL DATAFRAME COMPLETO DE RESUMEN_MENSUAL
         df_raw = st.session_state.df_ventas.copy()
         
-        # Validar que hay datos
         if df_raw.empty:
             st.error("❌ El DataFrame está vacío")
             st.stop()
         
         st.info(f"📊 Registros iniciales: {len(df_raw):,}")
         
-        # Pipeline de transformación con manejo de errores
+        # ✅ MANTENER TODAS LAS COLUMNAS ORIGINALES
         df_clean = df_raw.copy()
         
-        # PASO 1: Mapear columnas
-        with st.spinner("🔄 Mapeando columnas..."):
-            df_clean = _mapear_columnas(df_clean)
-            st.success(f"✅ Columnas mapeadas. Registros: {len(df_clean):,}")
+        # PASO 1: Crear columnas necesarias SIN modificar las existentes
+        with st.spinner("🔄 Preparando datos..."):
+            # Asegurar columnas de fecha
+            if 'anio' not in df_clean.columns or 'mes' not in df_clean.columns:
+                st.error("❌ Faltan columnas de fecha (anio, mes)")
+                st.stop()
+            
+            # Crear columna Key_Nit si no existe (para merge con poblaciones)
+            if 'cliente_id' in df_clean.columns:
+                df_clean['Key_Nit'] = df_clean['cliente_id'].astype(str).str.strip()
+            
+            st.success(f"✅ Columnas preparadas. Registros: {len(df_clean):,}")
         
-        # PASO 2: Limpiar tipos de datos
+        # PASO 2: Limpiar tipos de datos básicos
         with st.spinner("🔄 Limpiando tipos de datos..."):
             df_clean = _limpiar_tipos_datos(df_clean)
             st.success(f"✅ Tipos limpiados. Registros: {len(df_clean):,}")
         
-        # PASO 3: Clasificar marcas
-        with st.spinner("🔄 Clasificando marcas..."):
-            df_clean = _clasificar_marcas(df_clean)
-            st.success(f"✅ Marcas clasificadas. Registros: {len(df_clean):,}")
+        # PASO 3: Clasificar líneas estratégicas
+        with st.spinner("🔄 Clasificando líneas estratégicas..."):
+            df_clean = _clasificar_lineas_estrategicas(df_clean)
+            st.success(f"✅ Líneas clasificadas. Registros: {len(df_clean):,}")
         
         # PASO 4: Enriquecer geografía
         with st.spinner("🔄 Enriqueciendo datos geográficos..."):
@@ -126,9 +134,10 @@ def cargar_y_validar_datos() -> Tuple[pd.DataFrame, Dict]:
         
         config_filtros = {
             'anios_disponibles': anios_disponibles,
-            'ciudades_disponibles': sorted(df_clean['Poblacion_Real'].dropna().unique()),
-            'marcas_disponibles': sorted(df_clean['Marca_Master'].dropna().unique()),
-            'categorias_disponibles': sorted(df_clean['Categoria_Master'].dropna().unique())
+            'ciudades_disponibles': sorted(df_clean['Poblacion_Real'].dropna().unique()) if 'Poblacion_Real' in df_clean.columns else [],
+            'lineas_disponibles': sorted(df_clean['Linea_Estrategica'].dropna().unique()) if 'Linea_Estrategica' in df_clean.columns else [],
+            'marcas_disponibles': sorted(df_clean['marca_producto'].dropna().unique()) if 'marca_producto' in df_clean.columns else [],
+            'vendedores_disponibles': sorted(df_clean['nomvendedor'].dropna().unique()) if 'nomvendedor' in df_clean.columns else []
         }
         
         st.success(f"✅ **Datos cargados exitosamente:** {len(df_clean):,} registros")
@@ -140,45 +149,16 @@ def cargar_y_validar_datos() -> Tuple[pd.DataFrame, Dict]:
         st.exception(e)
         st.stop()
 
-def _mapear_columnas(df: pd.DataFrame) -> pd.DataFrame:
-    """Mapea columnas a nombres estándar"""
-    config = AppConfig()
-    
-    # Mapear solo las columnas que existen
-    rename_dict = {}
-    for idx, new_name in config.COLUMNAS_MAESTRAS.items():
-        if idx < len(df.columns):
-            rename_dict[df.columns[idx]] = new_name
-    
-    df = df.rename(columns=rename_dict)
-    
-    # Asegurar columna 'dia' existe
-    if 'dia' not in df.columns:
-        df['dia'] = 15
-    
-    # Asegurar columnas críticas existen
-    columnas_requeridas = ['anio', 'mes', 'VALOR', 'CLIENTE', 'COD']
-    for col in columnas_requeridas:
-        if col not in df.columns:
-            if col == 'VALOR':
-                df[col] = 0
-            elif col in ['anio', 'mes']:
-                from datetime import date
-                df[col] = date.today().year if col == 'anio' else 1
-            else:
-                df[col] = 'N/A'
-    
-    return df
-
 def _limpiar_tipos_datos(df: pd.DataFrame) -> pd.DataFrame:
-    """Convierte columnas a tipos correctos"""
+    """Convierte columnas a tipos correctos SIN perder datos"""
     from datetime import date
     hoy = date.today()
     
-    # Limpiar valores antes de convertir
-    if 'VALOR' in df.columns:
-        df['VALOR'] = pd.to_numeric(df['VALOR'], errors='coerce').fillna(0)
+    # Limpiar valor_venta (columna principal de ventas)
+    if 'valor_venta' in df.columns:
+        df['valor_venta'] = pd.to_numeric(df['valor_venta'], errors='coerce').fillna(0)
     
+    # Limpiar anio y mes
     if 'anio' in df.columns:
         df['anio'] = pd.to_numeric(df['anio'], errors='coerce').fillna(hoy.year).astype(int)
     
@@ -186,63 +166,77 @@ def _limpiar_tipos_datos(df: pd.DataFrame) -> pd.DataFrame:
         df['mes'] = pd.to_numeric(df['mes'], errors='coerce').fillna(1).astype(int)
         df['mes'] = df['mes'].clip(1, 12)
     
-    if 'dia' in df.columns:
-        df['dia'] = pd.to_numeric(df['dia'], errors='coerce').fillna(15).astype(int)
-        df['dia'] = df['dia'].clip(1, 31)
-    
-    if 'COD' in df.columns:
-        df['Key_Nit'] = df['COD'].astype(str).str.strip().str.replace('.0', '', regex=False)
-    
     # Asegurar que las columnas de texto no sean nulas
-    if 'CLIENTE' in df.columns:
-        df['CLIENTE'] = df['CLIENTE'].fillna('Sin Cliente')
+    if 'nombre_cliente' in df.columns:
+        df['nombre_cliente'] = df['nombre_cliente'].fillna('Sin Cliente')
+    
+    if 'nomvendedor' in df.columns:
+        df['nomvendedor'] = df['nomvendedor'].fillna('GENERAL')
     
     return df
 
-def _clasificar_marcas(df: pd.DataFrame) -> pd.DataFrame:
-    """Clasifica marcas según código"""
+def _clasificar_lineas_estrategicas(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Clasifica productos en líneas estratégicas
+    ✅ USA LA COLUMNA 'linea_producto' DE RESUMEN_MENSUAL
+    """
     config = AppConfig()
     
-    def clasificar_fila(codigo_marca):
-        try:
-            codigo = int(codigo_marca) if pd.notna(codigo_marca) else 0
-        except (ValueError, TypeError):
-            codigo = 0
-        
-        marca = config.MAPEO_MARCAS.get(codigo, f"Código {codigo}")
-        prefijo = marca.split('-')[0] if '-' in marca else marca[:3]
-        categoria = config.CATEGORIAS_MARCA.get(prefijo, "Otros")
-        return marca, categoria
-    
-    # Aplicar y desempaquetar
-    if 'CODIGO_MARCA_N' in df.columns:
-        resultados = df['CODIGO_MARCA_N'].apply(clasificar_fila)
-        df['Marca_Master'] = [r[0] for r in resultados]
-        df['Categoria_Master'] = [r[1] for r in resultados]
+    # Si ya existe la columna linea_producto, usarla
+    if 'linea_producto' in df.columns:
+        df['Linea_Estrategica'] = df['linea_producto'].fillna('Otros')
     else:
-        df['Marca_Master'] = 'Sin Marca'
+        # Si no existe, intentar clasificar por nombre_articulo
+        if 'nombre_articulo' in df.columns:
+            def clasificar_por_nombre(nombre):
+                if pd.isna(nombre):
+                    return 'Otros'
+                nombre_upper = str(nombre).upper()
+                for linea in config.LINEAS_ESTRATEGICAS:
+                    if linea.upper() in nombre_upper:
+                        return linea
+                return 'Otros'
+            
+            df['Linea_Estrategica'] = df['nombre_articulo'].apply(clasificar_por_nombre)
+        else:
+            df['Linea_Estrategica'] = 'Sin Clasificar'
+    
+    # Clasificar categoría (Premium, Estandar, etc.)
+    if 'marca_producto' in df.columns:
+        def clasificar_categoria(marca):
+            if pd.isna(marca):
+                return 'Otros'
+            marca_upper = str(marca).upper()
+            if any(x in marca_upper for x in ['PINTUCO', 'SIKA', 'CORONA']):
+                return 'Premium'
+            elif any(x in marca_upper for x in ['MEGA', 'MASTER']):
+                return 'Estandar'
+            return 'Otros'
+        
+        df['Categoria_Master'] = df['marca_producto'].apply(clasificar_categoria)
+    else:
         df['Categoria_Master'] = 'Sin Categoría'
     
     return df
 
 def _enriquecer_geografia(df: pd.DataFrame) -> pd.DataFrame:
     """Agrega información geográfica"""
-    # Primero asegurar que existe la columna Vendedor
-    if 'Vendedor' not in df.columns:
-        df['Vendedor'] = 'GENERAL'
+    # Asegurar que existe columna Vendedor
+    if 'nomvendedor' not in df.columns:
+        df['nomvendedor'] = 'GENERAL'
     else:
-        df['Vendedor'] = df['Vendedor'].fillna('GENERAL')
+        df['nomvendedor'] = df['nomvendedor'].fillna('GENERAL')
     
     # Cargar poblaciones
     df_poblaciones = cargar_poblaciones()
     
     # Si no hay datos de poblaciones, asignar valor por defecto
-    if df_poblaciones.empty:
+    if df_poblaciones.empty or 'cliente_id' not in df.columns:
         df['Poblacion_Real'] = 'Sin Geo'
         return df
     
     # Hacer merge solo si hay datos
-    df = pd.merge(df, df_poblaciones, on='Key_Nit', how='left')
+    df = pd.merge(df, df_poblaciones, on='cliente_id', how='left')
     df['Poblacion_Real'] = df['Poblacion_Real'].fillna('Sin Geo')
     
     return df
@@ -251,19 +245,27 @@ def _aplicar_filtro_ytd(df: pd.DataFrame) -> pd.DataFrame:
     """Aplica filtro Year-To-Date"""
     hoy = date.today()
     
+    # Crear columna de fecha si no existe
+    if 'fecha_venta' not in df.columns:
+        if all(col in df.columns for col in ['anio', 'mes']):
+            df['fecha_venta'] = pd.to_datetime(
+                df[['anio', 'mes']].assign(dia=15),
+                errors='coerce'
+            )
+    
     def es_ytd(row):
         try:
             if row['mes'] < hoy.month:
                 return True
             if row['mes'] == hoy.month:
-                return row['dia'] <= hoy.day
+                return True  # Incluir todo el mes actual
             return False
         except:
             return False
     
     df_ytd = df[df.apply(es_ytd, axis=1)].copy()
     
-    # Si el filtro YTD deja el DataFrame vacío, mostrar advertencia
+    # Si el filtro YTD deja el DataFrame vacío, devolver todos
     if df_ytd.empty:
         st.warning("⚠️ El filtro Year-To-Date no devolvió registros. Mostrando todos los datos disponibles.")
         return df

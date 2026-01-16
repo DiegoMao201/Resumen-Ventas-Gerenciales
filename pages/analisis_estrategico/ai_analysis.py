@@ -85,10 +85,15 @@ def _analizar_lineas_estrategicas(
     
     resultados = {}
     
+    # ✅ USAR LA COLUMNA CORRECTA
+    columna_linea = 'Linea_Estrategica' if 'Linea_Estrategica' in df_actual.columns else 'linea_producto'
+    columna_valor = 'valor_venta' if 'valor_venta' in df_actual.columns else 'VALOR'
+    columna_cliente = 'nombre_cliente' if 'nombre_cliente' in df_actual.columns else 'CLIENTE'
+    
     for linea in lineas_estrategicas:
         # Filtrar por línea
-        ventas_actual = df_actual[df_actual['LINEA'].str.upper() == linea.upper()]['VALOR'].sum()
-        ventas_anterior = df_anterior[df_anterior['LINEA'].str.upper() == linea.upper()]['VALOR'].sum()
+        ventas_actual = df_actual[df_actual[columna_linea].str.upper() == linea.upper()][columna_valor].sum()
+        ventas_anterior = df_anterior[df_anterior[columna_linea].str.upper() == linea.upper()][columna_valor].sum()
         
         if ventas_anterior > 0:
             variacion_abs = ventas_actual - ventas_anterior
@@ -98,13 +103,8 @@ def _analizar_lineas_estrategicas(
             variacion_pct = 100.0 if ventas_actual > 0 else 0.0
         
         # Clientes únicos
-        clientes_actual = df_actual[df_actual['LINEA'].str.upper() == linea.upper()]['CLIENTE'].nunique()
-        clientes_anterior = df_anterior[df_anterior['LINEA'].str.upper() == linea.upper()]['CLIENTE'].nunique()
-        
-        # Top productos
-        top_productos = df_actual[df_actual['LINEA'].str.upper() == linea.upper()] \
-            .groupby('NOMBRE_PRODUCTO')['VALOR'].sum() \
-            .nlargest(3)
+        clientes_actual = df_actual[df_actual[columna_linea].str.upper() == linea.upper()][columna_cliente].nunique()
+        clientes_anterior = df_anterior[df_anterior[columna_linea].str.upper() == linea.upper()][columna_cliente].nunique()
         
         resultados[linea] = {
             'ventas_actual': ventas_actual,
@@ -113,7 +113,6 @@ def _analizar_lineas_estrategicas(
             'variacion_pct': variacion_pct,
             'clientes_actual': clientes_actual,
             'clientes_anterior': clientes_anterior,
-            'top_productos': top_productos.to_dict(),
             'impacto': 'MOTOR' if variacion_pct > 10 else 'FRENO' if variacion_pct < -10 else 'ESTABLE'
         }
     

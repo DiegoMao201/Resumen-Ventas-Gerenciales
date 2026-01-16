@@ -325,20 +325,83 @@ class TabTopClientes(BaseTab):
 
 
 class TabProductosEstrella(BaseTab):
-    """Tab de análisis de productos"""
+    """Tab 4: Análisis de productos estrella"""
     
     def render(self):
         st.header("📦 Productos Estrella")
-        st.markdown("Productos con mejor desempeño comercial.")
         
-        df_productos = self.df_actual.groupby('NOMBRE_PRODUCTO_K')['VALOR'].sum().sort_values(ascending=False).head(50)
+        # ✅ USAR LA COLUMNA CORRECTA DE RESUMEN_MENSUAL
+        columna_producto = 'nombre_articulo' if 'nombre_articulo' in self.df_actual.columns else 'NOMBRE_PRODUCTO'
+        columna_valor = 'valor_venta' if 'valor_venta' in self.df_actual.columns else 'VALOR'
         
-        fig = px.treemap(
-            df_productos.reset_index(),
-            path=['NOMBRE_PRODUCTO_K'],
-            values='VALOR',
-            title="Top 50 Productos"
+        if columna_producto not in self.df_actual.columns:
+            st.error(f"❌ No se encontró columna de productos. Columnas disponibles: {list(self.df_actual.columns)}")
+            return
+        
+        # Top productos
+        df_productos = self.df_actual.groupby(columna_producto)[columna_valor].sum().sort_values(ascending=False).head(50)
+        df_productos_anterior = self.df_anterior.groupby(columna_producto)[columna_valor].sum()
+        
+        st.subheader("🏆 Top 50 Productos por Ventas")
+        
+        # Crear DataFrame comparativo
+        df_comp = pd.DataFrame({
+            'Producto': df_productos.index,
+            'Ventas_Actual': df_productos.values,
+            'Ventas_Anterior': [df_productos_anterior.get(p, 0) for p in df_productos.index]
+        })
+        
+        df_comp['Variacion'] = df_comp['Ventas_Actual'] - df_comp['Ventas_Anterior']
+        df_comp['Variacion_Pct'] = np.where(
+            df_comp['Ventas_Anterior'] > 0,
+            (df_comp['Variacion'] / df_comp['Ventas_Anterior']) * 100,
+            100
         )
+        
+        # Mostrar tabla
+        st.dataframe(
+            df_comp,
+            column_config={
+                "Producto": "Producto",
+                "Ventas_Actual": st.column_config.NumberColumn(f"Ventas {self.filtros['anio_objetivo']}", format="$%d"),
+                "Ventas_Anterior": st.column_config.NumberColumn(f"Ventas {self.filtros['anio_base']}", format="$%d"),
+                "Variacion": st.column_config.NumberColumn("Variación", format="$%d"),
+                "Variacion_Pct": st.column_config.NumberColumn("Var %", format="%.1f%%")
+            },
+            use_container_width=True,
+            hide_index=True
+        )
+        
+        # Gráfico
+        st.subheader("📊 Visualización Top 20")
+        
+        import plotly.graph_objects as go
+        
+        fig = go.Figure()
+        
+        df_top20 = df_comp.head(20)
+        
+        fig.add_trace(go.Bar(
+            name=f'{self.filtros["anio_base"]}',
+            x=df_top20['Producto'],
+            y=df_top20['Ventas_Anterior'],
+            marker_color='lightblue'
+        ))
+        
+        fig.add_trace(go.Bar(
+            name=f'{self.filtros["anio_objetivo"]}',
+            x=df_top20['Producto'],
+            y=df_top20['Ventas_Actual'],
+            marker_color='darkblue'
+        ))
+        
+        fig.update_layout(
+            barmode='group',
+            title="Comparación de Ventas - Top 20 Productos",
+            xaxis_tickangle=-45,
+            height=600
+        )
+        
         st.plotly_chart(fig, use_container_width=True)
 
 

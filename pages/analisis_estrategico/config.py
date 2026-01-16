@@ -24,30 +24,12 @@ class AppConfig:
     LOGO_URL: str = "https://raw.githubusercontent.com/DiegoMao2021/Resumen-Ventas-Gerenciales/main/LOGO%20FERREINOX%20SAS%20BIC%202024.png"
     WEBSITE_URL: str = "https://www.ferreinox.co"
     
-    # ✅ LÍNEAS ESTRATÉGICAS CORRECTAS
+    # ✅ LÍNEAS ESTRATÉGICAS REALES DEL NEGOCIO
     LINEAS_ESTRATEGICAS: List[str] = field(default_factory=lambda: [
         'ABRACOL', 'YALE', 'GOYA', 'DELTA', 'SAINT GOBAIN', 
-        'ALLEGION', 'ARTECOLA', 'INDUMA', 'ATLAS', 'SEGUREX'
+        'ALLEGION', 'ARTECOLA', 'INDUMA', 'ATLAS', 'SEGUREX',
+        'PINTUCO'
     ])
-    
-    # Mapeo de marcas a líneas estratégicas
-    MAPEO_MARCAS: Dict[int, str] = field(default_factory=lambda: {
-        50: "Pintuco", 54: "MPY-International", 55: "AN Colorantes",
-        56: "Pintuco Profesional", 57: "ASC-Mega", 58: "Pintuco",
-        61: "Sika", 65: "Habro Pack", 66: "Anypsa Internacional",
-        67: "Anypsa", 68: "Anypsa", 69: "Master Pro",
-        73: "Corona", 74: "WEG", 75: "Generico",
-        76: "Lamosa", 77: "Abrasivos", 78: "Herramientas",
-        79: "Ferreteria", 80: "Seguridad", 81: "Electricos",
-        82: "Tuberia", 83: "Pegantes", 84: "Impermeabilizantes",
-        85: "Decoracion"
-    })
-    
-    COLUMNAS_MAESTRAS: Dict[int, str] = field(default_factory=lambda: {
-        0: 'anio', 1: 'mes', 2: 'dia', 7: 'COD', 8: 'CLIENTE',
-        10: 'NOMBRE_PRODUCTO', 11: 'CATEGORIA', 12: 'LINEA',
-        13: 'MARCA', 14: 'VALOR', 15: 'UNIDADES', 16: 'COSTO'
-    })
 
 def configurar_pagina():
     """Configura página con estilos corporativos Ferreinox"""
