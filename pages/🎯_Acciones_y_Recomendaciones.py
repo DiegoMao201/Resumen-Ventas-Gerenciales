@@ -173,16 +173,27 @@ def tabla_seguimiento_vendedor(df_meta_vend: pd.DataFrame, df_real: pd.DataFrame
         .sum()
         .rename(columns={"valor_venta": "venta_real"})
     )
-    out = df_meta_vend.merge(real_vend, on("nomvendedor", how="left")).fillna({"venta_real": 0})
+    out = df_meta_vend.merge(real_vend, on="nomvendedor", how="left").fillna({"venta_real": 0})
     out["avance_pct"] = np.where(out["presupuesto"] > 0, (out["venta_real"] / out["presupuesto"]) * 100, 0)
     return out.sort_values("presupuesto", ascending=False)
 
 def tabla_seguimiento_cliente(df_det: pd.DataFrame, df_real: pd.DataFrame) -> pd.DataFrame:
     if df_det.empty:
         return pd.DataFrame()
-    real_cli = df_real.groupby("cliente_id")["valor_venta"].sum().rename("venta_real") if not df_real.empty else pd.Series([], dtype=float)
     base = df_det[["codigo_cliente", "nombre_cliente", "nomvendedor", "presupuesto_meta"]].copy()
     base = base.rename(columns={"codigo_cliente": "cliente_id"})
+    # Si no hay datos reales o faltan columnas, devolver ceros
+    if df_real.empty or ("cliente_id" not in df_real.columns) or ("valor_venta" not in df_real.columns):
+        out = base.copy()
+        out["venta_real"] = 0
+        out["avance_pct"] = 0
+        return out.sort_values("presupuesto_meta", ascending=False)
+
+    real_cli = (
+        df_real.groupby("cliente_id", as_index=False)["valor_venta"]
+        .sum()
+        .rename(columns={"valor_venta": "venta_real"})
+    )
     out = base.merge(real_cli, on="cliente_id", how="left").fillna({"venta_real": 0})
     out["avance_pct"] = np.where(out["presupuesto_meta"] > 0, (out["venta_real"] / out["presupuesto_meta"]) * 100, 0)
     return out.sort_values("presupuesto_meta", ascending=False)
