@@ -201,12 +201,19 @@ def _enriquecer_geografia(df: pd.DataFrame) -> pd.DataFrame:
     
     if df_poblaciones.empty:
         df['Poblacion_Real'] = 'Sin Geo'
-        df['Vendedor'] = df.get('Vendedor', 'GENERAL').fillna('GENERAL')
+        if 'Vendedor' not in df.columns:
+            df['Vendedor'] = 'GENERAL'
+        else:
+            df['Vendedor'] = df['Vendedor'].fillna('GENERAL')
         return df
     
     df = pd.merge(df, df_poblaciones, on='Key_Nit', how='left')
     df['Poblacion_Real'] = df['Poblacion_Real'].fillna('Sin Geo')
-    df['Vendedor'] = df.get('Vendedor', 'GENERAL').fillna('GENERAL')
+    
+    if 'Vendedor' not in df.columns:
+        df['Vendedor'] = 'GENERAL'
+    else:
+        df['Vendedor'] = df['Vendedor'].fillna('GENERAL')
     
     return df
 
