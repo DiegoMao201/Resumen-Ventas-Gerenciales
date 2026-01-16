@@ -1,11 +1,11 @@
 """Componentes de interfaz de usuario reutilizables"""
-import streamlit as st  # ✅ AGREGAR
-import pandas as pd     # ✅ AGREGAR
+import streamlit as st
+import pandas as pd
 from typing import Dict
+from .config import AppConfig  # ✅ MOVER AQUÍ
 
 def renderizar_sidebar(df_master: pd.DataFrame, config: Dict) -> Dict:
     """Renderiza sidebar con filtros interactivos"""
-    from .config import AppConfig
     
     st.sidebar.image(AppConfig.LOGO_URL, use_container_width=True)
     st.sidebar.markdown("---")
