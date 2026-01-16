@@ -5,10 +5,11 @@ import plotly.express as px
 import plotly.graph_objects as go
 from typing import Dict, List
 import io
+import datetime
 
 st.set_page_config(page_title="💰 Presupuesto 2026 | Ferreinox", page_icon="💰", layout="wide")
 
-# --- NUEVO: Estilos ejecutivos ---
+# --- ESTILOS EJECUTIVOS CSS ---
 st.markdown("""
 <style>
 :root {
@@ -33,12 +34,13 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# ----------------- Funciones de UI -----------------
 def render_header():
     st.markdown(f"""
     <div class="hero">
       <h2 style="margin:0;">💰 Presupuesto 2026 | Ferreinox</h2>
       <p style="margin:4px 0 0 0; color:rgba(255,255,255,0.85);">
-        Asignación anual y mensual por participación real 2025, crecimiento y estacionalidad.
+        Sistema de Planeación Financiera y Comercial.
       </p>
     </div>
     """, unsafe_allow_html=True)
@@ -53,7 +55,7 @@ def kpi_card(label:str, value:str, delta:str=None):
     </div>
     """, unsafe_allow_html=True)
 
-# ----------------- Utilidades -----------------
+# ----------------- Utilidades de Datos -----------------
 def normalizar_texto(texto: str) -> str:
     import unicodedata, re
     if pd.isna(texto): return ""
@@ -94,6 +96,7 @@ def construir_grupo(vendedor: str, grupos: Dict[str, List[str]]) -> str:
             return normalizar_texto(grupo)
     return vend_norm
 
+# ----------------- Lógica de Negocio (Cálculos) -----------------
 def proyectar_total_2026(total_2024, total_2025, escenario: str):
     if total_2024 <= 0 or total_2025 <= 0:
         return total_2025, 0
@@ -128,14 +131,6 @@ def distribuir_presupuesto_mensual(df_asignado: pd.DataFrame, df_hist: pd.DataFr
     return pd.DataFrame(registros)
 
 def asignar_presupuesto(df: pd.DataFrame, grupos: Dict[str, List[str]], total_2026: float) -> pd.DataFrame:
-    """
-    Asigna presupuesto 2026 basado en participación 2025 y tendencia 24-25.
-    - Base: venta_2025 (participación real).
-    - Ajuste: crecimiento 24-25 limitado para evitar distorsiones.
-    - Piso: no cae más de 30% vs 2025.
-    - Techo: no sube más de 35% vs 2025 antes de reescalar.
-    - Reescalado final al total_2026.
-    """
     base = df[df["anio"].isin([2024, 2025])]
     agg = base.groupby("nomvendedor").agg(
         venta_2024=("valor_venta", lambda s: s[df.loc[s.index, "anio"] == 2024].sum()),
@@ -154,25 +149,21 @@ def asignar_presupuesto(df: pd.DataFrame, grupos: Dict[str, List[str]], total_20
         return np.where(mx > mn, (agg[col] - mn) / (mx - mn), 0.0)
 
     agg["crec_pct"] = np.where(agg["venta_2024"] > 0, (agg["venta_2025"] - agg["venta_2024"]) / agg["venta_2024"], 0)
-    # Limitar impacto para evitar distorsiones extremas
-    agg["crec_ajustado"] = np.clip(agg["crec_pct"], -0.15, 0.30)  # -15% a +30%
+    agg["crec_ajustado"] = np.clip(agg["crec_pct"], -0.15, 0.30) 
     agg["diversidad"] = 0.6 * norm_col("lineas") + 0.4 * norm_col("clientes")
-
-    # Score proporcional a venta_2025 con ajuste de crecimiento y ligera prima por diversidad
     agg["score_raw"] = agg["venta_2025"] * (1 + agg["crec_ajustado"]) * (1 + 0.10 * agg["diversidad"])
+    
     suma_scores = agg["score_raw"].sum()
     agg["presupuesto_prelim"] = np.where(suma_scores > 0, agg["score_raw"] / suma_scores * total_2026, 0)
 
-    # Aplicar piso y techo relativos a 2025 antes de reescalar
-    piso_pct = 0.70  # no cae más de 30% vs 2025
-    techo_pct = 1.35 # no sube más de 35% vs 2025
+    piso_pct = 0.70 
+    techo_pct = 1.35 
     agg["presupuesto_ajustado"] = np.clip(
         agg["presupuesto_prelim"],
         agg["venta_2025"] * piso_pct,
         agg["venta_2025"] * techo_pct
     )
 
-    # Reescalar para que la suma final sea exactamente total_2026
     suma_ajustada = agg["presupuesto_ajustado"].sum()
     factor_rescale = total_2026 / suma_ajustada if suma_ajustada > 0 else 0
     agg["presupuesto_2026"] = agg["presupuesto_ajustado"] * factor_rescale
@@ -194,66 +185,209 @@ def comentarios_presupuesto(df_asignado: pd.DataFrame) -> pd.DataFrame:
         delta_vs_2025 = (r["presupuesto_2026"] - r["venta_2025"])
         delta_pct = (delta_vs_2025 / r["venta_2025"] * 100) if r["venta_2025"] > 0 else 0
         trend = "crecimiento" if r["crec_pct"] > 0 else "decrecimiento"
+        # Comentario optimizado para lectura en Excel
         just = (
-            f"Part. 2025: {r['participacion_2025']*100:.1f}%. "
-            f"Tendencia 24-25: {trend} {r['crec_pct']*100:.1f}%. "
-            f"Diversidad (líneas/clientes): {r['diversidad']*100:.1f}%. "
-            f"Presupuesto 2026: ${r['presupuesto_2026']:,.0f} ({delta_pct:+.1f}% vs 2025)."
+            f"Meta 26: ${r['presupuesto_2026']/1e6:.1f}M ({delta_pct:+.1f}% vs 25). "
+            f"Basado en {trend} del {r['crec_pct']*100:.1f}% y diversidad."
         )
         comentarios.append({"nomvendedor": r["nomvendedor"], "grupo": r["grupo"], "comentario": just})
     return pd.DataFrame(comentarios)
 
-def exportar_excel_mensual_unificado(tabla_mensual: pd.DataFrame) -> bytes:
-    """Genera Excel profesional para la tabla mensual unificada."""
+# ----------------- GENERADOR DE EXCEL PREMIUM -----------------
+def exportar_excel_ejecutivo(df_mensual_unificado: pd.DataFrame, df_coment: pd.DataFrame, meta_total: float, escenario: str) -> bytes:
+    """
+    Genera un Excel de Alto Nivel con Sparklines, Formato Condicional y Diseño Moderno.
+    """
     output = io.BytesIO()
+    
+    # 1. Preparación de datos para Excel
+    # Pivotar los meses
+    df_pivot = df_mensual_unificado.pivot_table(
+        index="vendedor_unificado", columns="mes", values="presupuesto_mensual", aggfunc="sum"
+    ).fillna(0)
+    
+    # Ordenar por venta total descendente para impacto visual
+    df_pivot["Total_2026"] = df_pivot.sum(axis=1)
+    df_pivot = df_pivot.sort_values("Total_2026", ascending=False)
+    
+    # Mapeo de comentarios (Buscamos el comentario más relevante para el vendedor/grupo)
+    # Si es grupo, intentamos concatenar o dejar genérico. Si es vendedor, pegamos su comentario.
+    comment_map = {}
+    # Crear diccionario rápido de comentarios individuales
+    raw_comments = dict(zip(df_coment["nomvendedor"], df_coment["comentario"]))
+    
+    # Crear diccionario de comentarios de grupo (tomamos el del líder o genérico)
+    for idx, row in df_pivot.iterrows():
+        nombre = str(idx)
+        if nombre in raw_comments:
+            comment_map[nombre] = raw_comments[nombre]
+        else:
+            # Es un grupo o no tiene comentario directo.
+            # Buscamos si el nombre coincide con un grupo en df_coment
+            sub_c = df_coment[df_coment["grupo"] == nombre]
+            if not sub_c.empty:
+                 comment_map[nombre] = f"Agrupación de {len(sub_c)} vendedores. Obj. Grupal: ${row['Total_2026']/1e6:.1f}M"
+            else:
+                 comment_map[nombre] = "Asignación directa."
+
+    # 2. Configuración de Writer y Workbook
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-        tabla_mensual.to_excel(writer, index=False, sheet_name="Plan_Mensual_2026", startrow=3)
+        sheet_name = "Plan_Maestro_2026"
+        # Escribimos un dataframe vacío solo para inicializar, escribiremos manualmente
+        pd.DataFrame().to_excel(writer, sheet_name=sheet_name)
+        
         wb = writer.book
-        ws = writer.sheets["Plan_Mensual_2026"]
-
-        # Formatos
-        title_fmt = wb.add_format({
-            "bold": True, "font_size": 16, "font_color": "white",
-            "align": "center", "valign": "vcenter", "fg_color": "#1e3a8a"
+        ws = writer.sheets[sheet_name]
+        ws.hide_gridlines(2) # Ocultar líneas de cuadrícula para look limpio
+        
+        # --- DEFINICIÓN DE FORMATOS ---
+        fmt_title = wb.add_format({
+            'bold': True, 'font_size': 20, 'font_color': '#FFFFFF',
+            'bg_color': '#1e3a8a', 'align': 'left', 'valign': 'vcenter', 'indent': 1
         })
-        header_fmt = wb.add_format({
-            "bold": True, "font_color": "white", "align": "center", "valign": "vcenter",
-            "fg_color": "#3b82f6", "border": 1
+        fmt_subtitle = wb.add_format({
+            'font_size': 11, 'font_color': '#cbd5e1', # Gris claro azulado
+            'bg_color': '#1e3a8a', 'align': 'left', 'valign': 'top', 'indent': 1, 'italic': True
         })
-        money_fmt = wb.add_format({"num_format": "$#,##0", "border": 1})
-        total_fmt = wb.add_format({"num_format": "$#,##0", "border": 1, "bold": True, "fg_color": "#fef3c7"})
-        index_fmt = wb.add_format({"border": 1, "bold": True, "bg_color": "#eef2ff"})
+        fmt_kpi_box = wb.add_format({
+            'border': 1, 'border_color': '#cbd5e1', 'bg_color': '#f8fafc',
+            'align': 'center', 'valign': 'vcenter', 'font_size': 10
+        })
+        fmt_kpi_val = wb.add_format({
+            'bold': True, 'font_size': 12, 'font_color': '#1e3a8a',
+            'align': 'center', 'bg_color': '#f8fafc', 'num_format': '$#,##0'
+        })
+        
+        # Formatos de Tabla
+        header_color = '#2563eb' # Azul más brillante para cabecera tabla
+        fmt_header = wb.add_format({
+            'bold': True, 'font_color': 'white', 'bg_color': header_color,
+            'align': 'center', 'valign': 'vcenter', 'border': 1, 'border_color': 'white'
+        })
+        fmt_row_idx = wb.add_format({
+            'bold': True, 'font_color': '#334155', 'bg_color': '#f1f5f9',
+            'border': 1, 'border_color': '#e2e8f0', 'align': 'left'
+        })
+        fmt_curr = wb.add_format({'num_format': '$ #,##0', 'border': 1, 'border_color': '#f1f5f9', 'font_size': 10})
+        fmt_curr_tot = wb.add_format({
+            'num_format': '$ #,##0', 'bold': True, 'bg_color': '#fff7ed', # Naranja muy suave
+            'border': 1, 'border_color': '#fdba74'
+        })
+        fmt_text_sm = wb.add_format({'font_size': 9, 'font_color': '#64748b', 'text_wrap': True, 'valign': 'vcenter'})
 
-        # Título corporativo
-        num_cols = len(tabla_mensual.columns)
-        ws.merge_range(0, 0, 1, num_cols - 1, "PRESUPUESTO FERREINOX SAS BIC 2026", title_fmt)
+        # --- SECCIÓN 1: DASHBOARD HEADER (Filas 0-4) ---
+        ws.set_row(0, 35) # Altura Título
+        ws.set_row(1, 20) # Altura Subtítulo
+        ws.set_row(2, 10) # Espaciador
+        ws.set_row(3, 40) # Fila KPIs
+        
+        # Título Corporativo
+        ws.merge_range('A1:Q1', "  FERREINOX SAS BIC | PRESUPUESTO COMERCIAL 2026", fmt_title)
+        ws.merge_range('A2:Q2', f"  Escenario seleccionado: {escenario.upper()} | Generado: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}", fmt_subtitle)
+        
+        # KPIs Mini Dashboard en Excel
+        ws.write('B4', "META TOTAL AÑO", fmt_kpi_box)
+        ws.write('C4', meta_total, fmt_kpi_val)
+        ws.write('E4', "PROMEDIO MENSUAL", fmt_kpi_box)
+        ws.write('F4', meta_total/12, fmt_kpi_val)
+        
+        # --- SECCIÓN 2: CABECERAS DE TABLA (Fila 6) ---
+        start_row = 6
+        cols = ["Vendedor / Grupo", "Tendencia", "Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic", "TOTAL 2026", "Observaciones Estratégicas"]
+        
+        for c_idx, col_name in enumerate(cols):
+            ws.write(start_row, c_idx, col_name, fmt_header)
+            
+        # --- SECCIÓN 3: DATOS Y SPARKLINES ---
+        curr_row = start_row + 1
+        
+        # Columnas mapeadas: A=0, B=1(Spark), C=2(Ene)... N=13(Dic), O=14(Total), P=15(Comentario)
+        
+        for idx_val, row in df_pivot.iterrows():
+            # 1. Nombre
+            ws.write(curr_row, 0, idx_val, fmt_row_idx)
+            
+            # 2. Datos Mensuales (Cols 2 a 13) - Escribimos los valores
+            months_data = []
+            for m in range(1, 13):
+                val = row.get(m, 0)
+                months_data.append(val)
+                ws.write(curr_row, m + 1, val, fmt_curr) # +1 porque hay columna sparkline antes
+                
+            # 3. Total (Col 14)
+            ws.write(curr_row, 14, row["Total_2026"], fmt_curr_tot)
+            
+            # 4. Comentario (Col 15)
+            ws.write(curr_row, 15, comment_map.get(str(idx_val), ""), fmt_text_sm)
+            
+            # 5. SPARKLINES (Mini gráfico en Col 1 - 'B')
+            # Definir el rango de datos de esta fila para el sparkline (C a N)
+            # Fila excel es curr_row + 1 (base 1)
+            row_excel = curr_row + 1
+            data_range = f"C{row_excel}:N{row_excel}" # Rango de Ene a Dic
+            
+            ws.add_sparkline(curr_row, 1, {
+                'range': data_range,
+                'type': 'line',
+                'style': 12, # Estilo azul
+                'markers': True,
+                'last_point': True,
+                'high_point': True, # Puntos destacados
+                'line_weight': 2
+            })
+            
+            curr_row += 1
 
-        # Encabezados
-        for col, name in enumerate(tabla_mensual.columns):
-            ws.write(3, col, name, header_fmt)
+        # Fila de Totales Generales al final
+        ws.write(curr_row, 0, "TOTAL COMPAÑÍA", fmt_header)
+        # Sumar columnas verticales
+        for m_idx in range(1, 13):
+            # Formula excel: =SUM(C7:C_last)
+            col_letter = chr(65 + m_idx + 1) # C es col 2, pero offset +1 por sparkline = D? No, wait.
+            # A=0, B=1, C=2. Ene esta en col 2.
+            # chr(65+2) = C.
+            xls_col =  pd.io.excel.ExcelWriter(io.BytesIO(), engine='xlsxwriter').book.add_format()._get_color
+            # Mejor usar indices numericos de xlsxwriter
+            ws.write_formula(curr_row, m_idx + 1, f"=SUM({chr(67+m_idx-1)}{start_row+2}:{chr(67+m_idx-1)}{curr_row})", fmt_curr_tot)
 
-        # Filas
-        for row_idx in range(4, len(tabla_mensual) + 4):
-            ws.set_row(row_idx, None, money_fmt)
+        ws.write_formula(curr_row, 14, f"=SUM(O{start_row+2}:O{curr_row})", fmt_curr_tot)
 
-        # Columna índice y totales
-        ws.set_column(0, 0, 32, index_fmt)
-        ws.set_column(1, num_cols - 2, 16, money_fmt)
-        ws.set_column(num_cols - 1, num_cols - 1, 18, total_fmt)
-
-        # Fila TOTAL_MES destacada
-        idx_col = tabla_mensual.columns[0]
-        if idx_col in tabla_mensual.columns and (tabla_mensual[idx_col] == "TOTAL_MES").any():
-            r = tabla_mensual.index[tabla_mensual[idx_col] == "TOTAL_MES"][0] + 4
-            ws.set_row(r, None, total_fmt)
-
-        # Congelar y autofiltro
-        ws.freeze_panes(4, 1)
-        ws.autofilter(3, 0, len(tabla_mensual) + 3, num_cols - 1)
-
+        # --- SECCIÓN 4: FORMATO CONDICIONAL Y VISUALES ---
+        # Rango de datos numéricos (Meses): C7 a N_last
+        last_data_row = curr_row - 1
+        rng_months = f"C{start_row+2}:N{last_data_row+1}"
+        rng_totals = f"O{start_row+2}:O{last_data_row+1}"
+        
+        # 1. Mapa de Calor (Azul suave) para los meses - Identifica estacionalidad
+        ws.conditional_format(rng_months, {
+            'type': '3_color_scale',
+            'min_color': '#ffffff', # Blanco
+            'mid_color': '#bfdbfe', # Azul muy claro
+            'max_color': '#3b82f6'  # Azul corporativo
+        })
+        
+        # 2. Barras de Datos para el Total - Comparativa visual de tamaño
+        ws.conditional_format(rng_totals, {
+            'type': 'data_bar',
+            'bar_color': '#f59e0b', # Dorado/Ambar Ferreinox
+            'bar_solid': True,
+        })
+        
+        # --- SECCIÓN 5: AJUSTES FINALES DE LAYOUT ---
+        ws.set_column(0, 0, 35) # Ancho Vendedor
+        ws.set_column(1, 1, 12) # Ancho Sparkline
+        ws.set_column(2, 13, 14) # Ancho Meses
+        ws.set_column(14, 14, 18) # Ancho Total
+        ws.set_column(15, 15, 50) # Ancho Comentarios
+        
+        ws.freeze_panes(start_row + 1, 2) # Congelar encabezados y columnas nombre+sparkline
+        ws.autofilter(start_row, 0, last_data_row, 15) # Filtros automáticos
+        
+        # Insertar Logo (Texto estilizado si no hay imagen) en A1 ya hecho.
+        
     return output.getvalue()
 
-# ----------------- UI -----------------
+# ----------------- EJECUCIÓN PRINCIPAL -----------------
 validar_sesion()
 df_raw = preparar_df(st.session_state.df_ventas)
 DATA_CONFIG = st.session_state.DATA_CONFIG
@@ -286,14 +420,15 @@ with kpi_cols:
     kpi_card("Vendedores activos", f"{df_master['nomvendedor'].nunique():,}")
     st.markdown('</div>', unsafe_allow_html=True)
 
+# --- Procesamiento de Presupuestos ---
 df_asignado = asignar_presupuesto(df_master, grupos_cfg, total_2026)
 df_grupos = tabla_grupos(df_asignado)
 df_mensual = distribuir_presupuesto_mensual(df_asignado, df_master)
 df_coment = comentarios_presupuesto(df_asignado)
 
-# --- NUEVO: consolidar mostradores en la vista mensual ---
+# Consolidar mostradores para la vista mensual unificada
 df_mensual['vendedor_unificado'] = np.where(
-    df_mensual['grupo'].notna() & (df_mensual['grupo'] != ''),
+    df_mensual['grupo'].notna() & (df_mensual['grupo'] != '') & (df_mensual['grupo'] != df_mensual['nomvendedor']),
     df_mensual['grupo'],
     df_mensual['nomvendedor']
 )
@@ -337,48 +472,21 @@ st.dataframe(
     }
 )
 
-# --- Plan mensual unificado (solo mostradores y vendedores individuales) ---
-st.markdown("### 🗓️ Plan Mensual unificado (agrupa mostradores)")
+# --- Vista Previa Mensual ---
+st.markdown("### 🗓️ Plan Mensual unificado (Vista Previa)")
 with st.expander("Ver detalle mensual consolidado", expanded=False):
-    tabla_mensual = df_mensual_unificado.pivot_table(
-        index="vendedor_unificado",
-        columns="mes",
-        values="presupuesto_mensual",
-        aggfunc="sum"
+    tabla_mensual_preview = df_mensual_unificado.pivot_table(
+        index="vendedor_unificado", columns="mes", values="presupuesto_mensual", aggfunc="sum"
     ).fillna(0)
-    tabla_mensual["Total_2026"] = tabla_mensual.sum(axis=1)
-
-    # Fila total por mes (Total 1=Ene, ..., Total 12=Dic, Total_2026)
-    fila_total = tabla_mensual.sum(axis=0)
-    fila_total.name = "TOTAL_MES"
-    tabla_mensual = pd.concat([tabla_mensual, fila_total.to_frame().T])
-
-    # Redondear y usar solo enteros
-    tabla_mensual = tabla_mensual.round(0).astype(int)
-
-    # Renombrar columnas de mes a nombre
-    mapeo_meses = {1:"Enero", 2:"Febrero", 3:"Marzo", 4:"Abril", 5:"Mayo", 6:"Junio",
-                   7:"Julio", 8:"Agosto", 9:"Septiembre", 10:"Octubre", 11:"Noviembre", 12:"Diciembre"}
-    tabla_mensual.rename(columns={k: v for k, v in mapeo_meses.items()}, inplace=True)
-
-    # Preparar configuración de columnas
-    tabla_mensual_reset = tabla_mensual.reset_index().rename(columns={"vendedor_unificado": "Vendedor/Grupo"})
-    col_config = {
-        "Vendedor/Grupo": "Vendedor/Grupo",
-        "Total_2026": st.column_config.NumberColumn("Total 2026", format="$ %d"),
-    }
-    for num, nombre in mapeo_meses.items():
-        if nombre in tabla_mensual_reset.columns:
-            col_config[nombre] = st.column_config.NumberColumn(f"Total {nombre}", format="$ %d")
-
+    tabla_mensual_preview["Total_2026"] = tabla_mensual_preview.sum(axis=1)
+    tabla_mensual_preview = tabla_mensual_preview.sort_values("Total_2026", ascending=False)
+    
     st.dataframe(
-        tabla_mensual_reset,
-        use_container_width=True,
-        hide_index=True,
-        column_config=col_config
+        tabla_mensual_preview.style.format("${:,.0f}").background_gradient(cmap="Blues", subset=list(range(1,13))),
+        use_container_width=True
     )
 
-# --- Visualizaciones ejecutivas mejoradas ---
+# --- Visualizaciones ---
 st.markdown("### 📊 Visualizaciones Ejecutivas")
 c1, c2 = st.columns([1.4, 1])
 with c1:
@@ -399,31 +507,49 @@ with c2:
     fig_g.update_layout(height=520, template="plotly_white", margin=dict(t=60, b=20, l=10, r=10))
     st.plotly_chart(fig_g, use_container_width=True)
 
-st.markdown("### 🗺️ Distribución Mensual (Heatmap Unificado)")
+st.markdown("### 🗺️ Mapa de Calor Mensual")
 fig_heat = px.imshow(
     df_mensual_unificado.pivot_table(index="vendedor_unificado", columns="mes", values="presupuesto_mensual", aggfunc="sum").fillna(0),
     labels={"x": "Mes", "y": "Vendedor/Grupo", "color": "Presupuesto"},
-    aspect="auto", color_continuous_scale="Blues", text_auto=True
+    aspect="auto", color_continuous_scale="Blues"
 )
 fig_heat.update_layout(height=520, template="plotly_white", margin=dict(l=40, r=20, t=60, b=40))
 st.plotly_chart(fig_heat, use_container_width=True)
 
-# --- Comentarios ejecutivos con badge ---
-st.markdown("### 🧠 Comentarios Ejecutivos")
+# --- Comentarios ejecutivos ---
+st.markdown("### 🧠 Justificación Estratégica")
 st.dataframe(df_coment, use_container_width=True, hide_index=True)
 
-st.markdown("### 🧾 Descargar Asignaciones")
-csv_bytes = df_asignado.to_csv(index=False).encode("utf-8")
-st.download_button("📥 CSV Vendedores", data=csv_bytes, file_name="presupuesto_2026_vendedores.csv", mime="text/csv", use_container_width=True)
+# --- ZONA DE DESCARGAS ---
+st.markdown("### 🧾 Descarga de Informes Oficiales")
+col_d1, col_d2 = st.columns(2)
 
-csv_bytes_g = df_grupos.to_csv(index=False).encode("utf-8")
-st.download_button("📥 CSV Grupos", data=csv_bytes_g, file_name="presupuesto_2026_grupos.csv", mime="text/csv", use_container_width=True)
+with col_d1:
+    csv_bytes = df_asignado.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        "📥 CSV Data Bruta (Para Sistemas)", 
+        data=csv_bytes, 
+        file_name="base_datos_presupuesto_2026.csv", 
+        mime="text/csv", 
+        use_container_width=True
+    )
 
-csv_bytes_m = df_mensual.to_csv(index=False).encode("utf-8")
-st.download_button("📥 CSV Plan Mensual", data=csv_bytes_m, file_name="presupuesto_2026_mensual.csv", mime="text/csv", use_container_width=True)
-
-excel_bytes_unificado = exportar_excel_mensual_unificado(tabla_mensual_reset)
-st.download_button("📥 Excel Plan Mensual Unificado", data=excel_bytes_unificado, file_name="presupuesto_2026_plan_mensual_unificado.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+with col_d2:
+    # Generar el Excel Premium
+    excel_bytes_premium = exportar_excel_ejecutivo(
+        df_mensual_unificado, 
+        df_coment, 
+        total_2026,
+        escenario
+    )
+    st.download_button(
+        "💎 Descargar PRESUPUESTO EJECUTIVO 2026 (Excel Premium)", 
+        data=excel_bytes_premium, 
+        file_name="Presupuesto_Ferreinox_2026_Ejecutivo.xlsx", 
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+        use_container_width=True,
+        type="primary"
+    )
 
 st.markdown("---")
-st.caption("Sistema de Inteligencia Comercial | Presupuesto 2026 con participación 2025, crecimiento, diversidad y estacionalidad mensual.")
+st.caption("Sistema de Inteligencia Comercial | Ferreinox SAS BIC | 2026")
