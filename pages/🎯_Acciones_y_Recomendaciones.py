@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import dropbox
 import io
-import datetime  # añadido
 
 st.set_page_config(page_title="🎯 Acciones y Recomendaciones | Pintuco", page_icon="🎯", layout="wide")
 
@@ -77,22 +76,20 @@ def cargar_cliente_tipo() -> pd.DataFrame:
     if not dbx:
         st.error("⚠️ No hay token de Dropbox configurado. Configura st.secrets.dropbox.")
         return pd.DataFrame()
-    rutas = ["/data/CLIENTE_TIPO.csv", "/data/CLIENTE_TIPO.xlsx"]
-    for ruta in rutas:
-        try:
-            _, res = dbx.files_download(path=ruta)
-            if ruta.endswith(".csv"):
-                df = pd.read_csv(io.BytesIO(res.content), encoding="latin-1", sep="|")
-            else:
-                df = pd.read_excel(io.BytesIO(res.content))
-            df = preparar_cliente_tipo(df)
-            st.info(f"CLIENTE_TIPO cargado: {df.shape[0]:,} filas, {df.shape[1]} cols")
-            return df
-        except Exception as e:
-            st.warning(f"No se pudo leer {ruta}: {e}")
-            continue
-    st.error("No se encontró el archivo CLIENTE_TIPO en Dropbox.")
-    return pd.DataFrame()
+
+    ruta = "/data/CLIENTE_TIPO.xlsx"
+    try:
+        _, res = dbx.files_download(path=ruta)
+        df = pd.read_excel(io.BytesIO(res.content))
+        df = preparar_cliente_tipo(df)
+        if df.empty:
+            st.error("CLIENTE_TIPO.xlsx se leyó, pero quedó vacío. Revisa columnas y datos.")
+        else:
+            st.info(f"CLIENTE_TIPO.xlsx cargado: {df.shape[0]:,} filas, {df.shape[1]} cols")
+        return df
+    except Exception as e:
+        st.error(f"No se pudo leer {ruta}: {e}")
+        return pd.DataFrame()
 
 def asignar_presupuesto_detallista(df_tipo: pd.DataFrame, meta_total: float, canal="DETALLISTA") -> pd.DataFrame:
     df_det = df_tipo[df_tipo["nombre_tipo_negocio"].str.upper() == canal.upper()].copy()
