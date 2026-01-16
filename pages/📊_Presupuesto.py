@@ -82,6 +82,14 @@ def distribuir_presupuesto_mensual(df_asignado: pd.DataFrame, df_hist: pd.DataFr
     return pd.DataFrame(registros)
 
 def asignar_presupuesto(df: pd.DataFrame, grupos: Dict[str, List[str]], total_2026: float) -> pd.DataFrame:
+    """
+    Asigna presupuesto 2026 basado en participación 2025 y tendencia 24-25.
+    - Base: venta_2025 (participación real).
+    - Ajuste: crecimiento 24-25 limitado para evitar distorsiones.
+    - Piso: no cae más de 30% vs 2025.
+    - Techo: no sube más de 35% vs 2025 antes de reescalar.
+    - Reescalado final al total_2026.
+    """
     base = df[df["anio"].isin([2024, 2025])]
     agg = base.groupby("nomvendedor").agg(
         venta_2024=("valor_venta", lambda s: s[df.loc[s.index, "anio"] == 2024].sum()),
@@ -100,13 +108,28 @@ def asignar_presupuesto(df: pd.DataFrame, grupos: Dict[str, List[str]], total_20
         return np.where(mx > mn, (agg[col] - mn) / (mx - mn), 0.0)
 
     agg["crec_pct"] = np.where(agg["venta_2024"] > 0, (agg["venta_2025"] - agg["venta_2024"]) / agg["venta_2024"], 0)
-    agg["crec_norm"] = norm_col("crec_pct")
+    # Limitar impacto para evitar distorsiones extremas
+    agg["crec_ajustado"] = np.clip(agg["crec_pct"], -0.15, 0.30)  # -15% a +30%
     agg["diversidad"] = 0.6 * norm_col("lineas") + 0.4 * norm_col("clientes")
 
-    # Score: participación (60%), crecimiento (25%), profundidad/diversidad (15%)
-    agg["score"] = 0.6 * agg["participacion_2025"] + 0.25 * agg["crec_norm"] + 0.15 * agg["diversidad"]
-    suma_scores = agg["score"].sum()
-    agg["presupuesto_2026"] = np.where(suma_scores > 0, agg["score"] / suma_scores * total_2026, 0)
+    # Score proporcional a venta_2025 con ajuste de crecimiento y ligera prima por diversidad
+    agg["score_raw"] = agg["venta_2025"] * (1 + agg["crec_ajustado"]) * (1 + 0.10 * agg["diversidad"])
+    suma_scores = agg["score_raw"].sum()
+    agg["presupuesto_prelim"] = np.where(suma_scores > 0, agg["score_raw"] / suma_scores * total_2026, 0)
+
+    # Aplicar piso y techo relativos a 2025 antes de reescalar
+    piso_pct = 0.70  # no cae más de 30% vs 2025
+    techo_pct = 1.35 # no sube más de 35% vs 2025
+    agg["presupuesto_ajustado"] = np.clip(
+        agg["presupuesto_prelim"],
+        agg["venta_2025"] * piso_pct,
+        agg["venta_2025"] * techo_pct
+    )
+
+    # Reescalar para que la suma final sea exactamente total_2026
+    suma_ajustada = agg["presupuesto_ajustado"].sum()
+    factor_rescale = total_2026 / suma_ajustada if suma_ajustada > 0 else 0
+    agg["presupuesto_2026"] = agg["presupuesto_ajustado"] * factor_rescale
 
     agg["grupo"] = agg["nomvendedor"].apply(lambda v: construir_grupo(v, grupos))
     return agg
@@ -122,12 +145,14 @@ def tabla_grupos(df_asignado: pd.DataFrame) -> pd.DataFrame:
 def comentarios_presupuesto(df_asignado: pd.DataFrame) -> pd.DataFrame:
     comentarios = []
     for _, r in df_asignado.iterrows():
+        delta_vs_2025 = (r["presupuesto_2026"] - r["venta_2025"])
+        delta_pct = (delta_vs_2025 / r["venta_2025"] * 100) if r["venta_2025"] > 0 else 0
         trend = "crecimiento" if r["crec_pct"] > 0 else "decrecimiento"
         just = (
-            f"Participación 2025: {r['participacion_2025']*100:.1f}%. "
-            f"Tendencia: {trend} {r['crec_pct']*100:.1f}%. "
+            f"Part. 2025: {r['participacion_2025']*100:.1f}%. "
+            f"Tendencia 24-25: {trend} {r['crec_pct']*100:.1f}%. "
             f"Diversidad (líneas/clientes): {r['diversidad']*100:.1f}%. "
-            f"Presupuesto asignado 2026: ${r['presupuesto_2026']:,.0f}."
+            f"Presupuesto 2026: ${r['presupuesto_2026']:,.0f} ({delta_pct:+.1f}% vs 2025)."
         )
         comentarios.append({"nomvendedor": r["nomvendedor"], "grupo": r["grupo"], "comentario": just})
     return pd.DataFrame(comentarios)
