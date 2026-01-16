@@ -211,8 +211,15 @@ def ventas_reales_periodo(df_ventas: pd.DataFrame, df_det: pd.DataFrame, canales
     if "NIT" in df.columns:
         mask_cliente = mask_cliente | df["NIT"].astype(str).isin(clientes_det)
 
-    # Logs de filtrado
-    st.info(f"Log ventas_reales_periodo: candidatos iniciales={len(df)}, fecha={mask_fecha.sum()}, marca={mask_marca.sum()}, cliente={mask_cliente.sum()}")
+    # Logs de filtrado (seguro para bool/Series)
+    marca_cnt = int(mask_marca.sum()) if isinstance(mask_marca, pd.Series) else int(mask_marca) * len(df)
+    cliente_cnt = int(mask_cliente.sum()) if isinstance(mask_cliente, pd.Series) else int(mask_cliente) * len(df)
+    fecha_cnt = int(mask_fecha.sum()) if isinstance(mask_fecha, pd.Series) else int(mask_fecha) * len(df)
+
+    st.info(
+        f"Log ventas_reales_periodo: candidatos iniciales={len(df)}, "
+        f"fecha={fecha_cnt}, marca={marca_cnt}, cliente={cliente_cnt}"
+    )
 
     df = df[mask_fecha & mask_marca & mask_cliente]
     if df.empty:
@@ -385,8 +392,15 @@ def ventas_reales_periodo(df_ventas: pd.DataFrame, df_det: pd.DataFrame, canales
     if "NIT" in df.columns:
         mask_cliente = mask_cliente | df["NIT"].astype(str).isin(clientes_det)
 
-    # Logs de filtrado
-    st.info(f"Log ventas_reales_periodo: candidatos iniciales={len(df)}, fecha={mask_fecha.sum()}, marca={mask_marca.sum()}, cliente={mask_cliente.sum()}")
+    # Logs de filtrado (seguro para bool/Series)
+    marca_cnt = int(mask_marca.sum()) if isinstance(mask_marca, pd.Series) else int(mask_marca) * len(df)
+    cliente_cnt = int(mask_cliente.sum()) if isinstance(mask_cliente, pd.Series) else int(mask_cliente) * len(df)
+    fecha_cnt = int(mask_fecha.sum()) if isinstance(mask_fecha, pd.Series) else int(mask_fecha) * len(df)
+
+    st.info(
+        f"Log ventas_reales_periodo: candidatos iniciales={len(df)}, "
+        f"fecha={fecha_cnt}, marca={marca_cnt}, cliente={cliente_cnt}"
+    )
 
     df = df[mask_fecha & mask_marca & mask_cliente]
     if df.empty:
