@@ -76,28 +76,45 @@ def analizar_con_ia_avanzado(
         return _analisis_manual_avanzado(df_actual, df_anterior, metricas, lineas_estrategicas)
 
 
-def _resolver_columnas(df: pd.DataFrame) -> Dict[str, str]:
-    """Mapea nombres reales desde Resumen_Mensual."""
-    col_cliente = (
-        "nombre_cliente" if "nombre_cliente" in df.columns else
-        "CLIENTE" if "CLIENTE" in df.columns else
-        next((c for c in df.columns if "cliente" in c.lower()), None)
-    )
-    col_valor = (
-        "valor_venta" if "valor_venta" in df.columns else
-        "VALOR" if "VALOR" in df.columns else
-        next((c for c in df.columns if "valor" in c.lower()), None)
-    )
-    col_linea = (
-        "Linea_Estrategica" if "Linea_Estrategica" in df.columns else
-        "linea_producto" if "linea_producto" in df.columns else
-        next((c for c in df.columns if "linea" in c.lower()), None)
-    )
+def _resolver_columnas(df: pd.DataFrame, df_fallback: pd.DataFrame | None = None) -> Dict[str, str]:
+    """Mapea columnas reales comprobando presencia en df_actual/df_anterior."""
+    def pick(candidatos: List[str]) -> str | None:
+        for c in candidatos:
+            if c and c in df.columns:
+                return c
+            if df_fallback is not None and c and c in df_fallback.columns:
+                return c
+        return None
+
+    col_cliente = pick([
+        "nombre_cliente",
+        "CLIENTE",
+        next((x for x in df.columns if "cliente" in x.lower()), None),
+        next((x for x in df_fallback.columns if "cliente" in x.lower()), None) if df_fallback is not None else None,
+    ])
+
+    col_valor = pick([
+        "valor_venta",
+        "VALOR",
+        next((x for x in df.columns if "valor" in x.lower()), None),
+        next((x for x in df_fallback.columns if "valor" in x.lower()), None) if df_fallback is not None else None,
+    ])
+
+    col_linea = pick([
+        "Linea_Estrategica",
+        "linea_producto",
+        next((x for x in df.columns if "linea" in x.lower()), None),
+        next((x for x in df_fallback.columns if "linea" in x.lower()), None) if df_fallback is not None else None,
+    ])
+
     return {"cliente": col_cliente, "valor": col_valor, "linea": col_linea}
 
+
 def _analizar_lineas_estrategicas(df_actual, df_anterior, lineas_estrategicas):
-    cols = _resolver_columnas(df_actual)
+    cols = _resolver_columnas(df_actual, df_anterior)
     columna_linea, columna_valor, columna_cliente = cols["linea"], cols["valor"], cols["cliente"]
+    if None in (columna_linea, columna_valor, columna_cliente):
+        return {}
     resultados = {}
     for linea in lineas_estrategicas:
         mask_a = df_actual[columna_linea].astype(str).str.upper() == linea.upper()
@@ -120,8 +137,21 @@ def _analizar_lineas_estrategicas(df_actual, df_anterior, lineas_estrategicas):
     return resultados
 
 def _analizar_retencion_clientes(df_actual, df_anterior):
-    cols = _resolver_columnas(df_actual)
+    cols = _resolver_columnas(df_actual, df_anterior)
     col_cliente, col_valor = cols["cliente"], cols["valor"]
+    if None in (col_cliente, col_valor):
+        return {
+            "total_clientes_actual": 0,
+            "total_clientes_anterior": 0,
+            "clientes_retenidos": 0,
+            "clientes_nuevos": 0,
+            "clientes_perdidos": 0,
+            "ventas_retenidos": 0,
+            "ventas_nuevos": 0,
+            "tasa_retencion": 0,
+            "top_retenidos": {},
+            "top_nuevos": {},
+        }
     clientes_actual = set(df_actual[col_cliente].unique())
     clientes_anterior = set(df_anterior[col_cliente].unique())
     clientes_retenidos = clientes_actual & clientes_anterior
