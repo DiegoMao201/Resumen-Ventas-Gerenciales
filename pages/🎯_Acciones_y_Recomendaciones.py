@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import dropbox
 import io
+import unicodedata
 
 st.set_page_config(page_title="🎯 Acciones y Recomendaciones | Pintuco", page_icon="🎯", layout="wide")
 
@@ -34,6 +35,11 @@ def limpiar_df_ventas(df: pd.DataFrame) -> pd.DataFrame:
     if "nombre_marca" in dfc: dfc["nombre_marca"] = dfc["nombre_marca"].astype(str).str.strip()
     if "fecha_venta" in dfc: dfc["fecha_venta"] = pd.to_datetime(dfc["fecha_venta"], errors="coerce")
     return dfc
+
+def _normalizar_txt(txt: str) -> str:
+    if pd.isna(txt): return ""
+    t = "".join(c for c in unicodedata.normalize("NFD", str(txt)) if unicodedata.category(c) != "Mn")
+    return t.strip().upper()
 
 def preparar_cliente_tipo(df_raw: pd.DataFrame) -> pd.DataFrame:
     ren = {
@@ -68,6 +74,12 @@ def preparar_cliente_tipo(df_raw: pd.DataFrame) -> pd.DataFrame:
     for col in ["nit", "codigo_cliente", "nomvendedor", "nombre_cliente"]:
         if col in df: df[col] = df[col].astype(str).str.strip()
     normalizar_num(df, ["valor_total_item_vendido", "cantidad"])
+    # normalizar canal/cliente/vendedor
+    if "nombre_tipo_negocio" in df: df["nombre_tipo_negocio"] = df["nombre_tipo_negocio"].apply(_normalizar_txt)
+    if "nomvendedor" in df: df["nomvendedor"] = df["nomvendedor"].apply(_normalizar_txt)
+    if "nombre_cliente" in df: df["nombre_cliente"] = df["nombre_cliente"].apply(_normalizar_txt)
+    if "codigo_cliente" in df: df["codigo_cliente"] = df["codigo_cliente"].astype(str).str.strip()
+    if "nit" in df: df["nit"] = df["nit"].astype(str).str.strip()
     return df
 
 @st.cache_data(ttl=1800)
@@ -92,16 +104,13 @@ def cargar_cliente_tipo() -> pd.DataFrame:
         return pd.DataFrame()
 
 def asignar_presupuesto_detallista(df_tipo: pd.DataFrame, meta_total: float, canal="DETALLISTA") -> pd.DataFrame:
-    df_det = df_tipo[df_tipo["nombre_tipo_negocio"].str.upper() == canal.upper()].copy()
+    df_det = df_tipo[df_tipo["nombre_tipo_negocio"] == _normalizar_txt(canal)].copy()
     if df_det.empty:
+        st.error(f"❌ No hay registros de canal {canal} en CLIENTE_TIPO (columna NOMBRE_TIPO_NEGOCIO). Ejemplos encontrados: {df_tipo['nombre_tipo_negocio'].dropna().unique()[:10]}")
         return pd.DataFrame()
     ventas_2025 = df_det[df_det["anio"] == 2025]
     base_sum = ventas_2025["valor_total_item_vendido"].sum()
-    df_det["participacion_2025"] = np.where(
-        base_sum > 0,
-        df_det["valor_total_item_vendido"] / base_sum,
-        0
-    )
+    df_det["participacion_2025"] = np.where(base_sum > 0, df_det["valor_total_item_vendido"] / base_sum, 0)
     df_det["presupuesto_meta"] = meta_total * df_det["participacion_2025"]
     return df_det
 
