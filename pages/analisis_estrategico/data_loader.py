@@ -4,7 +4,7 @@ import pandas as pd
 import dropbox
 import io
 from datetime import date
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Any  # <-- añade Any aquí
 from .config import AppConfig
 import unicodedata
 
