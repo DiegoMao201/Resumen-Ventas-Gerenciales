@@ -14,20 +14,22 @@ from .config import AppConfig
 
 class BaseTab(ABC):
     """Clase base abstracta para tabs de análisis"""
-    
     def __init__(self, df: pd.DataFrame, filtros: Dict):
         self.df = df
         self.filtros = filtros
         self.df_actual = df[df["anio"] == filtros["anio_objetivo"]]
         self.df_anterior = df[df["anio"] == filtros["anio_base"]]
-        # mapeo robusto de columnas del maestro
-        self.col_valor = "valor_venta" if "valor_venta" in df.columns else "VALOR"
-        self.col_cliente = "nombre_cliente" if "nombre_cliente" in df.columns else "CLIENTE"
-        self.col_producto = "nombre_articulo" if "nombre_articulo" in df.columns else "NOMBRE_PRODUCTO"
-        self.col_marca = "marca_producto" if "marca_producto" in df.columns else "Marca_Master"
-        self.col_linea = "Linea_Estrategica" if "Linea_Estrategica" in df.columns else "linea_producto"
-        self.col_vendedor = "nomvendedor" if "nomvendedor" in df.columns else "Vendedor"
-        self.col_ciudad = "Poblacion_Real" if "Poblacion_Real" in df.columns else "Ciudad"
+
+        def pick(colnames):
+            return next((c for c in colnames if c in df.columns), colnames[-1])
+
+        self.col_valor = pick(["valor_venta", "VALOR", next((c for c in df.columns if "valor" in c.lower()), "valor_venta")])
+        self.col_cliente = pick(["nombre_cliente", "CLIENTE", next((c for c in df.columns if "client" in c.lower()), "nombre_cliente")])
+        self.col_producto = pick(["nombre_articulo", "NOMBRE_PRODUCTO", next((c for c in df.columns if "art" in c.lower()), "nombre_articulo")])
+        self.col_marca = pick(["marca_producto", "Marca_Master", next((c for c in df.columns if "marca" in c.lower()), "marca_producto")])
+        self.col_linea = pick(["Linea_Estrategica", "linea_producto", next((c for c in df.columns if "linea" in c.lower()), "linea_producto")])
+        self.col_vendedor = pick(["nomvendedor", "Vendedor", next((c for c in df.columns if "vendedor" in c.lower()), "nomvendedor")])
+        self.col_ciudad = pick(["Poblacion_Real", "Ciudad", next((c for c in df.columns if "ciud" in c.lower()), "Poblacion_Real")])
     
     @abstractmethod
     def render(self):

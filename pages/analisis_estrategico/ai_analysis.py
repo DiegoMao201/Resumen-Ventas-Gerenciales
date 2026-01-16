@@ -76,39 +76,31 @@ def analizar_con_ia_avanzado(
         return _analisis_manual_avanzado(df_actual, df_anterior, metricas, lineas_estrategicas)
 
 
-def _resolver_columnas(df: pd.DataFrame, df_fallback: pd.DataFrame | None = None) -> Dict[str, str]:
-    """Mapea columnas reales comprobando presencia en df_actual/df_anterior."""
-    def pick(candidatos: List[str]) -> str | None:
-        for c in candidatos:
+def _resolver_columnas(df: pd.DataFrame, df_fb: pd.DataFrame | None = None) -> Dict[str, str | None]:
+    def pick(cands):
+        for c in cands:
             if c and c in df.columns:
                 return c
-            if df_fallback is not None and c and c in df_fallback.columns:
+            if df_fb is not None and c and c in df_fb.columns:
                 return c
         return None
 
     col_cliente = pick([
-        "nombre_cliente",
-        "CLIENTE",
-        next((x for x in df.columns if "cliente" in x.lower()), None),
-        next((x for x in df_fallback.columns if "cliente" in x.lower()), None) if df_fallback is not None else None,
+        "nombre_cliente", "CLIENTE",
+        next((x for x in df.columns if "client" in x.lower()), None),
+        next((x for x in df_fb.columns if "client" in x.lower()), None) if df_fb is not None else None,
     ])
-
     col_valor = pick([
-        "valor_venta",
-        "VALOR",
+        "valor_venta", "VALOR",
         next((x for x in df.columns if "valor" in x.lower()), None),
-        next((x for x in df_fallback.columns if "valor" in x.lower()), None) if df_fallback is not None else None,
+        next((x for x in df_fb.columns if "valor" in x.lower()), None) if df_fb is not None else None,
     ])
-
     col_linea = pick([
-        "Linea_Estrategica",
-        "linea_producto",
+        "Linea_Estrategica", "linea_producto",
         next((x for x in df.columns if "linea" in x.lower()), None),
-        next((x for x in df_fallback.columns if "linea" in x.lower()), None) if df_fallback is not None else None,
+        next((x for x in df_fb.columns if "linea" in x.lower()), None) if df_fb is not None else None,
     ])
-
     return {"cliente": col_cliente, "valor": col_valor, "linea": col_linea}
-
 
 def _analizar_lineas_estrategicas(df_actual, df_anterior, lineas_estrategicas):
     cols = _resolver_columnas(df_actual, df_anterior)
@@ -123,8 +115,8 @@ def _analizar_lineas_estrategicas(df_actual, df_anterior, lineas_estrategicas):
         ventas_b = df_anterior.loc[mask_b, columna_valor].sum()
         variacion_abs = ventas_a - ventas_b
         variacion_pct = (variacion_abs / ventas_b * 100) if ventas_b > 0 else (100.0 if ventas_a > 0 else 0.0)
-        clientes_a = df_actual.loc[mask_a, columna_cliente].nunique()
-        clientes_b = df_anterior.loc[mask_b, columna_cliente].nunique()
+        clientes_a = df_actual.loc[mask_a, columna_cliente].astype(str).nunique()
+        clientes_b = df_anterior.loc[mask_b, columna_cliente].astype(str).nunique()
         resultados[linea] = {
             "ventas_actual": ventas_a,
             "ventas_anterior": ventas_b,
@@ -141,19 +133,13 @@ def _analizar_retencion_clientes(df_actual, df_anterior):
     col_cliente, col_valor = cols["cliente"], cols["valor"]
     if None in (col_cliente, col_valor):
         return {
-            "total_clientes_actual": 0,
-            "total_clientes_anterior": 0,
-            "clientes_retenidos": 0,
-            "clientes_nuevos": 0,
-            "clientes_perdidos": 0,
-            "ventas_retenidos": 0,
-            "ventas_nuevos": 0,
-            "tasa_retencion": 0,
-            "top_retenidos": {},
-            "top_nuevos": {},
+            "total_clientes_actual": 0, "total_clientes_anterior": 0,
+            "clientes_retenidos": 0, "clientes_nuevos": 0, "clientes_perdidos": 0,
+            "ventas_retenidos": 0, "ventas_nuevos": 0, "tasa_retencion": 0,
+            "top_retenidos": {}, "top_nuevos": {}
         }
-    clientes_actual = set(df_actual[col_cliente].unique())
-    clientes_anterior = set(df_anterior[col_cliente].unique())
+    clientes_actual = set(df_actual[col_cliente].astype(str).unique())
+    clientes_anterior = set(df_anterior[col_cliente].astype(str).unique())
     clientes_retenidos = clientes_actual & clientes_anterior
     clientes_nuevos = clientes_actual - clientes_anterior
     clientes_perdidos = clientes_anterior - clientes_actual
