@@ -2,7 +2,7 @@
 import streamlit as st
 import pandas as pd
 from typing import Dict, List
-import openai
+from openai import OpenAI
 from datetime import datetime
 
 def analizar_con_ia(
@@ -18,21 +18,23 @@ def analizar_con_ia(
     """
     
     try:
-        # Configurar API key
-        openai.api_key = st.secrets.get("OPENAI_API_KEY", "")
+        # Configurar cliente de OpenAI
+        api_key = st.secrets.get("OPENAI_API_KEY", "")
         
-        if not openai.api_key:
+        if not api_key:
             return {
                 "resumen": "⚠️ API Key de OpenAI no configurada. Configure OPENAI_API_KEY en secrets.",
                 "insights": [],
                 "recomendaciones": []
             }
         
+        client = OpenAI(api_key=api_key)
+        
         # Preparar datos para el prompt
         prompt = _construir_prompt_ejecutivo(df_actual, df_anterior, metricas)
         
-        # Llamar a GPT-4 Mini
-        response = openai.ChatCompletion.create(
+        # Llamar a GPT-4 Mini con la nueva API
+        response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {
@@ -59,7 +61,7 @@ def analizar_con_ia(
         return {
             "resumen": f"⚠️ Error al conectar con OpenAI: {str(e)}",
             "insights": ["No se pudo generar análisis automático"],
-            "recomendaciones": ["Revisar configuración de API Key"]
+            "recomendaciones": ["Revisar configuración de API Key y conexión a internet"]
         }
 
 
