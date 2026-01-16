@@ -4,6 +4,7 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from typing import Dict, List
+import io
 
 st.set_page_config(page_title="💰 Presupuesto 2026 | Ferreinox", page_icon="💰", layout="wide")
 
@@ -202,6 +203,42 @@ def comentarios_presupuesto(df_asignado: pd.DataFrame) -> pd.DataFrame:
         comentarios.append({"nomvendedor": r["nomvendedor"], "grupo": r["grupo"], "comentario": just})
     return pd.DataFrame(comentarios)
 
+def exportar_excel_mensual_unificado(tabla_mensual: pd.DataFrame) -> bytes:
+    """Genera Excel profesional para la tabla mensual unificada."""
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+        tabla_mensual.to_excel(writer, index=False, sheet_name="Plan_Mensual_2026")
+        wb = writer.book
+        ws = writer.sheets["Plan_Mensual_2026"]
+
+        header_fmt = wb.add_format({
+            "bold": True, "font_color": "white", "align": "center", "valign": "vcenter",
+            "fg_color": "#1e3a8a", "border": 1
+        })
+        money_fmt = wb.add_format({"num_format": "$#,##0", "border": 1})
+        total_fmt = wb.add_format({"num_format": "$#,##0", "border": 1, "bold": True, "fg_color": "#fef3c7"})
+        index_fmt = wb.add_format({"border": 1, "bold": True, "bg_color": "#eef2ff"})
+
+        for col, name in enumerate(tabla_mensual.columns):
+            ws.write(0, col, name, header_fmt)
+        for row_idx in range(1, len(tabla_mensual) + 1):
+            ws.set_row(row_idx, None, money_fmt)
+        ws.set_column(0, 0, 30, index_fmt)  # Vendedor/Grupo
+        ws.set_column(1, len(tabla_mensual.columns) - 2, 14, money_fmt)
+        ws.set_column(len(tabla_mensual.columns) - 1, len(tabla_mensual.columns) - 1, 16, total_fmt)
+
+        # Fila total con formato destacado si existe
+        total_row = tabla_mensual[tabla_mensual["Vendedor/Grupo"] == "TOTAL_MES"]
+        if not total_row.empty:
+            r = tabla_mensual.index[tabla_mensual["Vendedor/Grupo"] == "TOTAL_MES"][0] + 1
+            ws.set_row(r, None, total_fmt)
+
+        ws.freeze_panes(1, 1)
+        ws.autofilter(0, 0, len(tabla_mensual), len(tabla_mensual.columns) - 1)
+        ws.merge_range("A1:A1", "Plan Mensual 2026 Ferreinox", header_fmt)
+
+    return output.getvalue()
+
 # ----------------- UI -----------------
 validar_sesion()
 df_raw = preparar_df(st.session_state.df_ventas)
@@ -370,6 +407,9 @@ st.download_button("📥 CSV Grupos", data=csv_bytes_g, file_name="presupuesto_2
 
 csv_bytes_m = df_mensual.to_csv(index=False).encode("utf-8")
 st.download_button("📥 CSV Plan Mensual", data=csv_bytes_m, file_name="presupuesto_2026_mensual.csv", mime="text/csv", use_container_width=True)
+
+excel_bytes_unificado = exportar_excel_mensual_unificado(tabla_mensual_reset)
+st.download_button("📥 Excel Plan Mensual Unificado", data=excel_bytes_unificado, file_name="presupuesto_2026_plan_mensual_unificado.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
 st.markdown("---")
 st.caption("Sistema de Inteligencia Comercial | Presupuesto 2026 con participación 2025, crecimiento, diversidad y estacionalidad mensual.")
