@@ -7,6 +7,51 @@ from typing import Dict, List
 
 st.set_page_config(page_title="💰 Presupuesto 2026 | Ferreinox", page_icon="💰", layout="wide")
 
+# --- NUEVO: Estilos ejecutivos ---
+st.markdown("""
+<style>
+:root {
+  --ferreinox-primary:#1e3a8a; --ferreinox-secondary:#3b82f6;
+  --ferreinox-accent:#f59e0b; --ferreinox-success:#10b981;
+  --ferreinox-gray:#f8fafc; --ferreinox-dark:#0f172a;
+}
+.hero {
+  background: linear-gradient(135deg, var(--ferreinox-primary), var(--ferreinox-secondary));
+  color:white; padding:18px 24px; border-radius:16px; box-shadow:0 12px 30px rgba(17,24,39,0.25);
+}
+.kpi-grid {display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; margin:10px 0 6px 0;}
+.kpi-card {
+  background: white; border-radius:14px; padding:14px 16px;
+  border:1px solid #e5e7eb; box-shadow:0 6px 18px rgba(0,0,0,0.05);
+}
+.kpi-label {color:#6b7280; font-size:0.9rem; margin:0;}
+.kpi-value {color:var(--ferreinox-dark); font-size:1.8rem; font-weight:800; margin:2px 0;}
+.kpi-delta {color:var(--ferreinox-success); font-weight:700;}
+.section-title {margin:4px 0 2px 0; font-size:1.05rem;}
+.dataframe tbody tr:hover {background:#f1f5f9;}
+</style>
+""", unsafe_allow_html=True)
+
+def render_header():
+    st.markdown(f"""
+    <div class="hero">
+      <h2 style="margin:0;">💰 Presupuesto 2026 | Ferreinox</h2>
+      <p style="margin:4px 0 0 0; color:rgba(255,255,255,0.85);">
+        Asignación anual y mensual por participación real 2025, crecimiento y estacionalidad.
+      </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+def kpi_card(label:str, value:str, delta:str=None):
+    delta_html = f'<div class="kpi-delta">{delta}</div>' if delta else ''
+    st.markdown(f"""
+    <div class="kpi-card">
+        <p class="kpi-label">{label}</p>
+        <div class="kpi-value">{value}</div>
+        {delta_html}
+    </div>
+    """, unsafe_allow_html=True)
+
 # ----------------- Utilidades -----------------
 def normalizar_texto(texto: str) -> str:
     import unicodedata, re
@@ -163,9 +208,9 @@ df_raw = preparar_df(st.session_state.df_ventas)
 DATA_CONFIG = st.session_state.DATA_CONFIG
 grupos_cfg = DATA_CONFIG.get("grupos_vendedores", {})
 
-st.title("💰 Presupuesto 2026 | Ferreinox")
-st.caption("Asignación anual y plan mensual por vendedor/grupo basada en participación 2025, crecimiento y estacionalidad.")
+render_header()
 
+# ----------------- Filtros -----------------
 col_a, col_b, col_c = st.columns([1.2, 1, 1])
 escenario = col_a.selectbox("Escenario de Proyección", ["Conservador", "Realista", "Optimista"], index=1)
 anio_base = col_b.selectbox("Año Base", sorted(df_raw["anio"].dropna().unique(), reverse=True), index=0)
@@ -179,24 +224,39 @@ total_2024 = df_master[df_master["anio"] == 2024]["valor_venta"].sum()
 total_2025 = df_master[df_master["anio"] == 2025]["valor_venta"].sum()
 total_2026, tasa_apl = proyectar_total_2026(total_2024, total_2025, escenario)
 
+# --- KPIs ejecutivos ---
 st.markdown("### 📌 Resumen Ejecutivo 2026")
-k1, k2, k3, k4 = st.columns(4)
-k1.metric("Venta 2024", f"${total_2024:,.0f}")
-k2.metric("Venta 2025", f"${total_2025:,.0f}")
-k3.metric("Proyección 2026", f"${total_2026:,.0f}", f"{tasa_apl*100:+.1f}%")
-k4.metric("Vendedores activos", f"{df_master['nomvendedor'].nunique():,}")
+kpi_cols = st.container()
+with kpi_cols:
+    st.markdown('<div class="kpi-grid">', unsafe_allow_html=True)
+    kpi_card("Venta 2024", f"${total_2024:,.0f}")
+    kpi_card("Venta 2025", f"${total_2025:,.0f}")
+    kpi_card("Proyección 2026", f"${total_2026:,.0f}", f"{tasa_apl*100:+.1f}%")
+    kpi_card("Vendedores activos", f"{df_master['nomvendedor'].nunique():,}")
+    st.markdown('</div>', unsafe_allow_html=True)
 
 df_asignado = asignar_presupuesto(df_master, grupos_cfg, total_2026)
 df_grupos = tabla_grupos(df_asignado)
 df_mensual = distribuir_presupuesto_mensual(df_asignado, df_master)
 df_coment = comentarios_presupuesto(df_asignado)
 
+# --- NUEVO: consolidar mostradores en la vista mensual ---
+df_mensual['vendedor_unificado'] = np.where(
+    df_mensual['grupo'].notna() & (df_mensual['grupo'] != ''),
+    df_mensual['grupo'],
+    df_mensual['nomvendedor']
+)
+df_mensual_unificado = (
+    df_mensual
+    .groupby(['vendedor_unificado', 'mes'], as_index=False)['presupuesto_mensual']
+    .sum()
+)
+
 st.markdown("---")
 st.subheader("🧭 Asignación Anual por Vendedor")
 st.dataframe(
     df_asignado.sort_values("presupuesto_2026", ascending=False),
-    use_container_width=True,
-    hide_index=True,
+    use_container_width=True, hide_index=True,
     column_config={
         "nomvendedor": "Vendedor",
         "grupo": "Grupo/MOSTRADOR",
@@ -204,7 +264,7 @@ st.dataframe(
         "venta_2025": st.column_config.NumberColumn("Venta 2025", format="$%d"),
         "participacion_2025": st.column_config.ProgressColumn("Part. 2025", format="%.1f%%", min_value=0, max_value=1),
         "crec_pct": st.column_config.NumberColumn("Crec. %", format="%.1f%%"),
-        "diversidad": st.column_config.NumberColumn("Diversidad", format="%.2f"),
+        "diversidad": st.column_config.ProgressColumn("Diversidad", format="%.1f%%", min_value=0, max_value=1),
         "score": st.column_config.NumberColumn("Score", format="%.3f"),
         "presupuesto_2026": st.column_config.NumberColumn("Presupuesto 2026", format="$%d"),
         "clientes": st.column_config.NumberColumn("Clientes", format="%d"),
@@ -216,8 +276,7 @@ st.dataframe(
 st.markdown("### 🏢 Consolidado por Grupo MOSTRADOR")
 st.dataframe(
     df_grupos,
-    use_container_width=True,
-    hide_index=True,
+    use_container_width=True, hide_index=True,
     column_config={
         "grupo": "Grupo",
         "presupuesto_grupo": st.column_config.NumberColumn("Presupuesto 2026", format="$%d"),
@@ -227,15 +286,16 @@ st.dataframe(
     }
 )
 
-st.markdown("### 🗓️ Plan Mensual por Vendedor (2026)")
-with st.expander("Ver detalle mensual por vendedor", expanded=False):
-    st.dataframe(
-        df_mensual.pivot_table(index=["nomvendedor", "grupo"], columns="mes", values="presupuesto_mensual", aggfunc="sum").fillna(0),
-        use_container_width=True
-    )
+# --- Plan mensual unificado (solo mostradores y vendedores individuales) ---
+st.markdown("### 🗓️ Plan Mensual unificado (agrupa mostradores)")
+with st.expander("Ver detalle mensual consolidado", expanded=False):
+    tabla_mensual = df_mensual_unificado.pivot_table(
+        index="vendedor_unificado", columns="mes", values="presupuesto_mensual", aggfunc="sum"
+    ).fillna(0)
+    st.dataframe(tabla_mensual, use_container_width=True)
 
-st.markdown("---")
-st.subheader("📊 Visualizaciones Ejecutivas")
+# --- Visualizaciones ejecutivas mejoradas ---
+st.markdown("### 📊 Visualizaciones Ejecutivas")
 c1, c2 = st.columns([1.4, 1])
 with c1:
     fig = px.bar(
@@ -243,29 +303,29 @@ with c1:
         x="nomvendedor", y="presupuesto_2026", color="grupo",
         title="Top 20 Vendedores por Presupuesto 2026",
         labels={"presupuesto_2026": "Presupuesto", "nomvendedor": "Vendedor"},
-        height=520
+        height=520, text_auto=".2s"
     )
-    fig.update_layout(xaxis_tickangle=-45, template="plotly_white")
+    fig.update_layout(xaxis_tickangle=-35, template="plotly_white", margin=dict(t=60, b=60, l=20, r=20))
     st.plotly_chart(fig, use_container_width=True)
 with c2:
     fig_g = px.pie(
         df_grupos, values="presupuesto_grupo", names="grupo",
         title="Participación de Grupos en Presupuesto 2026", hole=0.45
     )
-    fig_g.update_layout(height=520, template="plotly_white")
+    fig_g.update_layout(height=520, template="plotly_white", margin=dict(t=60, b=20, l=10, r=10))
     st.plotly_chart(fig_g, use_container_width=True)
 
-st.markdown("### 🗺️ Distribución Mensual (Heatmap)")
+st.markdown("### 🗺️ Distribución Mensual (Heatmap Unificado)")
 fig_heat = px.imshow(
-    df_mensual.pivot_table(index="nomvendedor", columns="mes", values="presupuesto_mensual", aggfunc="sum").fillna(0),
-    labels={"x": "Mes", "y": "Vendedor", "color": "Presupuesto"},
-    aspect="auto", color_continuous_scale="Blues"
+    df_mensual_unificado.pivot_table(index="vendedor_unificado", columns="mes", values="presupuesto_mensual", aggfunc="sum").fillna(0),
+    labels={"x": "Mes", "y": "Vendedor/Grupo", "color": "Presupuesto"},
+    aspect="auto", color_continuous_scale="Blues", text_auto=True
 )
-fig_heat.update_layout(height=520, template="plotly_white")
+fig_heat.update_layout(height=520, template="plotly_white", margin=dict(l=40, r=20, t=60, b=40))
 st.plotly_chart(fig_heat, use_container_width=True)
 
-st.markdown("---")
-st.subheader("🧠 Comentarios Ejecutivos (auto)")
+# --- Comentarios ejecutivos con badge ---
+st.markdown("### 🧠 Comentarios Ejecutivos")
 st.dataframe(df_coment, use_container_width=True, hide_index=True)
 
 st.markdown("### 🧾 Descargar Asignaciones")
