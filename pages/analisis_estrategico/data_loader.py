@@ -58,6 +58,27 @@ def _procesar_poblaciones(df: pd.DataFrame) -> pd.DataFrame:
     except Exception as e:
         return pd.DataFrame()
 
+def _normalizar_txt(txt: str) -> str:
+    if pd.isna(txt): return ""
+    t = "".join(c for c in unicodedata.normalize("NFD", str(txt)) if unicodedata.category(c) != "Mn")
+    return t.strip().upper()
+
+def _unificar_lineas_marcas(df: pd.DataFrame) -> pd.DataFrame:
+    # Toma la mejor fuente disponible para la línea
+    if 'linea_producto' in df.columns:
+        df['Linea_Estrategica'] = df['linea_producto'].fillna('')
+    elif 'categoria_producto' in df.columns:
+        df['Linea_Estrategica'] = df['categoria_producto'].fillna('')
+    elif 'nombre_articulo' in df.columns:
+        df['Linea_Estrategica'] = df['nombre_articulo'].fillna('')
+    else:
+        df['Linea_Estrategica'] = ''
+
+    df['Linea_Estrategica'] = df['Linea_Estrategica'].apply(_normalizar_txt)
+    if 'marca_producto' in df.columns:
+        df['marca_producto'] = df['marca_producto'].fillna('').apply(_normalizar_txt)
+    return df
+
 def cargar_y_validar_datos() -> Tuple[pd.DataFrame, Dict]:
     """Pipeline completo usando los datos de Resumen_Mensual.py"""
     if 'df_ventas' not in st.session_state:
@@ -76,39 +97,11 @@ def cargar_y_validar_datos() -> Tuple[pd.DataFrame, Dict]:
         
         # Limpiar tipos de datos
         df_clean = _limpiar_tipos_datos(df_clean)
-        
-        # Clasificar líneas estratégicas
+        # Clasificar líneas y enriquecer
+        df_clean = _unificar_lineas_marcas(df_clean)
         df_clean = _clasificar_lineas_estrategicas(df_clean)
-        
-        # Enriquecer geografía
         df_clean = _enriquecer_geografia(df_clean)
-        
-        # >>> No recortar con YTD; mantener todo el histórico
-        # df_clean = _aplicar_filtro_ytd(df_clean)
-
-        if df_clean.empty:
-            st.error("❌ No hay datos después del procesamiento")
-            st.stop()
-        
-        # Extraer años válidos
-        anios_disponibles = sorted([
-            int(a) for a in df_clean['anio'].unique() 
-            if pd.notna(a) and a > 2000
-        ], reverse=True)
-        
-        if len(anios_disponibles) < 2:
-            st.error("❌ Se necesitan al menos 2 años de datos para análisis comparativo")
-            st.stop()
-        
-        def obtener_lista_ordenada(serie):
-            """Obtiene lista ordenada limpiando tipos mixtos"""
-            try:
-                valores = serie.dropna().unique()
-                valores_str = [str(v).strip() for v in valores if v != '' and str(v).strip() != '']
-                return sorted(list(set(valores_str)))
-            except Exception as e:
-                return []
-        
+        anios_disponibles = sorted(df_clean['anio'].unique(), reverse=True)
         config_filtros = {
             'anios_disponibles': anios_disponibles,
             'ciudades_disponibles': obtener_lista_ordenada(df_clean['Poblacion_Real']) if 'Poblacion_Real' in df_clean.columns else [],
@@ -116,25 +109,12 @@ def cargar_y_validar_datos() -> Tuple[pd.DataFrame, Dict]:
             'marcas_disponibles': obtener_lista_ordenada(df_clean['marca_producto']) if 'marca_producto' in df_clean.columns else [],
             'vendedores_disponibles': obtener_lista_ordenada(df_clean['nomvendedor']) if 'nomvendedor' in df_clean.columns else []
         }
-        
         return df_clean, config_filtros
         
     except Exception as e:
         st.error(f"❌ Error en pipeline de datos: {str(e)}")
         st.exception(e)
         st.stop()
-
-def _normalizar_txt(txt: str) -> str:
-    if pd.isna(txt): return ""
-    t = "".join(c for c in unicodedata.normalize("NFD", str(txt)) if unicodedata.category(c) != "Mn")
-    return t.strip().upper()
-
-def _unificar_lineas_marcas(df: pd.DataFrame) -> pd.DataFrame:
-    df['Linea_Estrategica'] = df.get('Linea_Estrategica', df.get('linea_producto', '')).fillna('')
-    df['marca_producto'] = df.get('marca_producto', '').fillna('')
-    df['Linea_Estrategica'] = df['Linea_Estrategica'].apply(_normalizar_txt)
-    df['marca_producto'] = df['marca_producto'].apply(_normalizar_txt)
-    return df
 
 def _limpiar_tipos_datos(df: pd.DataFrame) -> pd.DataFrame:
     """Convierte columnas a tipos correctos SIN perder datos"""
