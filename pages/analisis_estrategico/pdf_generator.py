@@ -1,44 +1,31 @@
 """Generador de reportes PDF empresariales avanzado - Ferreinox"""
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4, letter
+from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-    PageBreak, Image, KeepTogether
+    PageBreak, KeepTogether
 )
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.pdfgen import canvas
 from io import BytesIO
 import pandas as pd
 from datetime import datetime
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 class EncabezadoPiePagina:
     """Clase para manejar encabezados y pies de página"""
     
-    def __init__(self, titulo: str, logo_url: str = None):
+    def __init__(self, titulo: str):
         self.titulo = titulo
-        self.logo_url = logo_url
     
     def en_primera_pagina(self, canvas, doc):
         """Encabezado especial para la primera página"""
         canvas.saveState()
-        
-        # Logo (si existe)
-        if self.logo_url:
-            try:
-                canvas.drawImage(
-                    self.logo_url, 
-                    50, 
-                    doc.height + 50, 
-                    width=100, 
-                    height=40,
-                    preserveAspectRatio=True
-                )
-            except:
-                pass
-        
+        canvas.setFont('Helvetica-Bold', 16)
+        canvas.setFillColorRGB(0.12, 0.23, 0.54)
+        canvas.drawCentredString(doc.width/2 + 50, doc.height + 50, "FERREINOX S.A.S. BIC")
         canvas.restoreState()
     
     def en_paginas_posteriores(self, canvas, doc):
@@ -58,7 +45,6 @@ class EncabezadoPiePagina:
         fecha_generacion = datetime.now().strftime('%d/%m/%Y %H:%M')
         canvas.drawString(50, 30, f"Generado: {fecha_generacion}")
         
-        # Número de página
         pagina = f"Página {canvas.getPageNumber()}"
         canvas.drawRightString(doc.width + 50, 30, pagina)
         
@@ -141,19 +127,9 @@ class GeneradorPDFFerreinox:
         self, 
         anio_objetivo: int, 
         anio_base: int,
-        logo_url: str = None,
         empresa: str = "Ferreinox S.A.S. BIC"
     ):
-        """Crea portada profesional con logo"""
-        
-        # Logo (si existe)
-        if logo_url:
-            try:
-                img = Image(logo_url, width=2*inch, height=0.8*inch)
-                self.elementos.append(img)
-                self.elementos.append(Spacer(1, 20))
-            except:
-                pass
+        """Crea portada profesional"""
         
         # Título principal
         titulo = Paragraph(
@@ -192,7 +168,6 @@ class GeneradorPDFFerreinox:
     def agregar_resumen_ejecutivo(self, metricas: Dict):
         """Agrega resumen ejecutivo con métricas clave"""
         
-        # Título de sección
         titulo = Paragraph(
             "📊 Resumen Ejecutivo",
             self.estilos['titulo_seccion']
@@ -200,7 +175,6 @@ class GeneradorPDFFerreinox:
         self.elementos.append(titulo)
         self.elementos.append(Spacer(1, 12))
         
-        # Tabla de métricas principales
         datos_tabla = [
             ['Métrica', 'Valor', 'Variación'],
             [
@@ -222,7 +196,6 @@ class GeneradorPDFFerreinox:
         
         tabla = Table(datos_tabla, colWidths=[3*inch, 2*inch, 1.5*inch])
         
-        # Estilo de tabla profesional
         estilo_tabla = TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), self.colores['primary']),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
@@ -258,7 +231,6 @@ class GeneradorPDFFerreinox:
             ))
             return
         
-        # Preparar datos para tabla
         df_marcas = df_marcas.head(10).reset_index()
         
         datos_tabla = [['Marca', 'Ventas', 'Participación']]
@@ -312,7 +284,7 @@ class GeneradorPDFFerreinox:
         for idx, row in enumerate(df_top.iterrows(), 1):
             datos_tabla.append([
                 str(idx),
-                row[1]['Cliente'][:40],  # Limitar longitud
+                row[1]['Cliente'][:40],
                 f"${row[1]['Ventas']:,.0f}"
             ])
         
@@ -353,7 +325,6 @@ class GeneradorPDFFerreinox:
     def generar(self, config: Dict = None) -> bytes:
         """Genera el PDF y retorna bytes"""
         
-        # Configuración por defecto
         if config is None:
             config = {
                 'pagesize': A4,
@@ -372,7 +343,6 @@ class GeneradorPDFFerreinox:
             bottomMargin=config.get('bottomMargin', 60)
         )
         
-        # Construir documento con encabezados/pies
         encabezado = EncabezadoPiePagina(self.titulo)
         
         doc.build(
@@ -385,8 +355,6 @@ class GeneradorPDFFerreinox:
         return self.buffer.getvalue()
 
 
-# ===== FUNCIÓN DE CONVENIENCIA PARA GENERAR PDF COMPLETO =====
-
 def generar_reporte_completo(
     metricas_basicas: Dict,
     df_marcas: pd.DataFrame,
@@ -395,28 +363,14 @@ def generar_reporte_completo(
     anio_base: int,
     conclusiones: List[str] = None
 ) -> bytes:
-    """
-    Genera un reporte PDF completo con todos los análisis
-    
-    Args:
-        metricas_basicas: Dict con métricas comparativas
-        df_marcas: DataFrame con análisis de marcas
-        df_clientes: DataFrame con top clientes
-        anio_objetivo: Año objetivo del análisis
-        anio_base: Año base de comparación
-        conclusiones: Lista de conclusiones/recomendaciones
-    
-    Returns:
-        bytes: Contenido del PDF generado
-    """
+    """Genera un reporte PDF completo con todos los análisis"""
     
     generador = GeneradorPDFFerreinox("Análisis Estratégico de Crecimiento")
     
     # Portada
     generador.agregar_portada(
         anio_objetivo=anio_objetivo,
-        anio_base=anio_base,
-        logo_url="https://raw.githubusercontent.com/DiegoMao2021/Resumen-Ventas-Gerenciales/main/LOGO%20FERREINOX%20SAS%20BIC%202024.png"
+        anio_base=anio_base
     )
     
     # Resumen ejecutivo

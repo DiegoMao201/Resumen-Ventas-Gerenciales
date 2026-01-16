@@ -7,9 +7,9 @@ import plotly.graph_objects as go
 import numpy as np
 from typing import Dict
 
-# Importar módulos internos
 from .projections import proyectar_ventas_2026, proyectar_por_vendedor, proyectar_por_ciudad
-from .pdf_generator import generar_reporte_completo  # ✅ AGREGAR AQUÍ
+from .pdf_generator import generar_reporte_completo
+from .ai_analysis import analizar_con_ia  # ✅ NUEVO
 
 class BaseTab(ABC):
     """Clase base abstracta para tabs de análisis"""
@@ -79,11 +79,10 @@ class TabADNCrecimiento(BaseTab):
         self._analisis_tendencias()
         self._analisis_marcas()
         
-        # NUEVO: Botón de descarga PDF
+        # Botón de descarga PDF
         st.markdown("---")
         if st.button("📥 Descargar Reporte PDF", key="btn_pdf_adn"):
             
-            # Preparar datos para PDF
             df_marcas = self.df_actual.groupby('Marca_Master')['VALOR'].sum().reset_index()
             df_marcas.columns = ['Marca', 'Ventas']
             
@@ -144,8 +143,50 @@ class TabADNCrecimiento(BaseTab):
         fig.add_trace(go.Bar(name=f'{self.filtros["anio_base"]}', x=df_comp.index, y=df_comp['Anterior']))
         fig.add_trace(go.Bar(name=f'{self.filtros["anio_objetivo"]}', x=df_comp.index, y=df_comp['Actual']))
         
-        fig.update_layout(barmode='group', title="Top 10 Marcas")
+        fig.update_layout(barmode='group', title="Comparación por Marca")
         st.plotly_chart(fig, use_container_width=True)
+
+
+class TabAnalisisIA(BaseTab):
+    """Tab de análisis con Inteligencia Artificial"""
+    
+    def render(self):
+        st.header("🤖 Análisis con Inteligencia Artificial")
+        st.markdown("**Análisis ejecutivo generado por GPT-4 Mini**")
+        
+        with st.spinner("🧠 Generando análisis estratégico con IA..."):
+            metricas = self.calcular_metricas_basicas()
+            analisis = analizar_con_ia(self.df_actual, self.df_anterior, metricas)
+        
+        # Resumen Ejecutivo
+        st.subheader("📋 Resumen Ejecutivo")
+        st.markdown(analisis.get('resumen', 'No disponible'))
+        
+        st.markdown("---")
+        
+        # Insights Clave
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("💡 Insights Clave")
+            insights = analisis.get('insights', [])
+            if insights:
+                for insight in insights:
+                    st.markdown(f"- {insight}")
+            else:
+                st.info("No se generaron insights")
+        
+        with col2:
+            st.subheader("🎯 Recomendaciones Estratégicas")
+            recomendaciones = analisis.get('recomendaciones', [])
+            if recomendaciones:
+                for rec in recomendaciones:
+                    st.markdown(f"- {rec}")
+            else:
+                st.info("No se generaron recomendaciones")
+        
+        st.markdown("---")
+        st.caption("✨ Análisis generado por OpenAI GPT-4 Mini | Revisado para Ferreinox S.A.S. BIC")
 
 
 class TabOportunidadGeografica(BaseTab):
@@ -252,45 +293,6 @@ class TabGestionRiesgo(BaseTab):
         
         st.subheader("⚠️ Top 20 Clientes en Riesgo")
         st.dataframe(clientes_riesgo.reset_index())
-
-
-class TabAnalisisIA(BaseTab):
-    """Tab de análisis con IA"""
-    
-    def render(self):
-        st.header("🤖 Análisis con IA")
-        st.markdown("Predicciones y patrones detectados por inteligencia artificial.")
-        
-        from sklearn.linear_model import LinearRegression
-        
-        df_entreno = self.df[self.df['anio'] < self.filtros['anio_objetivo']]
-        X = df_entreno[['mes', 'dia']].values
-        y = df_entreno['VALOR'].values
-        
-        modelo = LinearRegression()
-        modelo.fit(X, y)
-        
-        df_pred = self.df_actual[['mes', 'dia']].copy()
-        df_pred['Prediccion'] = modelo.predict(df_pred[['mes', 'dia']])
-        
-        st.subheader("📈 Predicciones vs Real")
-        
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=df_pred.index,
-            y=self.df_actual['VALOR'].values,
-            name='Real',
-            mode='lines'
-        ))
-        fig.add_trace(go.Scatter(
-            x=df_pred.index,
-            y=df_pred['Prediccion'],
-            name='Predicción IA',
-            mode='lines',
-            line=dict(dash='dash')
-        ))
-        
-        st.plotly_chart(fig, use_container_width=True)
 
 
 class TabProyeccion2026(BaseTab):
