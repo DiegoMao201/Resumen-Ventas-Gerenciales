@@ -7,19 +7,17 @@ from datetime import date
 from typing import Tuple, Dict
 from .config import AppConfig
 
-# ✅ TODOS LOS IMPORTS CORRECTOS
-
 @st.cache_resource
 def get_dropbox_client():
     """Cliente Dropbox singleton"""
     try:
-        return dropbox.Dropbox(
-            app_key=st.secrets.dropbox.app_key,
-            app_secret=st.secrets.dropbox.app_secret,
-            oauth2_refresh_token=st.secrets.dropbox.refresh_token
-        )
+        token = st.secrets.get("DROPBOX_ACCESS_TOKEN")
+        if not token:
+            st.error("⚠️ Token de Dropbox no configurado")
+            return None
+        return dropbox.Dropbox(token)
     except Exception as e:
-        st.error(f"❌ Error conectando a Dropbox: {e}")
+        st.error(f"Error conectando a Dropbox: {e}")
         return None
 
 @st.cache_data(ttl=7200)
@@ -39,25 +37,28 @@ def cargar_poblaciones() -> pd.DataFrame:
         except:
             continue
     
-    st.info("ℹ️ No se encontró archivo de poblaciones. Análisis geográfico limitado.")
     return pd.DataFrame()
 
 def _procesar_poblaciones(df: pd.DataFrame) -> pd.DataFrame:
     """Limpia datos de poblaciones"""
-    df.columns = df.columns.str.strip().str.lower()
-    
-    col_nit = next((c for c in df.columns if 'nit' in c), None)
-    col_pob = next((c for c in df.columns if 'poblacion' in c or 'ciudad' in c), None)
-    
-    if not (col_nit and col_pob):
+    try:
+        df.columns = df.columns.str.strip().str.lower()
+        
+        col_nit = next((c for c in df.columns if 'nit' in c), None)
+        col_pob = next((c for c in df.columns if 'poblacion' in c or 'ciudad' in c), None)
+        
+        if not (col_nit and col_pob):
+            return pd.DataFrame()
+        
+        df_clean = df[[col_nit, col_pob]].copy()
+        df_clean.columns = ['Key_Nit', 'Poblacion_Real']
+        df_clean['Key_Nit'] = df_clean['Key_Nit'].astype(str).str.strip().str.replace('.0', '', regex=False)
+        df_clean['Poblacion_Real'] = df_clean['Poblacion_Real'].astype(str).str.strip().str.upper()
+        
+        return df_clean.dropna()
+    except Exception as e:
+        st.warning(f"Error procesando poblaciones: {e}")
         return pd.DataFrame()
-    
-    df_clean = df[[col_nit, col_pob]].copy()
-    df_clean.columns = ['Key_Nit', 'Poblacion_Real']
-    df_clean['Key_Nit'] = df_clean['Key_Nit'].astype(str).str.strip().str.replace('.0', '', regex=False)
-    df_clean['Poblacion_Real'] = df_clean['Poblacion_Real'].astype(str).str.strip().str.upper()
-    
-    return df_clean.dropna()
 
 def cargar_y_validar_datos() -> Tuple[pd.DataFrame, Dict]:
     """Pipeline completo de carga y limpieza de datos"""
@@ -74,19 +75,42 @@ def cargar_y_validar_datos() -> Tuple[pd.DataFrame, Dict]:
             st.error("❌ El DataFrame está vacío")
             st.stop()
         
+        st.info(f"📊 Registros iniciales: {len(df_raw):,}")
+        
         # Pipeline de transformación con manejo de errores
         df_clean = df_raw.copy()
         
-        with st.spinner("🔄 Procesando datos..."):
+        # PASO 1: Mapear columnas
+        with st.spinner("🔄 Mapeando columnas..."):
             df_clean = _mapear_columnas(df_clean)
+            st.success(f"✅ Columnas mapeadas. Registros: {len(df_clean):,}")
+        
+        # PASO 2: Limpiar tipos de datos
+        with st.spinner("🔄 Limpiando tipos de datos..."):
             df_clean = _limpiar_tipos_datos(df_clean)
+            st.success(f"✅ Tipos limpiados. Registros: {len(df_clean):,}")
+        
+        # PASO 3: Clasificar marcas
+        with st.spinner("🔄 Clasificando marcas..."):
             df_clean = _clasificar_marcas(df_clean)
+            st.success(f"✅ Marcas clasificadas. Registros: {len(df_clean):,}")
+        
+        # PASO 4: Enriquecer geografía
+        with st.spinner("🔄 Enriqueciendo datos geográficos..."):
             df_clean = _enriquecer_geografia(df_clean)
+            st.success(f"✅ Geografía enriquecida. Registros: {len(df_clean):,}")
+        
+        # PASO 5: Aplicar filtro YTD
+        with st.spinner("🔄 Aplicando filtro Year-To-Date..."):
             df_clean = _aplicar_filtro_ytd(df_clean)
+            st.success(f"✅ Filtro YTD aplicado. Registros: {len(df_clean):,}")
         
         # Validar resultado final
         if df_clean.empty:
             st.error("❌ No hay datos después del procesamiento")
+            st.warning("Verifica que:")
+            st.markdown("- Los datos tengan años válidos (> 2000)")
+            st.markdown("- Existan registros dentro del año actual (YTD)")
             st.stop()
         
         # Extraer años válidos
@@ -107,11 +131,13 @@ def cargar_y_validar_datos() -> Tuple[pd.DataFrame, Dict]:
             'categorias_disponibles': sorted(df_clean['Categoria_Master'].dropna().unique())
         }
         
+        st.success(f"✅ **Datos cargados exitosamente:** {len(df_clean):,} registros")
+        
         return df_clean, config_filtros
         
     except Exception as e:
         st.error(f"❌ Error en pipeline de datos: {str(e)}")
-        st.exception(e)  # Mostrar traceback completo
+        st.exception(e)
         st.stop()
 
 def _mapear_columnas(df: pd.DataFrame) -> pd.DataFrame:
@@ -158,14 +184,18 @@ def _limpiar_tipos_datos(df: pd.DataFrame) -> pd.DataFrame:
     
     if 'mes' in df.columns:
         df['mes'] = pd.to_numeric(df['mes'], errors='coerce').fillna(1).astype(int)
-        df['mes'] = df['mes'].clip(1, 12)  # Asegurar rango válido
+        df['mes'] = df['mes'].clip(1, 12)
     
     if 'dia' in df.columns:
         df['dia'] = pd.to_numeric(df['dia'], errors='coerce').fillna(15).astype(int)
-        df['dia'] = df['dia'].clip(1, 31)  # Asegurar rango válido
+        df['dia'] = df['dia'].clip(1, 31)
     
     if 'COD' in df.columns:
         df['Key_Nit'] = df['COD'].astype(str).str.strip().str.replace('.0', '', regex=False)
+    
+    # Asegurar que las columnas de texto no sean nulas
+    if 'CLIENTE' in df.columns:
+        df['CLIENTE'] = df['CLIENTE'].fillna('Sin Cliente')
     
     return df
 
@@ -182,7 +212,7 @@ def _clasificar_marcas(df: pd.DataFrame) -> pd.DataFrame:
         marca = config.MAPEO_MARCAS.get(codigo, f"Código {codigo}")
         prefijo = marca.split('-')[0] if '-' in marca else marca[:3]
         categoria = config.CATEGORIAS_MARCA.get(prefijo, "Otros")
-        return marca, categoria  # Retornar tupla, no Series
+        return marca, categoria
     
     # Aplicar y desempaquetar
     if 'CODIGO_MARCA_N' in df.columns:
@@ -197,23 +227,23 @@ def _clasificar_marcas(df: pd.DataFrame) -> pd.DataFrame:
 
 def _enriquecer_geografia(df: pd.DataFrame) -> pd.DataFrame:
     """Agrega información geográfica"""
-    df_poblaciones = cargar_poblaciones()
-    
-    if df_poblaciones.empty:
-        df['Poblacion_Real'] = 'Sin Geo'
-        if 'Vendedor' not in df.columns:
-            df['Vendedor'] = 'GENERAL'
-        else:
-            df['Vendedor'] = df['Vendedor'].fillna('GENERAL')
-        return df
-    
-    df = pd.merge(df, df_poblaciones, on='Key_Nit', how='left')
-    df['Poblacion_Real'] = df['Poblacion_Real'].fillna('Sin Geo')
-    
+    # Primero asegurar que existe la columna Vendedor
     if 'Vendedor' not in df.columns:
         df['Vendedor'] = 'GENERAL'
     else:
         df['Vendedor'] = df['Vendedor'].fillna('GENERAL')
+    
+    # Cargar poblaciones
+    df_poblaciones = cargar_poblaciones()
+    
+    # Si no hay datos de poblaciones, asignar valor por defecto
+    if df_poblaciones.empty:
+        df['Poblacion_Real'] = 'Sin Geo'
+        return df
+    
+    # Hacer merge solo si hay datos
+    df = pd.merge(df, df_poblaciones, on='Key_Nit', how='left')
+    df['Poblacion_Real'] = df['Poblacion_Real'].fillna('Sin Geo')
     
     return df
 
@@ -222,10 +252,20 @@ def _aplicar_filtro_ytd(df: pd.DataFrame) -> pd.DataFrame:
     hoy = date.today()
     
     def es_ytd(row):
-        if row['mes'] < hoy.month:
-            return True
-        if row['mes'] == hoy.month:
-            return row['dia'] <= hoy.day
-        return False
+        try:
+            if row['mes'] < hoy.month:
+                return True
+            if row['mes'] == hoy.month:
+                return row['dia'] <= hoy.day
+            return False
+        except:
+            return False
     
-    return df[df.apply(es_ytd, axis=1)].copy()
+    df_ytd = df[df.apply(es_ytd, axis=1)].copy()
+    
+    # Si el filtro YTD deja el DataFrame vacío, mostrar advertencia
+    if df_ytd.empty:
+        st.warning("⚠️ El filtro Year-To-Date no devolvió registros. Mostrando todos los datos disponibles.")
+        return df
+    
+    return df_ytd

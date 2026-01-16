@@ -1,18 +1,17 @@
-"""Configuración centralizada y estilos corporativos"""
+"""Configuración centralizada del módulo de análisis estratégico"""
 from dataclasses import dataclass, field
 from typing import Dict
 import streamlit as st
 
-@dataclass(frozen=True)
+@dataclass
 class FerreinoxColors:
-    """Paleta de colores corporativos Ferreinox"""
-    PRIMARY: str = "#1e3a8a"
-    SECONDARY: str = "#3b82f6"
-    ACCENT: str = "#f59e0b"
+    """Paleta de colores corporativos"""
+    PRIMARY: str = "#1e40af"
+    SECONDARY: str = "#7c3aed"
     SUCCESS: str = "#10b981"
-    ERROR: str = "#ef4444"
-    GRAY: str = "#64748b"
-    GRAY_LIGHT: str = "#f8fafc"
+    WARNING: str = "#f59e0b"
+    DANGER: str = "#ef4444"
+    INFO: str = "#3b82f6"
 
 @dataclass
 class AppConfig:
@@ -28,17 +27,23 @@ class AppConfig:
     MAPEO_MARCAS: Dict[int, str] = field(default_factory=lambda: {
         50: "P8-ASC-MEGA", 54: "MPY-International", 55: "DPP-AN Colorantes Latam",
         56: "DPP-Pintuco Profesional", 57: "ASC-Mega", 58: "DPP-Pintuco",
-        59: "DPP-Madetec", 60: "POW-Interpon", 61: "Varios", 62: "DPP-ICO",
-        63: "DPP-Terinsa", 64: "MPY-Pintuco", 65: "Terceros No-AN",
-        66: "ICO-AN Empaques", 67: "ASC-Automotriz", 68: "POW-Resicoat",
-        73: "DPP-Coral", 91: "DPP-Sikkens"
+        61: "S-M Sika", 65: "HPG-Habro Pack", 66: "ASI-Anypsa Internacional",
+        67: "ASC-Anypsa", 68: "ASI-Anypsa", 69: "MPY-Master Pro",
+        73: "C&D-Corona", 74: "WEG-Weg", 75: "GEN-Generico",
+        76: "LAM-Lamosa", 77: "ABR-Abrasivos", 78: "HER-Herramientas",
+        79: "FER-Ferreteria", 80: "SEG-Seguridad", 81: "ELE-Electricos",
+        82: "TUB-Tuberia", 83: "PEG-Pegantes", 84: "IMP-Impermeabilizantes",
+        85: "DEC-Decoracion"
     })
     
     CATEGORIAS_MARCA: Dict[str, str] = field(default_factory=lambda: {
-        "DPP": "Pinturas Decorativas",
-        "POW": "Recubrimientos en Polvo",
-        "ASC": "Automotriz",
-        "MPY": "Empaques Marítimos"
+        "P8": "Pinturas Premium", "MPY": "Pinturas Master", "DPP": "Pinturas Profesional",
+        "ASC": "Complementos", "S": "Sika", "HPG": "Empaque",
+        "ASI": "Internacional", "C&D": "Acabados", "WEG": "Electricos",
+        "GEN": "Genericos", "LAM": "Ceramica", "ABR": "Abrasivos",
+        "HER": "Herramientas", "FER": "Ferreteria", "SEG": "Seguridad",
+        "ELE": "Electricos", "TUB": "Tuberia", "PEG": "Pegantes",
+        "IMP": "Impermeabilizantes", "DEC": "Decoracion"
     })
     
     COLUMNAS_MAESTRAS: Dict[int, str] = field(default_factory=lambda: {
@@ -61,47 +66,27 @@ def configurar_pagina():
     
     st.markdown(f"""
     <style>
-        :root {{
-            --ferreinox-primary: {colors.PRIMARY};
-            --ferreinox-secondary: {colors.SECONDARY};
-            --ferreinox-accent: {colors.ACCENT};
-        }}
-        
         .encabezado-estrategico {{
             background: linear-gradient(135deg, {colors.PRIMARY}, {colors.SECONDARY});
-            padding: 2.5rem;
+            padding: 2rem;
             border-radius: 15px;
             margin-bottom: 2rem;
-            box-shadow: 0 10px 40px rgba(30, 58, 138, 0.3);
             text-align: center;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
         }}
         
         .encabezado-estrategico h1 {{
             color: white;
-            font-size: 2.8rem;
-            font-weight: 900;
             margin: 0;
-            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+            font-size: 2.5rem;
         }}
         
-        .metric-card {{
-            background: linear-gradient(145deg, #ffffff, {colors.GRAY_LIGHT});
-            border-left: 4px solid {colors.ACCENT};
-            padding: 1rem;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            transition: transform 0.3s ease;
-        }}
-        
-        .metric-card:hover {{
-            transform: translateY(-5px);
-        }}
-        
-        .stTabs [data-baseweb="tab-list"] {{
-            gap: 8px;
-            background-color: {colors.GRAY_LIGHT};
-            padding: 0.5rem;
+        .metrica-card {{
+            background: white;
+            padding: 1.5rem;
             border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            border-left: 4px solid {colors.PRIMARY};
         }}
         
         .stTabs [aria-selected="true"] {{
