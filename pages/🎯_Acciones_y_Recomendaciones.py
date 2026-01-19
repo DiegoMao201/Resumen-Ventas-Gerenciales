@@ -255,16 +255,16 @@ def clasificar_acciones(df_seg_vend, df_seg_cli):
         urgentes.append({
             "titulo": row['nomvendedor'],
             "info": f"Avance: {row['avance_pct']:.1f}% | Gap: ${row['presupuesto'] - row['venta_real']:,.0f}",
-            "accion": "📞 Revisar agenda ya."
+            "accion": "📞 Revisar agenda inmediatamente."
         })
 
     # 2. OPORTUNIDADES (Clientes Grandes Dormidos)
     dormidos = df_seg_cli[(df_seg_cli["venta_real"] == 0) & (df_seg_cli["presupuesto_meta"] > 3_000_000)].head(10)
     for _, row in dormidos.iterrows():
         oportunidades.append({
-            "titulo": row['nombre_cliente'][:25], # Truncar nombre largo
+            "titulo": row['nombre_cliente'][:25],
             "info": f"Vend: {row['nomvendedor'].split(' ')[0]} | Potencial: ${row['presupuesto_meta']:,.0f}",
-            "accion": "🚀 Reactivar pedido."
+            "accion": "🚀 Reactivar pedido ahora."
         })
 
     # 3. CIERRES (Les falta poco)
@@ -273,10 +273,126 @@ def clasificar_acciones(df_seg_vend, df_seg_cli):
         cierres.append({
             "titulo": row['nombre_cliente'][:25],
             "info": f"Al {row['avance_pct']:.0f}% | Falta: ${row['gap']:,.0f}",
-            "accion": "⭐ Cerrar mes."
+            "accion": "⭐ Cerrar antes de fin de mes."
         })
         
     return urgentes, oportunidades, cierres
+
+def exportar_plan_accion_excel(df_acciones: pd.DataFrame, vendedor_stats: dict) -> bytes:
+    """
+    Genera Excel Premium con Plan de Acción por Vendedor
+    Formato profesional, visual y accionable
+    """
+    output = io.BytesIO()
+    
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        # Escribir datos
+        df_acciones.to_excel(writer, sheet_name='Plan_Activacion', startrow=6, index=False)
+        
+        wb = writer.book
+        ws = writer.sheets['Plan_Activacion']
+        
+        # --- FORMATOS ---
+        fmt_titulo = wb.add_format({
+            'bold': True, 'font_size': 18, 'font_color': '#FFFFFF',
+            'bg_color': '#1565c0', 'align': 'center', 'valign': 'vcenter'
+        })
+        fmt_subtitulo = wb.add_format({
+            'font_size': 11, 'font_color': '#555555', 'italic': True,
+            'align': 'center'
+        })
+        fmt_kpi_label = wb.add_format({
+            'bold': True, 'font_size': 10, 'bg_color': '#e3f2fd',
+            'border': 1, 'align': 'right'
+        })
+        fmt_kpi_valor = wb.add_format({
+            'font_size': 12, 'num_format': '$#,##0', 'bg_color': '#f1f8e9',
+            'border': 1, 'bold': True
+        })
+        fmt_header = wb.add_format({
+            'bold': True, 'font_color': 'white', 'bg_color': '#1e88e5',
+            'align': 'center', 'valign': 'vcenter', 'border': 1, 'text_wrap': True
+        })
+        fmt_vendedor = wb.add_format({
+            'bold': True, 'font_size': 11, 'bg_color': '#fff9c4',
+            'border': 1, 'align': 'left'
+        })
+        fmt_cliente = wb.add_format({
+            'font_size': 10, 'border': 1, 'text_wrap': True
+        })
+        fmt_producto = wb.add_format({
+            'font_size': 10, 'border': 1, 'bg_color': '#e8f5e9', 'text_wrap': True
+        })
+        fmt_historico = wb.add_format({
+            'num_format': '$#,##0', 'border': 1, 'align': 'right'
+        })
+        fmt_compras = wb.add_format({
+            'border': 1, 'align': 'center', 'num_format': '0'
+        })
+        fmt_accion = wb.add_format({
+            'font_size': 9, 'border': 1, 'italic': True, 'text_wrap': True,
+            'font_color': '#c62828'
+        })
+        
+        # --- CABECERA ---
+        ws.merge_range('A1:F1', '🎯 PLAN DE ACCIÓN COMERCIAL | Pintuco', fmt_titulo)
+        ws.merge_range('A2:F2', f'Periodo: 16-31 Enero 2026 | Canal: Detallistas & Ferretería', fmt_subtitulo)
+        ws.set_row(0, 30)
+        ws.set_row(1, 18)
+        
+        # --- KPIs EJECUTIVOS (Fila 4) ---
+        ws.write('A4', 'META TOTAL:', fmt_kpi_label)
+        ws.write('B4', vendedor_stats.get('meta_total', 0), fmt_kpi_valor)
+        ws.write('C4', 'VENTA ACTUAL:', fmt_kpi_label)
+        ws.write('D4', vendedor_stats.get('venta_actual', 0), fmt_kpi_valor)
+        ws.write('E4', 'GAP (FALTA):', fmt_kpi_label)
+        ws.write('F4', vendedor_stats.get('gap', 0), fmt_kpi_valor)
+        
+        # --- ENCABEZADOS TABLA (Fila 7) ---
+        headers = ['Vendedor', 'Cliente a Contactar', 'Producto a Ofrecer', 
+                   'Compras Históricas', 'Valor Histórico', '🚀 ACCIÓN INMEDIATA']
+        for col_idx, header in enumerate(headers):
+            ws.write(6, col_idx, header, fmt_header)
+        
+        # --- APLICAR FORMATOS A DATOS ---
+        ultima_fila = 7 + len(df_acciones)
+        
+        # Columna Vendedor (A)
+        ws.set_column('A:A', 22, fmt_vendedor)
+        
+        # Columna Cliente (B)
+        ws.set_column('B:B', 35, fmt_cliente)
+        
+        # Columna Producto (C)
+        ws.set_column('C:C', 40, fmt_producto)
+        
+        # Columna Compras (D)
+        ws.set_column('D:D', 12, fmt_compras)
+        
+        # Columna Valor (E)
+        ws.set_column('E:E', 18, fmt_historico)
+        
+        # Columna Acción (F)
+        ws.set_column('F:F', 45, fmt_accion)
+        
+        # --- FORMATO CONDICIONAL: Resaltar alta prioridad ---
+        ws.conditional_format(f'E8:E{ultima_fila}', {
+            'type': '3_color_scale',
+            'min_color': '#ffffff',
+            'mid_color': '#fff9c4',
+            'max_color': '#4caf50'
+        })
+        
+        # --- AJUSTES FINALES ---
+        ws.freeze_panes(7, 0)  # Congelar encabezados
+        ws.autofilter(6, 0, ultima_fila - 1, 5)  # Filtros automáticos
+        ws.set_row(6, 35)  # Altura encabezados
+        
+        # Ajustar altura de filas de datos (auto-wrap)
+        for row_idx in range(7, ultima_fila):
+            ws.set_row(row_idx, 45)
+    
+    return output.getvalue()
 
 # ==========================================
 # 5. UI PRINCIPAL (WAR ROOM)
@@ -551,119 +667,3 @@ with tab3:
 # Footer
 st.markdown("---")
 st.markdown("**💡 Tip:** Exporta el plan de acción y asígnalo en tu reunión matutina de ventas.")
-
-def exportar_plan_accion_excel(df_acciones: pd.DataFrame, vendedor_stats: dict) -> bytes:
-    """
-    Genera Excel Premium con Plan de Acción por Vendedor
-    Formato profesional, visual y accionable
-    """
-    output = io.BytesIO()
-    
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        # Escribir datos
-        df_acciones.to_excel(writer, sheet_name='Plan_Activacion', startrow=6, index=False)
-        
-        wb = writer.book
-        ws = writer.sheets['Plan_Activacion']
-        
-        # --- FORMATOS ---
-        fmt_titulo = wb.add_format({
-            'bold': True, 'font_size': 18, 'font_color': '#FFFFFF',
-            'bg_color': '#1565c0', 'align': 'center', 'valign': 'vcenter'
-        })
-        fmt_subtitulo = wb.add_format({
-            'font_size': 11, 'font_color': '#555555', 'italic': True,
-            'align': 'center'
-        })
-        fmt_kpi_label = wb.add_format({
-            'bold': True, 'font_size': 10, 'bg_color': '#e3f2fd',
-            'border': 1, 'align': 'right'
-        })
-        fmt_kpi_valor = wb.add_format({
-            'font_size': 12, 'num_format': '$#,##0', 'bg_color': '#f1f8e9',
-            'border': 1, 'bold': True
-        })
-        fmt_header = wb.add_format({
-            'bold': True, 'font_color': 'white', 'bg_color': '#1e88e5',
-            'align': 'center', 'valign': 'vcenter', 'border': 1, 'text_wrap': True
-        })
-        fmt_vendedor = wb.add_format({
-            'bold': True, 'font_size': 11, 'bg_color': '#fff9c4',
-            'border': 1, 'align': 'left'
-        })
-        fmt_cliente = wb.add_format({
-            'font_size': 10, 'border': 1, 'text_wrap': True
-        })
-        fmt_producto = wb.add_format({
-            'font_size': 10, 'border': 1, 'bg_color': '#e8f5e9', 'text_wrap': True
-        })
-        fmt_historico = wb.add_format({
-            'num_format': '$#,##0', 'border': 1, 'align': 'right'
-        })
-        fmt_compras = wb.add_format({
-            'border': 1, 'align': 'center', 'num_format': '0'
-        })
-        fmt_accion = wb.add_format({
-            'font_size': 9, 'border': 1, 'italic': True, 'text_wrap': True,
-            'font_color': '#c62828'
-        })
-        
-        # --- CABECERA ---
-        ws.merge_range('A1:F1', '🎯 PLAN DE ACCIÓN COMERCIAL | Pintuco', fmt_titulo)
-        ws.merge_range('A2:F2', f'Periodo: 16-31 Enero 2026 | Canal: Detallistas & Ferretería', fmt_subtitulo)
-        ws.set_row(0, 30)
-        ws.set_row(1, 18)
-        
-        # --- KPIs EJECUTIVOS (Fila 4) ---
-        ws.write('A4', 'META TOTAL:', fmt_kpi_label)
-        ws.write('B4', vendedor_stats.get('meta_total', 0), fmt_kpi_valor)
-        ws.write('C4', 'VENTA ACTUAL:', fmt_kpi_label)
-        ws.write('D4', vendedor_stats.get('venta_actual', 0), fmt_kpi_valor)
-        ws.write('E4', 'GAP (FALTA):', fmt_kpi_label)
-        ws.write('F4', vendedor_stats.get('gap', 0), fmt_kpi_valor)
-        
-        # --- ENCABEZADOS TABLA (Fila 7) ---
-        headers = ['Vendedor', 'Cliente a Contactar', 'Producto a Ofrecer', 
-                   'Compras Históricas', 'Valor Histórico', '🚀 ACCIÓN INMEDIATA']
-        for col_idx, header in enumerate(headers):
-            ws.write(6, col_idx, header, fmt_header)
-        
-        # --- APLICAR FORMATOS A DATOS ---
-        ultima_fila = 7 + len(df_acciones)
-        
-        # Columna Vendedor (A)
-        ws.set_column('A:A', 22, fmt_vendedor)
-        
-        # Columna Cliente (B)
-        ws.set_column('B:B', 35, fmt_cliente)
-        
-        # Columna Producto (C)
-        ws.set_column('C:C', 40, fmt_producto)
-        
-        # Columna Compras (D)
-        ws.set_column('D:D', 12, fmt_compras)
-        
-        # Columna Valor (E)
-        ws.set_column('E:E', 18, fmt_historico)
-        
-        # Columna Acción (F)
-        ws.set_column('F:F', 45, fmt_accion)
-        
-        # --- FORMATO CONDICIONAL: Resaltar alta prioridad ---
-        ws.conditional_format(f'E8:E{ultima_fila}', {
-            'type': '3_color_scale',
-            'min_color': '#ffffff',
-            'mid_color': '#fff9c4',
-            'max_color': '#4caf50'
-        })
-        
-        # --- AJUSTES FINALES ---
-        ws.freeze_panes(7, 0)  # Congelar encabezados
-        ws.autofilter(6, 0, ultima_fila - 1, 5)  # Filtros automáticos
-        ws.set_row(6, 35)  # Altura encabezados
-        
-        # Ajustar altura de filas de datos (auto-wrap)
-        for row_idx in range(7, ultima_fila):
-            ws.set_row(row_idx, 45)
-    
-    return output.getvalue()
