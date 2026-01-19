@@ -453,7 +453,7 @@ with tab3:
         # 3. Cruzar: ¿Qué compraban antes y NO compraron este mes?
         oportunidades_producto = productos_frecuentes[
             productos_frecuentes["codigo_cliente"].isin(clientes_dormidos)
-        ].sort_values("total_historico", ascending=False).head(30)
+        ].sort_values("total_historico", ascending=False).head(50)  # Top 50 acciones
         
         if not oportunidades_producto.empty:
             # Enriquecer con nombre cliente y vendedor
@@ -464,39 +464,60 @@ with tab3:
                 how="left"
             )
             
-            st.metric("🎯 Acciones de Reactivación", len(oportunidades_producto))
+            st.metric("🎯 Acciones de Reactivación Identificadas", len(oportunidades_producto))
             
-            # Mostrar acciones concretas
-            st.markdown("**Lista de Acción Inmediata:**")
-            for idx, row in oportunidades_producto.iterrows():
+            # Mostrar preview visual
+            st.markdown("**Vista Previa - Top 10 Acciones:**")
+            for idx, row in oportunidades_producto.head(10).iterrows():
                 vendedor = row["nomvendedor"].split(" ")[0] if pd.notna(row["nomvendedor"]) else "Sin asignar"
                 st.markdown(f"""
                 <div style="background: white; padding: 12px; margin: 8px 0; border-radius: 5px; border-left: 4px solid #1e88e5;">
                     <strong style="color: #1565c0;">📞 {vendedor}</strong> → Llamar a <strong>{row['nombre_cliente'][:30]}</strong><br>
-                    <span style="color: #666;">💡 Oferta: <strong>{row['nombre_producto'][:40]}</strong></span><br>
+                    <span style="color: #666;">💡 Producto: <strong>{row['nombre_producto'][:40]}</strong></span><br>
                     <span style="font-size: 12px; color: #999;">Compró {row['veces_comprado']} veces | Histórico: ${row['total_historico']:,.0f}</span>
                 </div>
                 """, unsafe_allow_html=True)
             
-            # Tabla descargable
             st.markdown("---")
-            st.markdown("**📥 Descargar Plan Completo**")
-            df_export = oportunidades_producto[[
+            
+            # Preparar DataFrame para Excel Premium
+            df_export_excel = oportunidades_producto[[
                 "nomvendedor", "nombre_cliente", "nombre_producto", 
                 "veces_comprado", "total_historico"
-            ]].rename(columns={
-                "nomvendedor": "Vendedor",
-                "nombre_cliente": "Cliente",
-                "nombre_producto": "Producto a Ofrecer",
-                "veces_comprado": "Compras Históricas",
-                "total_historico": "Valor Histórico"
-            })
+            ]].copy()
             
-            st.dataframe(
-                df_export.style.format({"Valor Histórico": "${:,.0f}"}),
-                use_container_width=True,
-                height=400
+            df_export_excel.columns = ["Vendedor", "Cliente a Contactar", "Producto a Ofrecer",
+                                       "Compras Históricas", "Valor Histórico"]
+            
+            # Agregar columna de acción
+            df_export_excel["🚀 ACCIÓN INMEDIATA"] = df_export_excel.apply(
+                lambda r: f"☎️ Contactar HOY y ofrecer {r['Producto a Ofrecer'][:30]}. "
+                         f"Cliente ya lo compró {int(r['Compras Históricas'])} veces. "
+                         f"Potencial de venta: ${r['Valor Histórico']:,.0f}",
+                axis=1
             )
+            
+            # Calcular stats para el Excel
+            vendedor_stats = {
+                'meta_total': df_seg_vend["presupuesto"].sum() if not df_seg_vend.empty else 0,
+                'venta_actual': df_seg_vend["venta_real"].sum() if not df_seg_vend.empty else 0,
+                'gap': (df_seg_vend["presupuesto"].sum() - df_seg_vend["venta_real"].sum()) if not df_seg_vend.empty else 0
+            }
+            
+            # Generar Excel Premium
+            excel_bytes = exportar_plan_accion_excel(df_export_excel, vendedor_stats)
+            
+            # Botón de descarga con estilo
+            st.download_button(
+                label="💎 📥 DESCARGAR PLAN DE ACCIÓN COMPLETO (Excel Premium)",
+                data=excel_bytes,
+                file_name=f"Plan_Activacion_Pintuco_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                type="primary"
+            )
+            
+            st.info("📌 **Instrucciones:** Descarga el Excel y distribúyelo a tu equipo. Cada vendedor verá claramente qué clientes contactar y qué productos ofrecer.")
             
         else:
             st.success("✅ Todos los clientes frecuentes están activos este mes.")
@@ -530,3 +551,119 @@ with tab3:
 # Footer
 st.markdown("---")
 st.markdown("**💡 Tip:** Exporta el plan de acción y asígnalo en tu reunión matutina de ventas.")
+
+def exportar_plan_accion_excel(df_acciones: pd.DataFrame, vendedor_stats: dict) -> bytes:
+    """
+    Genera Excel Premium con Plan de Acción por Vendedor
+    Formato profesional, visual y accionable
+    """
+    output = io.BytesIO()
+    
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        # Escribir datos
+        df_acciones.to_excel(writer, sheet_name='Plan_Activacion', startrow=6, index=False)
+        
+        wb = writer.book
+        ws = writer.sheets['Plan_Activacion']
+        
+        # --- FORMATOS ---
+        fmt_titulo = wb.add_format({
+            'bold': True, 'font_size': 18, 'font_color': '#FFFFFF',
+            'bg_color': '#1565c0', 'align': 'center', 'valign': 'vcenter'
+        })
+        fmt_subtitulo = wb.add_format({
+            'font_size': 11, 'font_color': '#555555', 'italic': True,
+            'align': 'center'
+        })
+        fmt_kpi_label = wb.add_format({
+            'bold': True, 'font_size': 10, 'bg_color': '#e3f2fd',
+            'border': 1, 'align': 'right'
+        })
+        fmt_kpi_valor = wb.add_format({
+            'font_size': 12, 'num_format': '$#,##0', 'bg_color': '#f1f8e9',
+            'border': 1, 'bold': True
+        })
+        fmt_header = wb.add_format({
+            'bold': True, 'font_color': 'white', 'bg_color': '#1e88e5',
+            'align': 'center', 'valign': 'vcenter', 'border': 1, 'text_wrap': True
+        })
+        fmt_vendedor = wb.add_format({
+            'bold': True, 'font_size': 11, 'bg_color': '#fff9c4',
+            'border': 1, 'align': 'left'
+        })
+        fmt_cliente = wb.add_format({
+            'font_size': 10, 'border': 1, 'text_wrap': True
+        })
+        fmt_producto = wb.add_format({
+            'font_size': 10, 'border': 1, 'bg_color': '#e8f5e9', 'text_wrap': True
+        })
+        fmt_historico = wb.add_format({
+            'num_format': '$#,##0', 'border': 1, 'align': 'right'
+        })
+        fmt_compras = wb.add_format({
+            'border': 1, 'align': 'center', 'num_format': '0'
+        })
+        fmt_accion = wb.add_format({
+            'font_size': 9, 'border': 1, 'italic': True, 'text_wrap': True,
+            'font_color': '#c62828'
+        })
+        
+        # --- CABECERA ---
+        ws.merge_range('A1:F1', '🎯 PLAN DE ACCIÓN COMERCIAL | Pintuco', fmt_titulo)
+        ws.merge_range('A2:F2', f'Periodo: 16-31 Enero 2026 | Canal: Detallistas & Ferretería', fmt_subtitulo)
+        ws.set_row(0, 30)
+        ws.set_row(1, 18)
+        
+        # --- KPIs EJECUTIVOS (Fila 4) ---
+        ws.write('A4', 'META TOTAL:', fmt_kpi_label)
+        ws.write('B4', vendedor_stats.get('meta_total', 0), fmt_kpi_valor)
+        ws.write('C4', 'VENTA ACTUAL:', fmt_kpi_label)
+        ws.write('D4', vendedor_stats.get('venta_actual', 0), fmt_kpi_valor)
+        ws.write('E4', 'GAP (FALTA):', fmt_kpi_label)
+        ws.write('F4', vendedor_stats.get('gap', 0), fmt_kpi_valor)
+        
+        # --- ENCABEZADOS TABLA (Fila 7) ---
+        headers = ['Vendedor', 'Cliente a Contactar', 'Producto a Ofrecer', 
+                   'Compras Históricas', 'Valor Histórico', '🚀 ACCIÓN INMEDIATA']
+        for col_idx, header in enumerate(headers):
+            ws.write(6, col_idx, header, fmt_header)
+        
+        # --- APLICAR FORMATOS A DATOS ---
+        ultima_fila = 7 + len(df_acciones)
+        
+        # Columna Vendedor (A)
+        ws.set_column('A:A', 22, fmt_vendedor)
+        
+        # Columna Cliente (B)
+        ws.set_column('B:B', 35, fmt_cliente)
+        
+        # Columna Producto (C)
+        ws.set_column('C:C', 40, fmt_producto)
+        
+        # Columna Compras (D)
+        ws.set_column('D:D', 12, fmt_compras)
+        
+        # Columna Valor (E)
+        ws.set_column('E:E', 18, fmt_historico)
+        
+        # Columna Acción (F)
+        ws.set_column('F:F', 45, fmt_accion)
+        
+        # --- FORMATO CONDICIONAL: Resaltar alta prioridad ---
+        ws.conditional_format(f'E8:E{ultima_fila}', {
+            'type': '3_color_scale',
+            'min_color': '#ffffff',
+            'mid_color': '#fff9c4',
+            'max_color': '#4caf50'
+        })
+        
+        # --- AJUSTES FINALES ---
+        ws.freeze_panes(7, 0)  # Congelar encabezados
+        ws.autofilter(6, 0, ultima_fila - 1, 5)  # Filtros automáticos
+        ws.set_row(6, 35)  # Altura encabezados
+        
+        # Ajustar altura de filas de datos (auto-wrap)
+        for row_idx in range(7, ultima_fila):
+            ws.set_row(row_idx, 45)
+    
+    return output.getvalue()
