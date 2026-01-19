@@ -382,7 +382,7 @@ with col_green:
 st.markdown("---")
 
 # --- BLOQUE 3: ANÁLISIS PROFUNDO (TABS MEJORADOS) ---
-tab1, tab2, tab3 = st.tabs(["📊 Performance Vendedores", "👥 Radar Clientes", "📦 Mix Productos"])
+tab1, tab2, tab3 = st.tabs(["📊 Performance Vendedores", "👥 Radar Clientes", "📦 Plan de Acción por Producto & Cliente"])
 
 with tab1:
     st.markdown("##### 🏆 Ranking de Cumplimiento por Vendedor")
@@ -432,27 +432,101 @@ with tab2:
         )
 
 with tab3:
-    st.markdown("##### 📦 Ofertas Rápidas para Activación")
-    if not df_tipo_raw.empty:
+    st.markdown("##### 📦 Plan de Acción por Producto & Cliente")
+    
+    if not df_tipo_raw.empty and not df_seg_cli.empty:
+        # 1. Identificar productos frecuentes históricos (2024-2025)
+        df_hist = df_tipo_raw[df_tipo_raw["anio"].isin([2024, 2025])]
+        
+        # Productos más vendidos por cliente
+        compras_historicas = df_hist.groupby(["codigo_cliente", "nombre_producto"]).agg(
+            total_historico=("valor_total_item_vendido", "sum"),
+            veces_comprado=("fecha", "count")
+        ).reset_index()
+        
+        # Filtrar solo productos comprados 2+ veces (frecuentes)
+        productos_frecuentes = compras_historicas[compras_historicas["veces_comprado"] >= 2]
+        
+        # 2. Clientes activos SIN compra en enero 2026
+        clientes_dormidos = df_seg_cli[df_seg_cli["venta_real"] == 0]["cliente_id"].unique()
+        
+        # 3. Cruzar: ¿Qué compraban antes y NO compraron este mes?
+        oportunidades_producto = productos_frecuentes[
+            productos_frecuentes["codigo_cliente"].isin(clientes_dormidos)
+        ].sort_values("total_historico", ascending=False).head(30)
+        
+        if not oportunidades_producto.empty:
+            # Enriquecer con nombre cliente y vendedor
+            oportunidades_producto = oportunidades_producto.merge(
+                df_seg_cli[["cliente_id", "nombre_cliente", "nomvendedor"]],
+                left_on="codigo_cliente",
+                right_on="cliente_id",
+                how="left"
+            )
+            
+            st.metric("🎯 Acciones de Reactivación", len(oportunidades_producto))
+            
+            # Mostrar acciones concretas
+            st.markdown("**Lista de Acción Inmediata:**")
+            for idx, row in oportunidades_producto.iterrows():
+                vendedor = row["nomvendedor"].split(" ")[0] if pd.notna(row["nomvendedor"]) else "Sin asignar"
+                st.markdown(f"""
+                <div style="background: white; padding: 12px; margin: 8px 0; border-radius: 5px; border-left: 4px solid #1e88e5;">
+                    <strong style="color: #1565c0;">📞 {vendedor}</strong> → Llamar a <strong>{row['nombre_cliente'][:30]}</strong><br>
+                    <span style="color: #666;">💡 Oferta: <strong>{row['nombre_producto'][:40]}</strong></span><br>
+                    <span style="font-size: 12px; color: #999;">Compró {row['veces_comprado']} veces | Histórico: ${row['total_historico']:,.0f}</span>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # Tabla descargable
+            st.markdown("---")
+            st.markdown("**📥 Descargar Plan Completo**")
+            df_export = oportunidades_producto[[
+                "nomvendedor", "nombre_cliente", "nombre_producto", 
+                "veces_comprado", "total_historico"
+            ]].rename(columns={
+                "nomvendedor": "Vendedor",
+                "nombre_cliente": "Cliente",
+                "nombre_producto": "Producto a Ofrecer",
+                "veces_comprado": "Compras Históricas",
+                "total_historico": "Valor Histórico"
+            })
+            
+            st.dataframe(
+                df_export.style.format({"Valor Histórico": "${:,.0f}"}),
+                use_container_width=True,
+                height=400
+            )
+            
+        else:
+            st.success("✅ Todos los clientes frecuentes están activos este mes.")
+            
+        # 4. Top Productos Históricos (Referencia)
+        st.markdown("---")
+        st.markdown("##### 📊 Productos Estrella (Referencia 2025)")
         top_prods = (
-            df_tipo_raw[df_tipo_raw["anio"]==2025]
+            df_tipo_raw[df_tipo_raw["anio"] == 2025]
             .groupby("nombre_producto")["valor_total_item_vendido"].sum()
             .reset_index()
             .sort_values("valor_total_item_vendido", ascending=False)
-            .head(15)
+            .head(10)
         )
-        st.metric("SKUs clave para activar", f"{len(top_prods):,}")
-        st.plotly_chart(
-            px.bar(
-                top_prods, 
-                x="valor_total_item_vendido", 
-                y="nombre_producto", 
-                orientation='h',
-                color="valor_total_item_vendido", 
-                color_continuous_scale="Blues",
-                labels={"valor_total_item_vendido": "Ventas 2025", "nombre_producto": "Producto"}
-            ).update_layout(height=400, margin=dict(l=0,r=0,t=0,b=0)),
-            use_container_width=True
-        )
+        
+        if not top_prods.empty:
+            fig = px.bar(
+                top_prods,
+                x="valor_total_item_vendido",
+                y="nombre_producto",
+                orientation="h",
+                color="valor_total_item_vendido",
+                color_continuous_scale="Greens",
+                labels={"valor_total_item_vendido": "Ventas 2025", "nombre_producto": ""}
+            )
+            fig.update_layout(height=350, margin=dict(l=0, r=0, t=0, b=0), showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("No hay datos de productos disponibles.")
+        st.info("No hay datos suficientes para generar acciones.")
+
+# Footer
+st.markdown("---")
+st.markdown("**💡 Tip:** Exporta el plan de acción y asígnalo en tu reunión matutina de ventas.")
