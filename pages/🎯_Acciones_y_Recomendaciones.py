@@ -385,56 +385,74 @@ st.markdown("---")
 tab1, tab2, tab3 = st.tabs(["📊 Performance Vendedores", "👥 Radar Clientes", "📦 Mix Productos"])
 
 with tab1:
-    col_t1a, col_t1b = st.columns([2, 1])
-    with col_t1a:
-        st.markdown("##### 🏆 Ranking de Cumplimiento")
+    st.markdown("##### 🏆 Ranking de Cumplimiento por Vendedor")
+    
+    if not df_seg_vend.empty:
+        df_display = df_seg_vend.copy().replace([np.inf, -np.inf], 0).fillna(0)
         st.dataframe(
-            df_seg_vend.style.background_gradient(subset=["avance_pct"], cmap="RdYlGn", vmin=0, vmax=110)
+            df_display.style.background_gradient(subset=["avance_pct"], cmap="RdYlGn", vmin=0, vmax=110)
             .format({"presupuesto": "${:,.0f}", "venta_real": "${:,.0f}", "avance_pct": "{:.1f}%"}),
             use_container_width=True,
             height=300
         )
-    with col_t1b:
-        st.markdown("##### 🎯 Matriz de Esfuerzo")
-        if not df_seg_vend.empty:
-            fig = px.scatter(df_seg_vend, x="presupuesto", y="avance_pct", size="venta_real", color="avance_pct",
-                             hover_name="nomvendedor", text="nomvendedor", color_continuous_scale="RdYlGn",
-                             title="")
-            fig.update_layout(height=300, margin=dict(l=0,r=0,t=0,b=0), xaxis_title="Meta ($)", yaxis_title="% Avance")
-            st.plotly_chart(fig, use_container_width=True)
+        # 🔴 Se quita la Matriz de Esfuerzo (scatter) para centrar la acción en clientes
+        st.markdown("✅ Enfoque: usa las pestañas de Activación para movilizar clientes.")
+    else:
+        st.info("No hay datos de vendedores para mostrar.")
 
 with tab2:
-    st.markdown("##### 🔎 Buscador de Oportunidades")
+    st.markdown("##### 🚀 Activación de Clientes Dormidos")
     filtro_cli = st.multiselect("Filtrar por Vendedor:", df_seg_vend["nomvendedor"].unique())
     
     df_show = df_seg_cli.copy()
     if filtro_cli:
         df_show = df_show[df_show["nomvendedor"].isin(filtro_cli)]
-        
+    
+    dormidos = df_show[df_show["venta_real"]==0]
+    st.metric("Clientes dormidos", f"{len(dormidos):,}")
+    st.metric("Potencial dormido", f"${dormidos['presupuesto_meta'].sum():,.0f}")
+    
     col_f1, col_f2 = st.columns(2)
     with col_f1:
-        st.markdown("**Clientes Sin Compra (Prioridad)**")
+        st.markdown("**Top clientes sin compra (prioridad)**")
         st.dataframe(
-            df_show[df_show["venta_real"]==0].sort_values("presupuesto_meta", ascending=False)
+            dormidos.sort_values("presupuesto_meta", ascending=False)
             .style.format({"presupuesto_meta": "${:,.0f}"}),
             use_container_width=True, height=400,
             column_config={"cliente_id": None, "avance_pct": None, "gap": None}
         )
     with col_f2:
-        st.markdown("**Clientes Activos (Seguimiento)**")
+        st.markdown("**Clientes activos para upsell**")
+        activos = df_show[df_show["venta_real"]>0].sort_values("avance_pct", ascending=False)
         st.dataframe(
-            df_show[df_show["venta_real"]>0].sort_values("avance_pct", ascending=False)
-            .style.bar(subset=["avance_pct"], color="#4caf50", vmin=0, vmax=100)
+            activos.style.bar(subset=["avance_pct"], color="#4caf50", vmin=0, vmax=100)
             .format({"presupuesto_meta": "${:,.0f}", "venta_real": "${:,.0f}", "avance_pct": "{:.1f}%"}),
             use_container_width=True, height=400,
             column_config={"cliente_id": None}
         )
 
 with tab3:
-    st.markdown("##### 📦 ¿Qué vender? (Top Histórico 2025)")
-    top_prods = df_tipo_raw[df_tipo_raw["anio"]==2025].groupby("nombre_producto")["valor_total_item_vendido"].sum().reset_index().sort_values("valor_total_item_vendido", ascending=False).head(15)
-    
-    fig_bar = px.bar(top_prods, x="valor_total_item_vendido", y="nombre_producto", orientation='h', 
-                     color="valor_total_item_vendido", color_continuous_scale="Blues")
-    fig_bar.update_layout(height=400, margin=dict(l=0,r=0,t=0,b=0))
-    st.plotly_chart(fig_bar, use_container_width=True)
+    st.markdown("##### 📦 Ofertas Rápidas para Activación")
+    if not df_tipo_raw.empty:
+        top_prods = (
+            df_tipo_raw[df_tipo_raw["anio"]==2025]
+            .groupby("nombre_producto")["valor_total_item_vendido"].sum()
+            .reset_index()
+            .sort_values("valor_total_item_vendido", ascending=False)
+            .head(15)
+        )
+        st.metric("SKUs clave para activar", f"{len(top_prods):,}")
+        st.plotly_chart(
+            px.bar(
+                top_prods, 
+                x="valor_total_item_vendido", 
+                y="nombre_producto", 
+                orientation='h',
+                color="valor_total_item_vendido", 
+                color_continuous_scale="Blues",
+                labels={"valor_total_item_vendido": "Ventas 2025", "nombre_producto": "Producto"}
+            ).update_layout(height=400, margin=dict(l=0,r=0,t=0,b=0)),
+            use_container_width=True
+        )
+    else:
+        st.info("No hay datos de productos disponibles.")
