@@ -201,52 +201,43 @@ def exportar_excel_ejecutivo(df_mensual_unificado: pd.DataFrame, df_coment: pd.D
     output = io.BytesIO()
     
     # 1. Preparación de datos para Excel
-    # Pivotar los meses
     df_pivot = df_mensual_unificado.pivot_table(
         index="vendedor_unificado", columns="mes", values="presupuesto_mensual", aggfunc="sum"
     ).fillna(0)
     
-    # Ordenar por venta total descendente para impacto visual
     df_pivot["Total_2026"] = df_pivot.sum(axis=1)
     df_pivot = df_pivot.sort_values("Total_2026", ascending=False)
     
-    # Mapeo de comentarios (Buscamos el comentario más relevante para el vendedor/grupo)
-    # Si es grupo, intentamos concatenar o dejar genérico. Si es vendedor, pegamos su comentario.
+    # Mapeo de comentarios
     comment_map = {}
-    # Crear diccionario rápido de comentarios individuales
     raw_comments = dict(zip(df_coment["nomvendedor"], df_coment["comentario"]))
     
-    # Crear diccionario de comentarios de grupo (tomamos el del líder o genérico)
     for idx, row in df_pivot.iterrows():
         nombre = str(idx)
         if nombre in raw_comments:
             comment_map[nombre] = raw_comments[nombre]
         else:
-            # Es un grupo o no tiene comentario directo.
-            # Buscamos si el nombre coincide con un grupo en df_coment
             sub_c = df_coment[df_coment["grupo"] == nombre]
             if not sub_c.empty:
-                 comment_map[nombre] = f"Agrupación de {len(sub_c)} vendedores. Obj. Grupal: ${row['Total_2026']/1e6:.1f}M"
+                comment_map[nombre] = f"Agrupación de {len(sub_c)} vendedores. Obj. Grupal: ${row['Total_2026']/1e6:.1f}M"
             else:
-                 comment_map[nombre] = "Asignación directa."
+                comment_map[nombre] = "Asignación directa."
 
-    # 2. Configuración de Writer y Workbook
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
         sheet_name = "Plan_Maestro_2026"
-        # Escribimos un dataframe vacío solo para inicializar, escribiremos manualmente
         pd.DataFrame().to_excel(writer, sheet_name=sheet_name)
         
         wb = writer.book
         ws = writer.sheets[sheet_name]
-        ws.hide_gridlines(2) # Ocultar líneas de cuadrícula para look limpio
+        ws.hide_gridlines(2)
         
-        # --- DEFINICIÓN DE FORMATOS ---
+        # --- FORMATOS ---
         fmt_title = wb.add_format({
             'bold': True, 'font_size': 20, 'font_color': '#FFFFFF',
             'bg_color': '#1e3a8a', 'align': 'left', 'valign': 'vcenter', 'indent': 1
         })
         fmt_subtitle = wb.add_format({
-            'font_size': 11, 'font_color': '#cbd5e1', # Gris claro azulado
+            'font_size': 11, 'font_color': '#cbd5e1',
             'bg_color': '#1e3a8a', 'align': 'left', 'valign': 'top', 'indent': 1, 'italic': True
         })
         fmt_kpi_box = wb.add_format({
@@ -258,8 +249,7 @@ def exportar_excel_ejecutivo(df_mensual_unificado: pd.DataFrame, df_coment: pd.D
             'align': 'center', 'bg_color': '#f8fafc', 'num_format': '$#,##0'
         })
         
-        # Formatos de Tabla
-        header_color = '#2563eb' # Azul más brillante para cabecera tabla
+        header_color = '#2563eb'
         fmt_header = wb.add_format({
             'bold': True, 'font_color': 'white', 'bg_color': header_color,
             'align': 'center', 'valign': 'vcenter', 'border': 1, 'border_color': 'white'
@@ -270,121 +260,107 @@ def exportar_excel_ejecutivo(df_mensual_unificado: pd.DataFrame, df_coment: pd.D
         })
         fmt_curr = wb.add_format({'num_format': '$ #,##0', 'border': 1, 'border_color': '#f1f5f9', 'font_size': 10})
         fmt_curr_tot = wb.add_format({
-            'num_format': '$ #,##0', 'bold': True, 'bg_color': '#fff7ed', # Naranja muy suave
+            'num_format': '$ #,##0', 'bold': True, 'bg_color': '#fff7ed',
             'border': 1, 'border_color': '#fdba74'
         })
         fmt_text_sm = wb.add_format({'font_size': 9, 'font_color': '#64748b', 'text_wrap': True, 'valign': 'vcenter'})
 
-        # --- SECCIÓN 1: DASHBOARD HEADER (Filas 0-4) ---
-        ws.set_row(0, 35) # Altura Título
-        ws.set_row(1, 20) # Altura Subtítulo
-        ws.set_row(2, 10) # Espaciador
-        ws.set_row(3, 40) # Fila KPIs
+        # --- HEADER ---
+        ws.set_row(0, 35)
+        ws.set_row(1, 20)
+        ws.set_row(2, 10)
+        ws.set_row(3, 40)
         
-        # Título Corporativo
         ws.merge_range('A1:Q1', "  FERREINOX SAS BIC | PRESUPUESTO COMERCIAL 2026", fmt_title)
-        ws.merge_range('A2:Q2', f"  Escenario seleccionado: {escenario.upper()} | Generado: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}", fmt_subtitle)
+        ws.merge_range('A2:Q2', f"  Escenario: {escenario.upper()} | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}", fmt_subtitle)
         
-        # KPIs Mini Dashboard en Excel
         ws.write('B4', "META TOTAL AÑO", fmt_kpi_box)
         ws.write('C4', meta_total, fmt_kpi_val)
         ws.write('E4', "PROMEDIO MENSUAL", fmt_kpi_box)
         ws.write('F4', meta_total/12, fmt_kpi_val)
         
-        # --- SECCIÓN 2: CABECERAS DE TABLA (Fila 6) ---
+        # --- CABECERAS TABLA ---
         start_row = 6
-        cols = ["Vendedor / Grupo", "Tendencia", "Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic", "TOTAL 2026", "Observaciones Estratégicas"]
+        cols = ["Vendedor / Grupo", "Tendencia", "Ene", "Feb", "Mar", "Abr", "May", "Jun", 
+                "Jul", "Ago", "Sep", "Oct", "Nov", "Dic", "TOTAL 2026", "Observaciones Estratégicas"]
         
         for c_idx, col_name in enumerate(cols):
             ws.write(start_row, c_idx, col_name, fmt_header)
-            
-        # --- SECCIÓN 3: DATOS Y SPARKLINES ---
+        
+        # --- DATOS Y SPARKLINES ---
         curr_row = start_row + 1
         
-        # Columnas mapeadas: A=0, B=1(Spark), C=2(Ene)... N=13(Dic), O=14(Total), P=15(Comentario)
-        
         for idx_val, row in df_pivot.iterrows():
-            # 1. Nombre
+            # Nombre
             ws.write(curr_row, 0, idx_val, fmt_row_idx)
             
-            # 2. Datos Mensuales (Cols 2 a 13) - Escribimos los valores
-            months_data = []
+            # Datos Mensuales (columnas 2-13)
             for m in range(1, 13):
                 val = row.get(m, 0)
-                months_data.append(val)
-                ws.write(curr_row, m + 1, val, fmt_curr) # +1 porque hay columna sparkline antes
-                
-            # 3. Total (Col 14)
+                ws.write(curr_row, m + 1, val, fmt_curr)
+            
+            # Total
             ws.write(curr_row, 14, row["Total_2026"], fmt_curr_tot)
             
-            # 4. Comentario (Col 15)
+            # Comentario
             ws.write(curr_row, 15, comment_map.get(str(idx_val), ""), fmt_text_sm)
             
-            # 5. SPARKLINES (Mini gráfico en Col 1 - 'B')
-            # Definir el rango de datos de esta fila para el sparkline (C a N)
-            # Fila excel es curr_row + 1 (base 1)
+            # Sparkline
             row_excel = curr_row + 1
-            data_range = f"C{row_excel}:N{row_excel}" # Rango de Ene a Dic
+            data_range = f"C{row_excel}:N{row_excel}"
             
             ws.add_sparkline(curr_row, 1, {
                 'range': data_range,
                 'type': 'line',
-                'style': 12, # Estilo azul
+                'style': 12,
                 'markers': True,
                 'last_point': True,
-                'high_point': True, # Puntos destacados
+                'high_point': True,
                 'line_weight': 2
             })
             
             curr_row += 1
 
-        # Fila de Totales Generales al final
+        # Fila de Totales
         ws.write(curr_row, 0, "TOTAL COMPAÑÍA", fmt_header)
-        # Sumar columnas verticales
+        
         for m_idx in range(1, 13):
-            # Formula excel: =SUM(C7:C_last)
-            col_letter = chr(65 + m_idx + 1) # C es col 2, pero offset +1 por sparkline = D? No, wait.
-            # A=0, B=1, C=2. Ene esta en col 2.
-            # chr(65+2) = C.
-            xls_col =  pd.io.excel.ExcelWriter(io.BytesIO(), engine='xlsxwriter').book.add_format()._get_color
-            # Mejor usar indices numericos de xlsxwriter
-            ws.write_formula(curr_row, m_idx + 1, f"=SUM({chr(67+m_idx-1)}{start_row+2}:{chr(67+m_idx-1)}{curr_row})", fmt_curr_tot)
+            # Sumar desde fila start_row+2 hasta curr_row-1
+            col_letter = chr(67 + m_idx - 1)  # C=67 (ASCII) para mes 1
+            ws.write_formula(curr_row, m_idx + 1, 
+                           f"=SUM({col_letter}{start_row+2}:{col_letter}{curr_row})", 
+                           fmt_curr_tot)
 
         ws.write_formula(curr_row, 14, f"=SUM(O{start_row+2}:O{curr_row})", fmt_curr_tot)
 
-        # --- SECCIÓN 4: FORMATO CONDICIONAL Y VISUALES ---
-        # Rango de datos numéricos (Meses): C7 a N_last
+        # --- FORMATO CONDICIONAL ---
         last_data_row = curr_row - 1
         rng_months = f"C{start_row+2}:N{last_data_row+1}"
         rng_totals = f"O{start_row+2}:O{last_data_row+1}"
         
-        # 1. Mapa de Calor (Azul suave) para los meses - Identifica estacionalidad
         ws.conditional_format(rng_months, {
             'type': '3_color_scale',
-            'min_color': '#ffffff', # Blanco
-            'mid_color': '#bfdbfe', # Azul muy claro
-            'max_color': '#3b82f6'  # Azul corporativo
+            'min_color': '#ffffff',
+            'mid_color': '#bfdbfe',
+            'max_color': '#3b82f6'
         })
         
-        # 2. Barras de Datos para el Total - Comparativa visual de tamaño
         ws.conditional_format(rng_totals, {
             'type': 'data_bar',
-            'bar_color': '#f59e0b', # Dorado/Ambar Ferreinox
+            'bar_color': '#f59e0b',
             'bar_solid': True,
         })
         
-        # --- SECCIÓN 5: AJUSTES FINALES DE LAYOUT ---
-        ws.set_column(0, 0, 35) # Ancho Vendedor
-        ws.set_column(1, 1, 12) # Ancho Sparkline
-        ws.set_column(2, 13, 14) # Ancho Meses
-        ws.set_column(14, 14, 18) # Ancho Total
-        ws.set_column(15, 15, 50) # Ancho Comentarios
+        # --- LAYOUT ---
+        ws.set_column(0, 0, 35)
+        ws.set_column(1, 1, 12)
+        ws.set_column(2, 13, 14)
+        ws.set_column(14, 14, 18)
+        ws.set_column(15, 15, 50)
         
-        ws.freeze_panes(start_row + 1, 2) # Congelar encabezados y columnas nombre+sparkline
-        ws.autofilter(start_row, 0, last_data_row, 15) # Filtros automáticos
-        
-        # Insertar Logo (Texto estilizado si no hay imagen) en A1 ya hecho.
-        
+        ws.freeze_panes(start_row + 1, 2)
+        ws.autofilter(start_row, 0, last_data_row, 15)
+    
     return output.getvalue()
 
 # ----------------- EJECUCIÓN PRINCIPAL -----------------
