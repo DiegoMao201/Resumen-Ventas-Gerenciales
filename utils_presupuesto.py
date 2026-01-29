@@ -1,3 +1,7 @@
+# ==============================================================================
+# ARCHIVO: utils_presupuesto.py
+# DESCRIPCIÓN: Lógica de negocio, cálculos estadísticos y reglas de excepción
+# ==============================================================================
 import pandas as pd
 import numpy as np
 import unicodedata
@@ -31,7 +35,7 @@ def proyectar_total_2026(total_2024, total_2025):
 def asignar_presupuesto(df: pd.DataFrame, grupos: dict, total_2026: float) -> pd.DataFrame:
     """
     Calcula el presupuesto anual por vendedor aplicando reglas estadísticas
-    y excepciones puntuales de negocio.
+    y excepciones puntuales de negocio (Reglas de Oro: Jerson, Julian, Pablo).
     """
     # Filtrar años base
     base = df[df["anio"].isin([2024, 2025])]
@@ -91,28 +95,24 @@ def asignar_presupuesto(df: pd.DataFrame, grupos: dict, total_2026: float) -> pd
         presupuesto = row["presupuesto_2026"]
 
         # 1. LEDUYN MELGAREJO ARIAS: Presupuesto fijo mensual -> se multiplica por 12 para el anual
-        if nombre == "LEDUYN MELGAREJO ARIAS":
+        if "LEDUYN MELGAREJO" in nombre:
             return 146_000_000 * 12
 
-        # 2. JERSON ATEHORTUA OLARTE: Si presupuesto < 100M, subir con % cerrado hasta >= 100M
-        if nombre == "JERSON ATEHORTUA OLARTE":
+        # 2. JERSON ATEHORTUA OLARTE: PISO ESTRICTO DE 100 MILLONES
+        if "JERSON ATEHORTUA" in nombre:
             if presupuesto < 100_000_000:
-                for pct in [0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 1.00]:
-                    nuevo = presupuesto * (1 + pct)
-                    if nuevo >= 100_000_000:
-                        return int(nuevo)
-                # Si ni con 100% llega, asigna 100M fijo
-                return 100_000_000
+                return 100_000_000  # Forzar a 100 Millones exactos si dio menos
             return presupuesto
 
         # 3. PABLO CESAR MAFLA BANOL: Aumento del 7% sobre lo calculado
-        if nombre == "PABLO CESAR MAFLA BANOL":
+        if "PABLO CESAR MAFLA" in nombre:
             return presupuesto * 1.07
 
-        # 4. JULIAN MAURICIO ORTIZ GOMEZ: Piso mínimo de 300 Millones
-        if nombre == "JULIAN MAURICIO ORTIZ GOMEZ":
+        # 4. JULIAN MAURICIO ORTIZ GOMEZ: PISO ESTRICTO DE 300 MILLONES
+        if "JULIAN MAURICIO ORTIZ" in nombre:
             if presupuesto < 300_000_000:
-                return 300_000_001
+                return 300_000_000  # Forzar a 300 Millones exactos si dio menos
+            return presupuesto
 
         return presupuesto
 
@@ -134,7 +134,7 @@ def calcular_pesos_mensuales(df_hist: pd.DataFrame, vendedor: str, col_valor: st
 def distribuir_presupuesto_mensual(df_asignado: pd.DataFrame, df_hist: pd.DataFrame) -> pd.DataFrame:
     """
     Distribuye el presupuesto anual mes a mes aplicando estacionalidad
-    y reglas de negocio mensuales específicas.
+    y reglas de negocio mensuales específicas (Ej. Opalo mes 0 -> 45M).
     """
     # Usar 2025 como base de estacionalidad, o el último año disponible
     df_hist_2025 = df_hist[df_hist["anio"] == 2025]
@@ -144,15 +144,15 @@ def distribuir_presupuesto_mensual(df_asignado: pd.DataFrame, df_hist: pd.DataFr
     
     for _, row in df_asignado.iterrows():
         nombre = normalizar_texto(row["nomvendedor"])
-        grupo = row["grupo"]
+        grupo = normalizar_texto(row["grupo"])
         
         # --- EXCEPCIÓN MENSUAL: LEDUYN MELGAREJO ---
         # Debe tener fijo 146m mensual (ignora estacionalidad)
-        if nombre == "LEDUYN MELGAREJO ARIAS":
+        if "LEDUYN MELGAREJO" in nombre:
             for mes_idx in range(1, 13):
                 registros.append({
                     "nomvendedor": row["nomvendedor"],
-                    "grupo": grupo,
+                    "grupo": row["grupo"],
                     "mes": mes_idx,
                     "presupuesto_mensual": 146_000_000
                 })
@@ -165,14 +165,16 @@ def distribuir_presupuesto_mensual(df_asignado: pd.DataFrame, df_hist: pd.DataFr
             valor_mensual = row["presupuesto_2026"] * peso
             
             # --- EXCEPCIÓN MENSUAL: MOSTRADOR OPALO ---
-            # Si el cálculo da 0 (o menor), forzar 45m
-            if nombre == "MOSTRADOR OPALO" or grupo == "MOSTRADOR OPALO":
-                if valor_mensual <= 0:
+            # Si el cálculo da 0 (mes vacío en histórico), forzar 45m
+            # Se aplica si es el grupo OPALO o el vendedor está en OPALO
+            if "OPALO" in grupo or "OPALO" in nombre:
+                # Si el valor es muy bajo (cercano a 0) o 0, asignamos 45M
+                if valor_mensual < 1_000_000: 
                     valor_mensual = 45_000_000
 
             registros.append({
                 "nomvendedor": row["nomvendedor"],
-                "grupo": grupo,
+                "grupo": row["grupo"],
                 "mes": mes_idx,
                 "presupuesto_mensual": valor_mensual
             })
