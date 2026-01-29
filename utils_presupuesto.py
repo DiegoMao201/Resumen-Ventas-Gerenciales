@@ -88,40 +88,38 @@ def asignar_presupuesto(df: pd.DataFrame, grupos: dict, total_2026: float) -> pd
     # Asignación de grupos
     agg["grupo"] = agg["nomvendedor"].apply(lambda v: construir_grupo(v, grupos))
 
-    # ==============================================================================
-    # REGLAS DE ORO (EXCEPCIONES ANUALES) - LÓGICA BLINDADA
-    # ==============================================================================
-    def aplicar_reglas_anuales(row):
+    # --- REGLAS DE ORO (EXCEPCIONES ANUALES) ---
+    def aplicar_reglas_finales(row):
         nombre = normalizar_texto(row["nomvendedor"])
         presupuesto = row["presupuesto_2026"]
 
-        # 1. LEDUYN MELGAREJO ARIAS: Fijo Mensual x 12
+        # LEDUYN MELGAREJO ARIAS: Fijo Mensual x 12
         if "LEDUYN" in nombre and "MELGAREJO" in nombre:
             return 146_000_000 * 12
 
-        # 2. JERSON ATEHORTUA OLARTE: Si presupuesto < 100M, subir con % cerrado hasta >= 100M
+        # JERSON ATEHORTUA OLARTE: Si presupuesto < 100M, subir con % cerrado hasta >= 100M
         if "JERSON" in nombre and "ATEHORTUA" in nombre:
             if presupuesto < 100_000_000:
-                for pct in [0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 1.00, 1.10, 1.20, 1.30, 1.40, 1.50, 1.60, 1.70]:
+                for pct in [0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 1.00, 1.10, 1.20, 1.30, 1.40, 1.50, 1.60, 1.70, 2.00]:
                     nuevo = presupuesto * (1 + pct)
                     if nuevo >= 100_000_000:
                         return int(nuevo)
-                # Si ni con 100% llega, asigna 100M fijo
                 return 100_000_000
             return presupuesto
 
-        # 3. PABLO CESAR MAFLA BANOL: +7%
+        # PABLO CESAR MAFLA BANOL: +7%
         if "PABLO" in nombre and "MAFLA" in nombre:
             return presupuesto * 1.07
 
-        # 4. JULIAN MAURICIO ORTIZ GOMEZ: Piso mínimo de 300 Millones
+        # JULIAN MAURICIO ORTIZ GOMEZ: Piso mínimo de 300 Millones
         if "JULIAN" in nombre and "ORTIZ" in nombre:
             if presupuesto < 300_000_000:
                 return 300_000_000
 
         return presupuesto
 
-    agg["presupuesto_2026"] = agg.apply(aplicar_reglas_anuales, axis=1)
+    # APLICA LAS REGLAS FINALES DESPUÉS DEL REESCALADO
+    agg["presupuesto_2026"] = agg.apply(aplicar_reglas_finales, axis=1)
 
     return agg
 
