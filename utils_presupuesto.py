@@ -90,9 +90,10 @@ def asignar_presupuesto(df: pd.DataFrame, grupos: dict, total_2026: float) -> pd
 
     # --- REGLAS DE ORO (EXCEPCIONES ANUALES) ---
     def aplicar_reglas_finales(row):
-        nombre = row["nomvendedor"]  # Ya normalizado antes de entrar aquí
+        nombre = row["nomvendedor"]
         presupuesto = row["presupuesto_2026"]
-
+        if "JERSON" in nombre:
+            print("DEBUG JERSON:", nombre, presupuesto)
         # LEDUYN MELGAREJO ARIAS: Fijo Mensual x 12
         if "LEDUYN" in nombre and "MELGAREJO" in nombre:
             return 146_000_000 * 12
