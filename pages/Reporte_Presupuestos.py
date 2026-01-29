@@ -42,6 +42,10 @@ VENDEDORES_EXCLUIR = [
 ]
 VENDEDORES_EXCLUIR_NORM = [utils_presupuesto.normalizar_texto(v) for v in VENDEDORES_EXCLUIR]
 
+# Excluir solo de la vista/tabla y del PDF, pero NO del cálculo general
+EXCLUIR_PDF = ["", "SIN VENDEDOR"]
+EXCLUIR_PDF_NORM = [utils_presupuesto.normalizar_texto(v) for v in EXCLUIR_PDF]
+
 st.set_page_config(page_title="Generador de Acuerdos 2026", page_icon="📄", layout="centered")
 
 # --- FUNCIONES DE CARGA DE DATOS ---
@@ -219,8 +223,39 @@ def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf, df_historico)
     total_compania = df_mensual_unificado['presupuesto_mensual'].sum()
     pdf.draw_cover_page(total_compania)
 
-    mapeo_meses = {1:"Enero", 2:"Febrero", 3:"Marzo", 4:"Abril", 5:"Mayo", 6:"Junio", 7:"Julio", 8:"Agosto", 9:"Septiembre", 10:"Octubre", 11:"Noviembre", 12:"Diciembre"}
+    # --- VISTA GERENCIAL ---
+    pdf.add_page()
+    pdf.section_title("VISTA GERENCIAL: PRESUPUESTO ANUAL POR VENDEDOR/GRUPO")
+    pdf.set_font('Helvetica', '', 10)
+    pdf.multi_cell(0, 5, "Resumen ejecutivo de metas comerciales 2026. Incluye presupuesto anual, crecimiento porcentual y participación sobre el total.")
 
+    # Filtra solo para mostrar (no afecta totales)
+    df_vista = df_resumen_pdf[~df_resumen_pdf['vendedor_unificado'].apply(utils_presupuesto.normalizar_texto).isin(EXCLUIR_PDF_NORM)].copy()
+    widths = [70, 50, 40, 40]
+    pdf.table_header(['Vendedor / Grupo', 'Presupuesto 2026', '% Crecimiento', '% Participación'], widths)
+    fill = False
+    for _, row in df_vista.iterrows():
+        nombre = row['vendedor_unificado']
+        valor = row['presupuesto_mensual']
+        crecimiento_pct = row['crecimiento_pct']
+        participacion = (valor / total_compania * 100) if total_compania > 0 else 0
+        pdf.table_row([
+            f"  {nombre}",
+            f"$ {valor:,.0f}",
+            f"{crecimiento_pct:.1f}%" if not np.isnan(crecimiento_pct) else "N/A",
+            f"{participacion:.1f}%"
+        ], widths, fill)
+        fill = not fill
+    pdf.set_font('Helvetica', 'B', 10)
+    pdf.set_fill_color(30, 58, 138)
+    pdf.set_text_color(255, 255, 255)
+    pdf.cell(70, 10, '  TOTAL GENERAL', 0, 0, 'L', 1)
+    pdf.cell(50, 10, f"$ {total_compania:,.0f}", 0, 0, 'R', 1)
+    pdf.cell(40, 10, '', 0, 0, 'C', 1)
+    pdf.cell(40, 10, '100.0%', 0, 1, 'C', 1)
+    pdf.ln(8)
+
+    # --- VENTAS 2025 POR MES ---
     for _, row in df_resumen_pdf.iterrows():
         nombre = row['vendedor_unificado']
         df_v = df_mensual_unificado[df_mensual_unificado['vendedor_unificado'] == nombre].sort_values('mes')
@@ -268,6 +303,11 @@ def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf, df_historico)
         pdf.table_header(['MES', 'META DE VENTA', '% CRECIMIENTO', 'ACUMULADO'], widths_ind)
         acumulado = 0
         fill = False
+
+        # --- Obtener ventas 2025 por mes ---
+        mapeo_meses = {1:"Enero", 2:"Febrero", 3:"Marzo", 4:"Abril", 5:"Mayo", 6:"Junio", 7:"Julio", 8:"Agosto", 9:"Septiembre", 10:"Octubre", 11:"Noviembre", 12:"Diciembre"}
+        ventas_2025_mes = df_hist_2025.groupby('mes')['valor_venta'].sum().reindex(range(1, 13), fill_value=0)
+
         for _, row_mes in df_v.iterrows():
             mes = row_mes['mes']
             mes_nombre = mapeo_meses.get(mes, str(mes))
@@ -285,6 +325,7 @@ def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf, df_historico)
                 f"$ {acumulado:,.0f}"
             ], widths_ind, fill)
             fill = not fill
+
         pdf.set_font('Helvetica', 'B', 10)
         pdf.set_fill_color(30, 58, 138)
         pdf.set_text_color(255, 255, 255)
