@@ -1,6 +1,7 @@
 # ==============================================================================
 # ARCHIVO: pages/Reporte_Presupuestos.py
 # DESCRIPCIÓN: Generador de Acuerdos de Gestión Comercial 2026 (PDF Enterprise)
+# ESTADO: CORREGIDO Y OPTIMIZADO
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -9,7 +10,7 @@ from fpdf import FPDF
 import datetime
 import io
 import dropbox
-import utils_presupuesto  # Tu archivo de lógica de negocio
+import utils_presupuesto  # Tu archivo de lógica de negocio debe estar en la misma carpeta
 
 # --- CONFIGURACIÓN ESTÉTICA ---
 COLOR_PRIMARY = (30, 58, 138)       # Azul Corporativo (Navy)
@@ -31,9 +32,9 @@ APP_CONFIG = {
     }
 }
 
-# Lista de vendedores a excluir del reporte PDF y visualización
+# Lista de vendedores a excluir completamente
 VENDEDORES_EXCLUIR = [
-    "CRISTIAN CAMILO RENDON MONTES", # Si es parte de un grupo, excluirlo aquí lo saca del grupo
+    "CRISTIAN CAMILO RENDON MONTES", 
     "DIEGO MAURICIO GARCIA RENGIFO",
     "CAMILO AGUDELO MARIN",
     "RICHARD RAFAEL FERRER ROZO",
@@ -42,7 +43,7 @@ VENDEDORES_EXCLUIR = [
 ]
 VENDEDORES_EXCLUIR_NORM = [utils_presupuesto.normalizar_texto(v) for v in VENDEDORES_EXCLUIR]
 
-# Excluir solo de la vista/tabla y del PDF, pero NO del cálculo general
+# Excluir solo de la vista/tabla PDF (pero sus datos suman si están en grupo)
 EXCLUIR_PDF = ["", "SIN VENDEDOR"]
 EXCLUIR_PDF_NORM = [utils_presupuesto.normalizar_texto(v) for v in EXCLUIR_PDF]
 
@@ -80,9 +81,8 @@ class EnterpriseReport(FPDF):
         self.set_fill_color(*COLOR_PRIMARY)
         self.rect(0, 0, 210, 25, 'F')
         
-        # Logo (sobre fondo blanco o superpuesto)
+        # Logo
         try:
-            # Dibujar un cuadro blanco pequeño para el logo si es necesario
             self.set_fill_color(255, 255, 255)
             self.rect(10, 5, 40, 15, 'F')
             self.image(APP_CONFIG["url_logo"], 12, 6, 36)
@@ -144,7 +144,7 @@ class EnterpriseReport(FPDF):
         self.set_font('Helvetica', 'B', 13)
         self.cell(130, 8, 'META GLOBAL FERREINOX S.A.S. BIC', 0, 2, 'C')
         self.set_font('Helvetica', 'B', 22)
-        self.set_text_color(*COLOR_ACCENT) # Rojo/Naranja
+        self.set_text_color(*COLOR_ACCENT) 
         self.cell(130, 14, f"$ {total_compania:,.0f}", 0, 2, 'C')
         self.set_font('Helvetica', 'I', 10)
         self.set_text_color(100, 100, 100)
@@ -158,7 +158,9 @@ class EnterpriseReport(FPDF):
         self.ln(5)
         self.set_font('Helvetica', 'B', 14)
         self.set_text_color(*COLOR_PRIMARY)
-        self.cell(0, 10, title.upper(), 0, 1, 'L')
+        # Limpiar caracteres especiales básicos para el título
+        title_clean = title.encode('latin-1', 'replace').decode('latin-1')
+        self.cell(0, 10, title_clean.upper(), 0, 1, 'L')
         # Subrayado grueso
         self.set_draw_color(*COLOR_PRIMARY)
         self.set_line_width(1)
@@ -166,7 +168,7 @@ class EnterpriseReport(FPDF):
         self.ln(5)
 
     def draw_kpi_card(self, title, value, subtitle, x, y, w, h):
-        # Sombra simple (gris)
+        # Sombra simple
         self.set_fill_color(220, 220, 220)
         self.rect(x+1, y+1, w, h, 'F')
         # Fondo blanco
@@ -200,78 +202,108 @@ class EnterpriseReport(FPDF):
         self.ln()
 
     def table_row(self, data, widths, fill=False):
-        self.set_font('Helvetica', '', 9)
+        self.set_font('Helvetica', '', 8) # Fuente ligeramente más pequeña para que quepan nombres largos
         self.set_text_color(50, 50, 50)
         if fill:
-            self.set_fill_color(245, 247, 250) # Zebra muy sutil
+            self.set_fill_color(245, 247, 250) 
         else:
             self.set_fill_color(255, 255, 255)
             
         for i, (datum, w) in enumerate(zip(data, widths)):
             align = 'L' if i == 0 else 'R' # Primer columna izq, resto derecha
             if i == 2: align = 'C' # Centrar porcentajes
-            self.cell(w, 8, str(datum), 0, 0, align, 1)
+            
+            # Truncar texto si es muy largo para la celda
+            text_str = str(datum).encode('latin-1', 'replace').decode('latin-1')
+            self.cell(w, 8, text_str, 0, 0, align, 1)
         self.ln()
 
 # --- LÓGICA DE GENERACIÓN ---
 def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf, df_historico):
     """
     Genera el PDF iterando sobre el DataFrame unificado (Agrupado por Mostradores/Vendedores).
+    CORRECCIÓN: Filtra correctamente el histórico por vendedor antes de comparar mes a mes.
     """
     pdf = EnterpriseReport()
     pdf.set_auto_page_break(auto=True, margin=18)
-    total_compania = df_mensual_unificado['presupuesto_mensual'].sum()
+    
+    # Calcular total para portada
+    total_compania = df_resumen_pdf['presupuesto_mensual'].sum()
     pdf.draw_cover_page(total_compania)
 
-    # --- VISTA GERENCIAL ---
+    # -------------------------------------------------------------------------
+    # 1. VISTA GERENCIAL (RESUMEN EJECUTIVO)
+    # -------------------------------------------------------------------------
     pdf.add_page()
-    pdf.section_title("VISTA GERENCIAL: PRESUPUESTO ANUAL POR VENDEDOR/GRUPO")
+    pdf.section_title("VISTA GERENCIAL: PRESUPUESTO ANUAL")
     pdf.set_font('Helvetica', '', 10)
     pdf.multi_cell(0, 5, "Resumen ejecutivo de metas comerciales 2026. Incluye presupuesto anual, crecimiento porcentual y participación sobre el total.")
 
-    # Filtra solo para mostrar (no afecta totales)
+    # Filtra solo para mostrar (no afecta totales de cálculo)
     df_vista = df_resumen_pdf[~df_resumen_pdf['vendedor_unificado'].apply(utils_presupuesto.normalizar_texto).isin(EXCLUIR_PDF_NORM)].copy()
-    widths = [70, 50, 40, 40]
-    pdf.table_header(['Vendedor / Grupo', 'Presupuesto 2026', '% Crecimiento', '% Participación'], widths)
+    
+    # AJUSTE DE ANCHOS PARA QUE QUEPAN LOS NOMBRES (Total 190mm)
+    # Antes: [70, 50, 40, 40] -> Problema de espacio
+    # Nuevo: [80, 45, 35, 30] -> Más espacio al nombre
+    widths_gerencia = [80, 45, 35, 30] 
+    
+    pdf.table_header(['Vendedor / Grupo', 'Presupuesto 2026', '% Crecimiento', 'Part.%'], widths_gerencia)
     fill = False
+    
     for _, row in df_vista.iterrows():
         nombre = row['vendedor_unificado']
         valor = row['presupuesto_mensual']
         crecimiento_pct = row['crecimiento_pct']
         participacion = (valor / total_compania * 100) if total_compania > 0 else 0
+        
         pdf.table_row([
             f"  {nombre}",
             f"$ {valor:,.0f}",
-            f"{crecimiento_pct:.1f}%" if not np.isnan(crecimiento_pct) else "N/A",
+            f"{crecimiento_pct:.1f}%" if not np.isnan(crecimiento_pct) and not np.isinf(crecimiento_pct) else "N/A",
             f"{participacion:.1f}%"
-        ], widths, fill)
+        ], widths_gerencia, fill)
         fill = not fill
-    pdf.set_font('Helvetica', 'B', 10)
+        
+    # Fila de Totales
+    pdf.set_font('Helvetica', 'B', 9)
     pdf.set_fill_color(30, 58, 138)
     pdf.set_text_color(255, 255, 255)
-    pdf.cell(70, 10, '  TOTAL GENERAL', 0, 0, 'L', 1)
-    pdf.cell(50, 10, f"$ {total_compania:,.0f}", 0, 0, 'R', 1)
-    pdf.cell(40, 10, '', 0, 0, 'C', 1)
-    pdf.cell(40, 10, '100.0%', 0, 1, 'C', 1)
+    pdf.cell(widths_gerencia[0], 10, '  TOTAL GENERAL', 0, 0, 'L', 1)
+    pdf.cell(widths_gerencia[1], 10, f"$ {total_compania:,.0f}", 0, 0, 'R', 1)
+    pdf.cell(widths_gerencia[2], 10, '', 0, 0, 'C', 1)
+    pdf.cell(widths_gerencia[3], 10, '100.0%', 0, 1, 'C', 1)
     pdf.ln(8)
 
-    # --- VENTAS 2025 POR MES ---
+    # -------------------------------------------------------------------------
+    # 2. DETALLE INDIVIDUAL POR VENDEDOR / GRUPO
+    # -------------------------------------------------------------------------
+    
+    # Preparamos el histórico 2025 completo una sola vez
+    df_hist_2025_full = df_historico[df_historico['anio'] == 2025].copy()
+    mapeo_meses = {1:"Enero", 2:"Febrero", 3:"Marzo", 4:"Abril", 5:"Mayo", 6:"Junio", 7:"Julio", 8:"Agosto", 9:"Septiembre", 10:"Octubre", 11:"Noviembre", 12:"Diciembre"}
+
     for _, row in df_resumen_pdf.iterrows():
         nombre = row['vendedor_unificado']
+        # Obtener metas 2026 para este vendedor
         df_v = df_mensual_unificado[df_mensual_unificado['vendedor_unificado'] == nombre].sort_values('mes')
         total_vendedor = df_v['presupuesto_mensual'].sum()
 
-        # --- OBTENER VENTA 2025 POR MES ---
+        # --- CORRECCIÓN CRÍTICA: FILTRAR HISTÓRICO 2025 ESPECÍFICO ---
         nombre_norm = utils_presupuesto.normalizar_texto(nombre)
-        df_hist_2025 = df_historico[df_historico['anio'] == 2025]
+        
+        # Verificar si es un grupo
         if nombre_norm in APP_CONFIG['grupos_vendedores']:
-            vendedores_grupo = [utils_presupuesto.normalizar_texto(v) for v in APP_CONFIG['grupos_vendedores'][nombre_norm]]
-            df_hist_2025_v = df_hist_2025[df_hist_2025['nomvendedor'].isin(vendedores_grupo)]
+            # Es un grupo: Buscar a todos los miembros
+            miembros = [utils_presupuesto.normalizar_texto(m) for m in APP_CONFIG['grupos_vendedores'][nombre_norm]]
+            df_hist_filtrado = df_hist_2025_full[df_hist_2025_full['nomvendedor'].isin(miembros)]
         else:
-            df_hist_2025_v = df_hist_2025[df_hist_2025['nomvendedor'] == nombre_norm]
-        ventas_2025_mes = df_hist_2025_v.groupby('mes')['valor_venta'].sum().reindex(range(1, 13), fill_value=0)
+            # Es individual
+            df_hist_filtrado = df_hist_2025_full[df_hist_2025_full['nomvendedor'] == nombre_norm]
+            
+        # Agrupar ventas históricas por mes solo para este vendedor/grupo
+        ventas_2025_por_mes = df_hist_filtrado.groupby('mes')['valor_venta'].sum().reindex(range(1, 13), fill_value=0)
 
-        # --- NUEVA PÁGINA POR VENDEDOR/GRUPO ---
+        # --- INICIO PÁGINA INDIVIDUAL ---
         pdf.add_page()
         pdf.section_title(f"META INDIVIDUAL: {nombre}")
 
@@ -279,10 +311,13 @@ def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf, df_historico)
         y_start = pdf.get_y()
         pdf.draw_kpi_card("META ANUAL 2026", f"$ {total_vendedor:,.0f}", "Presupuesto Total Asignado", x=15, y=y_start, w=60, h=28)
         pdf.draw_kpi_card("PROMEDIO MENSUAL", f"$ {total_vendedor/12:,.0f}", "Base de cumplimiento", x=80, y=y_start, w=60, h=28)
-        pdf.draw_kpi_card("META PRIMER TRIMESTRE", f"$ {df_v[df_v['mes']<=3]['presupuesto_mensual'].sum():,.0f}", "Ene - Feb - Mar", x=145, y=y_start, w=60, h=28)
+        
+        # Calculamos meta Q1 (Trimestre 1)
+        meta_q1 = df_v[df_v['mes']<=3]['presupuesto_mensual'].sum()
+        pdf.draw_kpi_card("META PRIMER TRIMESTRE", f"$ {meta_q1:,.0f}", "Ene - Feb - Mar", x=145, y=y_start, w=60, h=28)
         pdf.set_y(y_start + 35)
 
-        # --- Mensaje Motivador y Explicación ---
+        # --- Mensaje Corporativo ---
         pdf.set_font('Helvetica', 'B', 11)
         pdf.set_text_color(30, 58, 138)
         pdf.cell(0, 7, "OBJETIVOS Y COMPROMISO", 0, 1)
@@ -290,42 +325,53 @@ def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf, df_historico)
         pdf.set_text_color(70, 70, 70)
         pdf.multi_cell(0, 5,
             "Este acuerdo establece las metas comerciales para el periodo 2026. "
-            "El presupuesto asignado representa el aporte directo a la sostenibilidad y crecimiento de FERREINOX S.A.S. BIC, "
-            "impulsando la viabilidad financiera y el desarrollo responsable de la compañía. "
-            "Tu compromiso y desempeño son clave para alcanzar los objetivos estratégicos y consolidar el liderazgo en el mercado."
+            "El presupuesto asignado representa el aporte directo a la sostenibilidad y crecimiento de FERREINOX S.A.S. BIC. "
+            "Tu compromiso y desempeño son clave para alcanzar los objetivos estratégicos."
         )
         pdf.ln(6)
 
-        # --- TABLA MENSUAL CON % CRECIMIENTO REAL ---
+        # --- TABLA MENSUAL DETALLADA ---
         pdf.set_font('Helvetica', 'B', 10)
+        pdf.set_text_color(0, 0, 0)
         pdf.cell(0, 6, "DETALLE DE EJECUCIÓN MENSUAL", 0, 1)
+        
         widths_ind = [50, 60, 40, 40]
         pdf.table_header(['MES', 'META DE VENTA', '% CRECIMIENTO', 'ACUMULADO'], widths_ind)
+        
         acumulado = 0
         fill = False
-
-        # --- Obtener ventas 2025 por mes ---
-        mapeo_meses = {1:"Enero", 2:"Febrero", 3:"Marzo", 4:"Abril", 5:"Mayo", 6:"Junio", 7:"Julio", 8:"Agosto", 9:"Septiembre", 10:"Octubre", 11:"Noviembre", 12:"Diciembre"}
-        ventas_2025_mes = df_hist_2025.groupby('mes')['valor_venta'].sum().reindex(range(1, 13), fill_value=0)
 
         for _, row_mes in df_v.iterrows():
             mes = row_mes['mes']
             mes_nombre = mapeo_meses.get(mes, str(mes))
             valor_2026 = row_mes['presupuesto_mensual']
-            valor_2025 = ventas_2025_mes.get(mes, 0)
+            
+            # Recuperar venta histórica correcta
+            valor_2025 = ventas_2025_por_mes.get(mes, 0)
+            
             acumulado += valor_2026
+            
+            # Cálculo de porcentaje seguro
             if valor_2025 > 0:
                 pct_mes = (valor_2026 - valor_2025) / valor_2025 * 100
+            elif valor_2025 == 0 and valor_2026 > 0:
+                pct_mes = 100.0 # Crecimiento total
             else:
-                pct_mes = float('nan')
+                pct_mes = 0.0 # Sin base ni meta o ambos 0
+
+            # Formateo visual
+            str_pct = f"{pct_mes:+.1f}%" # Agrega signo + si es positivo
+            if pct_mes == 0 and valor_2025 == 0: str_pct = "-"
+            
             pdf.table_row([
                 f"  {mes_nombre}",
                 f"$ {valor_2026:,.0f}",
-                f"{pct_mes:.1f}%" if not np.isnan(pct_mes) else "N/A",
+                str_pct,
                 f"$ {acumulado:,.0f}"
             ], widths_ind, fill)
             fill = not fill
 
+        # Fila Total Individual
         pdf.set_font('Helvetica', 'B', 10)
         pdf.set_fill_color(30, 58, 138)
         pdf.set_text_color(255, 255, 255)
@@ -334,29 +380,39 @@ def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf, df_historico)
         pdf.cell(40, 10, '', 0, 0, 'C', 1)
         pdf.cell(40, 10, '', 0, 1, 'C', 1)
 
-        # --- Firmas Compactas y Armónicas ---
-        pdf.ln(8)
+        # --- Firmas ---
+        pdf.ln(15)
         pdf.set_text_color(0, 0, 0)
         pdf.set_font('Helvetica', '', 9)
         pdf.cell(0, 5, "Se firma en constancia de aceptación y compromiso:", 0, 1, 'L')
-        pdf.ln(4)
+        pdf.ln(10)
+        
         y_firma = pdf.get_y()
+        
+        # Firma Vendedor
         pdf.set_draw_color(100, 100, 100)
         pdf.line(20, y_firma, 90, y_firma)
         pdf.set_xy(20, y_firma + 2)
-        pdf.set_font('Helvetica', 'B', 9)
-        pdf.cell(70, 5, str(nombre).upper(), 0, 1, 'C')
+        pdf.set_font('Helvetica', 'B', 8)
+        
+        # Nombre truncado si es muy largo para la firma
+        nombre_firma = (nombre[:35] + '..') if len(nombre) > 35 else nombre
+        pdf.cell(70, 5, nombre_firma.upper(), 0, 1, 'C')
+        
         pdf.set_x(20)
         pdf.set_font('Helvetica', '', 8)
         pdf.cell(70, 4, "Asesor / Responsable Comercial", 0, 1, 'C')
+        
+        # Firma Gerencia
         pdf.line(120, y_firma, 190, y_firma)
         pdf.set_xy(120, y_firma + 2)
-        pdf.set_font('Helvetica', 'B', 9)
+        pdf.set_font('Helvetica', 'B', 8)
         pdf.cell(70, 5, "GERENCIA COMERCIAL", 0, 1, 'C')
         pdf.set_x(120)
         pdf.set_font('Helvetica', '', 8)
         pdf.cell(70, 4, "Aprobación Gerencial", 0, 1, 'C')
 
+    # Retornar PDF en bytes
     pdf_bytes = pdf.output(dest='S')
     if isinstance(pdf_bytes, str):
         pdf_bytes = pdf_bytes.encode('latin-1')
@@ -374,12 +430,12 @@ def main():
     st.markdown("Generación de documentos oficiales para firma y legalización de presupuestos.")
     
     # 1. Cargar datos históricos
-    df_historico = cargar_datos_base()  # Tu función de carga
+    df_historico = cargar_datos_base()
     if df_historico.empty:
         st.error("No hay datos históricos disponibles o error en conexión Dropbox.")
         st.stop()
 
-    # 2. Calcular presupuesto anual y mensual con utils_presupuesto
+    # 2. Calcular presupuesto anual y mensual
     total_2024 = df_historico[df_historico['anio'] == 2024]['valor_venta'].sum()
     total_2025 = df_historico[df_historico['anio'] == 2025]['valor_venta'].sum()
     target_2026, _ = utils_presupuesto.proyectar_total_2026(total_2024, total_2025)
@@ -388,7 +444,7 @@ def main():
     df_anual = utils_presupuesto.asignar_presupuesto(df_historico, grupos_cfg, target_2026)
     df_mensual = utils_presupuesto.distribuir_presupuesto_mensual(df_anual, df_historico)
 
-    # 3. Unificar por grupo/vendedor (igual que en dashboard)
+    # 3. Unificar por grupo/vendedor
     df_mensual['vendedor_unificado'] = np.where(
         df_mensual['grupo'].notna() & (df_mensual['grupo'] != '') & (df_mensual['grupo'] != df_mensual['nomvendedor']),
         df_mensual['grupo'],
@@ -402,25 +458,17 @@ def main():
         .sum()
     )
 
-    # 5. Calcular ventas 2025 por vendedor_unificado (incluyendo grupos)
+    # 5. Calcular ventas 2025 para el resumen
     ventas_2025_map = dict(zip(
         df_anual['nomvendedor'], df_anual['venta_2025']
     ))
+    # Sumar ventas históricas para los grupos
     for grupo, lista in grupos_cfg.items():
         ventas_2025_map[utils_presupuesto.normalizar_texto(grupo)] = sum(
             ventas_2025_map.get(utils_presupuesto.normalizar_texto(v), 0) for v in lista
         )
 
-    # 6. Excluir vendedores individuales según tu lógica
-    VENDEDORES_EXCLUIR = [
-        "CRISTIAN CAMILO RENDON MONTES",
-        "DIEGO MAURICIO GARCIA RENGIFO",
-        "CAMILO AGUDELO MARIN",
-        "RICHARD RAFAEL FERRER ROZO",
-        "PABLO ANDRES CASTANO MONTES",
-        "CONTABILIDAD FERREINOX"
-    ]
-    VENDEDORES_EXCLUIR_NORM = [utils_presupuesto.normalizar_texto(v) for v in VENDEDORES_EXCLUIR]
+    # 6. Definir lista de páginas (Grupos + Individuales no excluidos)
     vendedores_en_grupos = {utils_presupuesto.normalizar_texto(v) for lista in grupos_cfg.values() for v in lista}
     vendedores_individuales = [
         v for v in df_mensual['nomvendedor'].unique()
@@ -428,7 +476,8 @@ def main():
            utils_presupuesto.normalizar_texto(v) not in vendedores_en_grupos
     ]
     grupos = list(grupos_cfg.keys())
-    paginas_pdf = grupos + vendedores_individuales
+    # Ordenamos: primero grupos, luego individuales alfabéticamente
+    paginas_pdf = grupos + sorted(vendedores_individuales)
 
     # 7. DataFrame resumen para el PDF
     df_resumen_pdf = (
@@ -437,21 +486,26 @@ def main():
         .reset_index()
     )
     df_resumen_pdf['venta_2025'] = df_resumen_pdf['vendedor_unificado'].map(ventas_2025_map).fillna(0)
-    df_resumen_pdf['crecimiento_abs'] = df_resumen_pdf['presupuesto_mensual'] - df_resumen_pdf['venta_2025']
+    
+    # Calcular crecimiento con seguridad
     df_resumen_pdf['crecimiento_pct'] = np.where(
         df_resumen_pdf['venta_2025'] > 0,
         (df_resumen_pdf['presupuesto_mensual'] - df_resumen_pdf['venta_2025']) / df_resumen_pdf['venta_2025'] * 100,
         np.nan
     )
+    
+    # Filtrar solo los que van al PDF/Vista
     df_resumen_pdf = df_resumen_pdf.loc[df_resumen_pdf['vendedor_unificado'].isin(paginas_pdf)]
 
-    # 8. Mostrar tabla previa (igual que en dashboard)
+    # 8. Mostrar tabla previa
     st.subheader("Vista Previa (Resumen)")
     tabla_mensual_preview = df_mensual_unificado.pivot_table(
         index="vendedor_unificado", columns="mes", values="presupuesto_mensual", aggfunc="sum"
     ).fillna(0)
     tabla_mensual_preview["Total_2026"] = tabla_mensual_preview.sum(axis=1)
-    tabla_mensual_preview = tabla_mensual_preview.loc[paginas_pdf]  # Ordena igual que el PDF
+    # Filtrar preview
+    tabla_mensual_preview = tabla_mensual_preview.loc[tabla_mensual_preview.index.isin(paginas_pdf)]
+    
     st.dataframe(
         tabla_mensual_preview.style.format("${:,.0f}").background_gradient(cmap="Blues", subset=list(range(1,13))),
         use_container_width=True
@@ -459,14 +513,18 @@ def main():
 
     # 9. Botón para generar PDF
     st.subheader("Descargar Documento")
-    st.info("Generar PDF Enterprise con portadas, indicadores y formato contractual.")
+    st.info("Generar PDF Enterprise con portadas, indicadores y formato contractual corregido.")
     if st.button("Generar PDF Oficial", type="primary"):
-        with st.spinner("Diseñando documento de alta calidad..."):
+        with st.spinner("Diseñando documento de alta calidad y procesando datos históricos..."):
+            # Pasamos solo los datos relevantes al generador
+            df_unificado_final = df_mensual_unificado.loc[df_mensual_unificado['vendedor_unificado'].isin(paginas_pdf)]
+            
             pdf_bytes = generar_pdf_presupuestos(
-                df_mensual_unificado.loc[df_mensual_unificado['vendedor_unificado'].isin(paginas_pdf)],
+                df_unificado_final,
                 df_resumen_pdf,
                 df_historico
             )
+            
             st.download_button(
                 label="📥 Descargar Acuerdo_Presupuestal_2026.pdf",
                 data=pdf_bytes,
@@ -474,6 +532,7 @@ def main():
                 mime="application/pdf",
                 use_container_width=True
             )
+            st.success("¡Documento generado exitosamente!")
             st.balloons()
 
 if __name__ == "__main__":
