@@ -254,15 +254,15 @@ def generar_pdf_presupuestos(df_mensual):
     vendedores_unicos = df_mensual['nomvendedor'].unique()
     mapeo_meses = {1:"Enero", 2:"Febrero", 3:"Marzo", 4:"Abril", 5:"Mayo", 6:"Junio", 7:"Julio", 8:"Agosto", 9:"Septiembre", 10:"Octubre", 11:"Noviembre", 12:"Diciembre"}
 
-    for vendedor in vendedores_unicos:
+    for nombre in vendedores_unicos:
         pdf.add_page()
         
         # Datos Vendedor
-        df_v = df_mensual[df_mensual['nomvendedor'] == vendedor].sort_values('mes')
+        df_v = df_mensual[df_mensual['nomvendedor'] == nombre].sort_values('mes')
         total_vendedor = df_v['presupuesto_mensual'].sum()
         
         # Encabezado Personalizado
-        pdf.section_title(f"META INDIVIDUAL: {vendedor}")
+        pdf.section_title(f"META INDIVIDUAL: {nombre}")
         
         # Cards de Resumen Rápido (KPIs)
         y_start = pdf.get_y()
@@ -273,7 +273,7 @@ def generar_pdf_presupuestos(df_mensual):
         q1_val = df_v[df_v['mes'].isin([1,2,3])]['presupuesto_mensual'].sum()
         pdf.draw_kpi_card(140, y_start, 60, 28, "META PRIMER TRIMESTRE", f"$ {q1_val:,.0f}", "Ene - Feb - Mar")
         
-        pdf.ln(35)
+        pdf.ln(15)
         
         # Texto Contractual
         pdf.set_font('Helvetica', 'B', 10)
@@ -320,7 +320,7 @@ def generar_pdf_presupuestos(df_mensual):
         pdf.cell(80, 10, '', 0, 1, 'C', 1)
         
         # Sección de Firmas (Footer visual de la página)
-        pdf.ln(25)
+        pdf.ln(15)
         pdf.set_text_color(0, 0, 0)
         pdf.set_font('Helvetica', '', 9)
         pdf.cell(0, 5, "Se firma en constancia de aceptación y compromiso:", 0, 1, 'L')
@@ -330,22 +330,23 @@ def generar_pdf_presupuestos(df_mensual):
         
         # Firma 1
         pdf.set_draw_color(100, 100, 100)
-        pdf.line(20, y_sig, 90, y_sig)
-        pdf.set_xy(20, y_sig + 2)
+        y_firma = pdf.get_y()
+        pdf.line(20, y_firma, 90, y_firma)
+        pdf.set_xy(20, y_firma + 2)
         pdf.set_font('Helvetica', 'B', 9)
-        pdf.cell(70, 5, str(vendedor).upper(), 0, 1, 'C')
+        pdf.cell(70, 5, str(nombre).upper(), 0, 1, 'C')
         pdf.set_x(20)
         pdf.set_font('Helvetica', '', 8)
         pdf.cell(70, 4, "Asesor / Responsable Comercial", 0, 1, 'C')
-        
+
         # Firma 2
-        pdf.line(120, y_sig, 190, y_sig)
-        pdf.set_xy(120, y_sig + 2)
+        pdf.line(120, y_firma, 190, y_firma)
+        pdf.set_xy(120, y_firma + 2)
         pdf.set_font('Helvetica', 'B', 9)
-        pdf.cell(70, 5, "GERENCIA GENERAL", 0, 1, 'C')
+        pdf.cell(70, 5, "GERENCIA COMERCIAL", 0, 1, 'C')
         pdf.set_x(120)
         pdf.set_font('Helvetica', '', 8)
-        pdf.cell(70, 4, "FERREINOX S.A.S. BIC", 0, 1, 'C')
+        pdf.cell(70, 4, "Aprobación Gerencial", 0, 1, 'C')
 
     # --- SOLUCIÓN DEL ERROR CRÍTICO Y RETORNO DE BYTES ---
     # FPDF output(dest='S') devuelve string en versiones 1.7.x
