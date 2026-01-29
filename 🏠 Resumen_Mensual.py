@@ -1,6 +1,6 @@
 # ==============================================================================
 # SCRIPT COMPLETO Y DEFINITIVO PARA: 🏠 Resumen Mensual.py
-# VERSIÓN: CORREGIDA Y OPTIMIZADA (Para Producción)
+# VERSIÓN: DINÁMICA CON UTILS_PRESUPUESTO (Ventas Automáticas / Cartera Estática)
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -15,6 +15,9 @@ import datetime
 import calendar
 import functools
 import hashlib
+
+# Importamos tu módulo de utilidades de presupuesto
+import utils_presupuesto
 
 # ==============================================================================
 # 1. CONFIGURACIÓN CENTRALIZADA
@@ -39,10 +42,12 @@ APP_CONFIG = {
     "complementarios": {"exclude_super_categoria": "Pintuco", "presupuesto_pct": 0.10},
     "sub_meta_complementarios": {"nombre_marca_objetivo": "non-AN Third Party", "presupuesto_pct": 0.10},
     "categorias_clave_venta": ['ABRACOL', 'YALE', 'SAINT GOBAIN', 'GOYA', 'ALLEGION', 'SEGUREX', 'ARTECOLA', 'ATLAS', 'INDUMA'],
-    "presupuesto_mostradores": {"incremento_anual_pct": 0.10}
+    "presupuesto_mostradores": {"incremento_anual_pct": 0.10} # Se mantiene como referencia, aunque ahora usamos utils
 }
 
 DATA_CONFIG = {
+    # NOTA: Aquí 'presupuesto' (ventas) será ignorado y reemplazado por el cálculo dinámico.
+    # Solo se usará 'presupuestocartera' de forma estática.
     "presupuestos": {'154033':{'presupuesto':123873239, 'presupuestocartera':138086459}, '154044':{'presupuesto':80000000, 'presupuestocartera':74547413}, '154034':{'presupuesto':82753045, 'presupuestocartera':134853042}, '154014':{'presupuesto':268214737, 'presupuestocartera':306818938}, '154046':{'presupuesto':85469798, 'presupuestocartera':42529021}, '154012':{'presupuesto':246616193, 'presupuestocartera':447901941}, '154043':{'presupuesto':124885413, 'presupuestocartera':147264596}, '154035':{'presupuesto':80000000, 'presupuestocartera':39864540}, '154006':{'presupuesto':81250000, 'presupuestocartera':127377725}, '154049':{'presupuesto':0, 'presupuestocartera':0}, '154013':{'presupuesto':303422639, 'presupuestocartera':483720267}, '154011':{'presupuesto':447060250, 'presupuestocartera':589086338}, '154029':{'presupuesto':50000000, 'presupuestocartera':34239301}, '154040':{'presupuesto':0, 'presupuestocartera':0},'154053':{'presupuesto':0, 'presupuestocartera':0},'154048':{'presupuesto':0, 'presupuestocartera':0},'154042':{'presupuesto':30000000, 'presupuestocartera':2900555},'154031':{'presupuesto':0, 'presupuestocartera':0},'154039':{'presupuesto':0, 'presupuestocartera':36593510},'154051':{'presupuesto':0, 'presupuestocartera':0},'154008':{'presupuesto':0, 'presupuestocartera':0},'154052':{'presupuesto':30000000, 'presupuestocartera':22401378},'154055':{'presupuesto':40000000, 'presupuestocartera':85788263},'154050':{'presupuesto':0, 'presupuestocartera':0}},
     "grupos_vendedores": {"MOSTRADOR PEREIRA": ["ALEJANDRO CARBALLO MARQUEZ", "GEORGINA A. GALVIS HERRERA"], "MOSTRADOR ARMENIA": ["CRISTIAN CAMILO RENDON MONTES", "FANDRY JOHANA ABRIL PENHA", "JAVIER ORLANDO PATINO HURTADO"], "MOSTRADOR MANIZALES": ["DAVID FELIPE MARTINEZ RIOS", "JHON JAIRO CASTAÑO MONTES"], "MOSTRADOR LAURELES": ["MAURICIO RIOS MORALES"], "MOSTRADOR OPALO": ["MARIA PAULA DEL JESUS GALVIS HERRERA"]},
     "metas_cl4_individual": {
@@ -57,7 +62,7 @@ DATA_CONFIG = {
 
 st.set_page_config(page_title=APP_CONFIG["page_title"], page_icon="🏠", layout="wide", initial_sidebar_state="expanded")
 
-# === ESTILOS CSS CORREGIDOS ===
+# === ESTILOS CSS ===
 st.markdown("""
 <style>
     :root {
@@ -328,17 +333,55 @@ def actualizar_oportunidades_con_ventas_del_trimestre(df_cl4_original, df_ventas
         df_cl4_actualizado['CL4'] = df_cl4_actualizado[columnas_producto_existentes].sum(axis=1)
     return df_cl4_actualizado
 
+@st.cache_data(ttl=3600)
+def calcular_presupuesto_dinamico_global(df_ventas_historicas):
+    """
+    Función que envuelve la lógica del utils_presupuesto para calcular 
+    el presupuesto dinámico para todo el año 2026.
+    """
+    # 1. Obtener totales 2024 y 2025 para la proyección global
+    total_2024 = df_ventas_historicas[df_ventas_historicas['anio'] == 2024]['valor_venta'].sum()
+    total_2025 = df_ventas_historicas[df_ventas_historicas['anio'] == 2025]['valor_venta'].sum()
+    
+    # 2. Proyectar Total 2026 usando la lógica del utils
+    target_2026, tasa_crec = utils_presupuesto.proyectar_total_2026(total_2024, total_2025)
+    
+    # 3. Asignar presupuesto anual por vendedor
+    # Nota: Asegurarse de que el DataFrame histórico esté limpio y tenga columnas correctas
+    df_asignacion_anual = utils_presupuesto.asignar_presupuesto(
+        df_ventas_historicas, 
+        DATA_CONFIG['grupos_vendedores'], 
+        target_2026
+    )
+    
+    # 4. Distribuir mensualmente según estacionalidad histórica individual
+    df_presupuesto_mensual = utils_presupuesto.distribuir_presupuesto_mensual(
+        df_asignacion_anual, 
+        df_ventas_historicas
+    )
+    
+    # Normalizar nombres para facilitar el merge posterior
+    df_presupuesto_mensual['nomvendedor'] = df_presupuesto_mensual['nomvendedor'].apply(normalizar_texto)
+    
+    return df_presupuesto_mensual
+
 def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel):
     filtro_ventas_netas = 'FACTURA|NOTA.*CREDITO'
     df_ventas_reales = df_ventas_periodo[df_ventas_periodo['TipoDocumento'].str.contains(filtro_ventas_netas, na=False, case=False, regex=True)].copy()
+    
+    # Resúmenes básicos
     resumen_ventas = df_ventas_reales.groupby(['codigo_vendedor', 'nomvendedor']).agg(ventas_totales=('valor_venta', 'sum'), impactos=('cliente_id', 'nunique')).reset_index()
     resumen_cobros = df_cobros_periodo.groupby('codigo_vendedor').agg(cobros_totales=('valor_cobro', 'sum')).reset_index()
+    
     categorias_objetivo = APP_CONFIG['categorias_clave_venta']
     df_ventas_comp = df_ventas_reales[df_ventas_reales['categoria_producto'].isin(categorias_objetivo)]
     resumen_complementarios = df_ventas_comp.groupby(['codigo_vendedor','nomvendedor']).agg(ventas_complementarios=('valor_venta', 'sum')).reset_index()
+    
     marca_sub_meta = APP_CONFIG['sub_meta_complementarios']['nombre_marca_objetivo']
     df_ventas_sub_meta = df_ventas_reales[df_ventas_reales['nombre_marca'] == marca_sub_meta]
-    resumen_sub_meta = df_ventas_sub_meta.groupby(['codigo_vendedor','nomvendedor']).agg(ventas_sub_meta=('valor_venta', 'sum')).reset_index()
+    resumen_sub_meta = df_ventas_sub_meta.groupby(['codigo_vendedor', 'nomvendedor']).agg(ventas_sub_meta=('valor_venta', 'sum')).reset_index()
+    
+    # Albaranes
     df_albaranes_historicos_bruto = df_ventas_historicas[df_ventas_historicas['TipoDocumento'].str.contains('ALBARAN', na=False, case=False)].copy()
     grouping_keys = ['Serie', 'cliente_id', 'codigo_articulo', 'codigo_vendedor']
     if not df_albaranes_historicos_bruto.empty:
@@ -357,41 +400,87 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
         resumen_albaranes = df_albaranes_reales_pendientes[df_albaranes_reales_pendientes['valor_venta'] > 0].groupby(['codigo_vendedor', 'nomvendedor']).agg(albaranes_pendientes=('valor_venta', 'sum')).reset_index()
     else:
         resumen_albaranes = pd.DataFrame(columns=['codigo_vendedor', 'nomvendedor', 'albaranes_pendientes'])
+    
+    # Merge inicial
     df_resumen = pd.merge(resumen_ventas, resumen_cobros, on='codigo_vendedor', how='left')
     df_resumen = pd.merge(df_resumen, resumen_complementarios, on=['codigo_vendedor', 'nomvendedor'], how='left')
     df_resumen = pd.merge(df_resumen, resumen_sub_meta, on=['codigo_vendedor', 'nomvendedor'], how='left')
     df_resumen = pd.merge(df_resumen, resumen_albaranes, on=['codigo_vendedor', 'nomvendedor'], how='left')
+    
+    # ==============================================================================
+    # INTEGRACIÓN DE PRESUPUESTOS (VENTAS: DINÁMICO / CARTERA: ESTÁTICO)
+    # ==============================================================================
+    
+    # 1. Cartera Estática (Original)
     presupuestos_fijos = DATA_CONFIG['presupuestos']
-    df_resumen['presupuesto'] = df_resumen['codigo_vendedor'].map(lambda x: presupuestos_fijos.get(x, {}).get('presupuesto', 0))
     df_resumen['presupuestocartera'] = df_resumen['codigo_vendedor'].map(lambda x: presupuestos_fijos.get(x, {}).get('presupuestocartera', 0))
+    
+    # 2. Ventas Dinámicas (Nuevo con utils_presupuesto)
+    # Calculamos el presupuesto dinámico global
+    df_dynamic_full = calcular_presupuesto_dinamico_global(df_ventas_historicas)
+    
+    # Filtramos para el mes seleccionado
+    df_dynamic_mes = df_dynamic_full[df_dynamic_full['mes'] == mes_sel][['nomvendedor', 'presupuesto_mensual']]
+    df_dynamic_mes.rename(columns={'presupuesto_mensual': 'presupuesto_dinamico'}, inplace=True)
+    
+    # Normalizamos el nombre en el resumen actual para asegurar el cruce
+    df_resumen['nomvendedor_norm'] = df_resumen['nomvendedor'].apply(normalizar_texto)
+    
+    # Merge con el presupuesto dinámico
+    df_resumen = pd.merge(df_resumen, df_dynamic_mes, left_on='nomvendedor_norm', right_on='nomvendedor', how='left')
+    
+    # Asignamos el presupuesto dinámico a la columna 'presupuesto' (y manejamos nulos)
+    df_resumen['presupuesto'] = df_resumen['presupuesto_dinamico'].fillna(0)
+    
+    # Limpieza
+    if 'presupuesto_dinamico' in df_resumen.columns: df_resumen.drop(columns=['presupuesto_dinamico'], inplace=True)
+    if 'nomvendedor_y' in df_resumen.columns: df_resumen.drop(columns=['nomvendedor_y'], inplace=True)
+    if 'nomvendedor_x' in df_resumen.columns: df_resumen.rename(columns={'nomvendedor_x': 'nomvendedor'}, inplace=True)
+    if 'nomvendedor_norm' in df_resumen.columns: df_resumen.drop(columns=['nomvendedor_norm'], inplace=True)
+
     df_resumen.fillna(0, inplace=True)
+    
+    # Agrupación de Grupos / Mostradores
     registros_agrupados = []
-    incremento_mostradores = 1 + APP_CONFIG['presupuesto_mostradores']['incremento_anual_pct']
+    
+    # Para los grupos, ya no usamos "incremento_mostradores" manual.
+    # Sumamos los presupuestos dinámicos individuales calculados por el utils.
+    
     for grupo, lista_vendedores in DATA_CONFIG['grupos_vendedores'].items():
         lista_vendedores_norm = [normalizar_texto(v) for v in lista_vendedores]
-        anio_anterior = anio_sel - 1
-        df_grupo_historico_facturas = df_ventas_historicas[
-            (df_ventas_historicas['TipoDocumento'].str.contains(filtro_ventas_netas, na=False, case=False, regex=True)) &
-            (df_ventas_historicas['anio'] == anio_anterior) & (df_ventas_historicas['mes'] == mes_sel) &
-            (df_ventas_historicas['nomvendedor'].isin(lista_vendedores_norm))
-        ]
-        ventas_anio_anterior = df_grupo_historico_facturas['valor_venta'].sum() if not df_grupo_historico_facturas.empty else 0
-        presupuesto_dinamico = ventas_anio_anterior * incremento_mostradores
-        df_grupo_actual = df_resumen[df_resumen['nomvendedor'].isin(lista_vendedores_norm)]
+        
+        # Filtramos el DF resumen actual (que ya tiene ventas reales y presupuesto dinámico individual)
+        df_grupo_actual = df_resumen[df_resumen['nomvendedor'].apply(normalizar_texto).isin(lista_vendedores_norm)]
+        
         cols_a_sumar = ['ventas_totales', 'cobros_totales', 'impactos', 'presupuestocartera', 'ventas_complementarios', 'ventas_sub_meta', 'albaranes_pendientes']
         suma_grupo = df_grupo_actual[cols_a_sumar].sum().to_dict()
-        suma_grupo['presupuesto'] = df_grupo_actual['presupuesto'].sum() 
+        
+        # Sumar los presupuestos individuales dinámicos para obtener la meta del grupo
+        suma_grupo['presupuesto'] = df_grupo_actual['presupuesto'].sum()
+        
+        # Si el grupo está vacío en ventas reales, buscamos si tiene presupuesto asignado en la tabla dinámica
+        if df_grupo_actual.empty:
+            presupuesto_grupo_faltante = df_dynamic_mes[df_dynamic_mes['nomvendedor'].isin(lista_vendedores_norm)]['presupuesto_dinamico'].sum()
+            suma_grupo['presupuesto'] = presupuesto_grupo_faltante
+
         codigo_grupo_norm = normalizar_texto(grupo)
         registro = {'nomvendedor': codigo_grupo_norm, 'codigo_vendedor': codigo_grupo_norm, **suma_grupo}
-        if presupuesto_dinamico > 0: registro['presupuesto'] = presupuesto_dinamico
         registros_agrupados.append(registro)
+    
     df_agrupado = pd.DataFrame(registros_agrupados)
     vendedores_en_grupos = [v for lista in DATA_CONFIG['grupos_vendedores'].values() for v in [normalizar_texto(i) for i in lista]]
-    df_individuales = df_resumen[~df_resumen['nomvendedor'].isin(vendedores_en_grupos)]
+    
+    # Filtramos individuales (quitamos los que pertenecen a grupos para no duplicar en la vista general si fuera necesario)
+    # Pero mantenemos la lógica original de concatenar
+    df_individuales = df_resumen[~df_resumen['nomvendedor'].apply(normalizar_texto).isin(vendedores_en_grupos)]
+    
     df_final = pd.concat([df_agrupado, df_individuales], ignore_index=True)
     df_final.fillna(0, inplace=True)
+    
+    # Presupuestos derivados (Complementarios y Sub-meta)
     df_final['presupuesto_complementarios'] = df_final['presupuesto'] * APP_CONFIG['complementarios']['presupuesto_pct']
     df_final['presupuesto_sub_meta'] = df_final['presupuesto_complementarios'] * APP_CONFIG['sub_meta_complementarios']['presupuesto_pct']
+    
     return df_final, df_albaranes_reales_pendientes
 
 def generar_comentario_asesor(avance_v, avance_c, clientes_meta, meta_clientes, avance_comp, avance_sub_meta):
@@ -705,7 +794,7 @@ def render_dashboard():
             st.subheader("Métricas Clave del Periodo")
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric(label="Ventas Netas Facturadas", value=f"${ventas_total:,.0f}", delta=f"{ventas_total - meta_ventas:,.0f}", help=f"Meta: ${meta_ventas:,.0f}")
+                st.metric(label="Ventas Netas Facturadas", value=f"${ventas_total:,.0f}", delta=f"{ventas_total - meta_ventas:,.0f}", help=f"Meta Automática: ${meta_ventas:,.0f}")
                 st.progress(min(avance_ventas / 100, 1.0), text=f"Avance Ventas Netas: {avance_ventas:.1f}%")
             with col2:
                 st.metric(label="Recaudo de Cartera", value=f"${cobros_total:,.0f}", delta=f"{cobros_total - meta_cobros:,.0f}", help=f"Meta: ${meta_cobros:,.0f}")
