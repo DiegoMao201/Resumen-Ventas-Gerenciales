@@ -215,47 +215,12 @@ def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf, df_historico)
     Genera el PDF iterando sobre el DataFrame unificado (Agrupado por Mostradores/Vendedores).
     """
     pdf = EnterpriseReport()
-    pdf.set_auto_page_break(auto=True, margin=20)
+    pdf.set_auto_page_break(auto=True, margin=18)
     total_compania = df_mensual_unificado['presupuesto_mensual'].sum()
     pdf.draw_cover_page(total_compania)
-    pdf.add_page()
-    pdf.section_title("Resumen Ejecutivo de Asignación")
-    pdf.set_font('Helvetica', '', 10)
-    pdf.multi_cell(0, 5, "El siguiente resumen presenta la distribución estratégica de metas para el año fiscal 2026. Los valores han sido calculados considerando históricos de venta, estacionalidad y objetivos de crecimiento corporativo.")
-    pdf.ln(10)
 
-    # --- TABLA RESUMEN ---
-    widths = [70, 40, 40, 40, 40, 30]
-    pdf.table_header(['Vendedor / Grupo', 'Meta Anual ($)', 'Venta 2025', 'Crecimiento', '% Crec.', '% Part.'], widths)
-    fill = False
-    for _, row in df_resumen_pdf.iterrows():
-        nombre = row['vendedor_unificado']
-        valor = row['presupuesto_mensual']
-        venta_2025 = row['venta_2025']
-        crecimiento_abs = row['crecimiento_abs']
-        crecimiento_pct = row['crecimiento_pct']
-        participacion = (valor / total_compania * 100) if total_compania > 0 else 0
-        pdf.table_row([
-            f"  {nombre}",
-            f"$ {valor:,.0f}",
-            f"$ {venta_2025:,.0f}",
-            f"$ {crecimiento_abs:,.0f}",
-            f"{crecimiento_pct:.1f}%" if not np.isnan(crecimiento_pct) else "N/A",
-            f"{participacion:.1f}%"
-        ], widths, fill)
-        fill = not fill
-    pdf.ln(2)
-    pdf.set_font('Helvetica', 'B', 10)
-    pdf.set_fill_color(220, 220, 220)
-    pdf.cell(70, 10, '  TOTAL GENERAL', 0, 0, 'L', 1)
-    pdf.cell(40, 10, f"$ {total_compania:,.0f}", 0, 0, 'R', 1)
-    pdf.cell(40, 10, '', 0, 0, 'R', 1)
-    pdf.cell(40, 10, '', 0, 0, 'R', 1)
-    pdf.cell(40, 10, '', 0, 0, 'R', 1)
-    pdf.cell(30, 10, '100.0%', 0, 1, 'C', 1)
-
-    # --- PÁGINAS INDIVIDUALES/GROUPS ---
     mapeo_meses = {1:"Enero", 2:"Febrero", 3:"Marzo", 4:"Abril", 5:"Mayo", 6:"Junio", 7:"Julio", 8:"Agosto", 9:"Septiembre", 10:"Octubre", 11:"Noviembre", 12:"Diciembre"}
+
     for _, row in df_resumen_pdf.iterrows():
         nombre = row['vendedor_unificado']
         df_v = df_mensual_unificado[df_mensual_unificado['vendedor_unificado'] == nombre].sort_values('mes')
@@ -264,7 +229,6 @@ def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf, df_historico)
         # --- OBTENER VENTA 2025 POR MES ---
         nombre_norm = utils_presupuesto.normalizar_texto(nombre)
         df_hist_2025 = df_historico[df_historico['anio'] == 2025]
-        # Si es grupo, suma ventas de todos los vendedores del grupo
         if nombre_norm in APP_CONFIG['grupos_vendedores']:
             vendedores_grupo = [utils_presupuesto.normalizar_texto(v) for v in APP_CONFIG['grupos_vendedores'][nombre_norm]]
             df_hist_2025_v = df_hist_2025[df_hist_2025['nomvendedor'].isin(vendedores_grupo)]
@@ -272,7 +236,32 @@ def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf, df_historico)
             df_hist_2025_v = df_hist_2025[df_hist_2025['nomvendedor'] == nombre_norm]
         ventas_2025_mes = df_hist_2025_v.groupby('mes')['valor_venta'].sum().reindex(range(1, 13), fill_value=0)
 
-        # --- TABLA MENSUAL CON % CRECIMIENTO MENSUAL ---
+        # --- NUEVA PÁGINA POR VENDEDOR/GRUPO ---
+        pdf.add_page()
+        pdf.section_title(f"META INDIVIDUAL: {nombre}")
+
+        # --- KPIs Compactos ---
+        y_start = pdf.get_y()
+        pdf.draw_kpi_card("META ANUAL 2026", f"$ {total_vendedor:,.0f}", "Presupuesto Total Asignado", x=15, y=y_start, w=60, h=28)
+        pdf.draw_kpi_card("PROMEDIO MENSUAL", f"$ {total_vendedor/12:,.0f}", "Base de cumplimiento", x=80, y=y_start, w=60, h=28)
+        pdf.draw_kpi_card("META PRIMER TRIMESTRE", f"$ {df_v[df_v['mes']<=3]['presupuesto_mensual'].sum():,.0f}", "Ene - Feb - Mar", x=145, y=y_start, w=60, h=28)
+        pdf.set_y(y_start + 35)
+
+        # --- Mensaje Motivador y Explicación ---
+        pdf.set_font('Helvetica', 'B', 11)
+        pdf.set_text_color(30, 58, 138)
+        pdf.cell(0, 7, "OBJETIVOS Y COMPROMISO", 0, 1)
+        pdf.set_font('Helvetica', '', 10)
+        pdf.set_text_color(70, 70, 70)
+        pdf.multi_cell(0, 5,
+            "Este acuerdo establece las metas comerciales para el periodo 2026. "
+            "El presupuesto asignado representa el aporte directo a la sostenibilidad y crecimiento de FERREINOX S.A.S. BIC, "
+            "impulsando la viabilidad financiera y el desarrollo responsable de la compañía. "
+            "Tu compromiso y desempeño son clave para alcanzar los objetivos estratégicos y consolidar el liderazgo en el mercado."
+        )
+        pdf.ln(6)
+
+        # --- TABLA MENSUAL CON % CRECIMIENTO REAL ---
         pdf.set_font('Helvetica', 'B', 10)
         pdf.cell(0, 6, "DETALLE DE EJECUCIÓN MENSUAL", 0, 1)
         widths_ind = [50, 60, 40, 40]
@@ -301,9 +290,11 @@ def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf, df_historico)
         pdf.set_text_color(255, 255, 255)
         pdf.cell(50, 10, '  TOTAL 2026', 0, 0, 'L', 1)
         pdf.cell(60, 10, f"$ {total_vendedor:,.0f}", 0, 0, 'R', 1)
-        pdf.cell(80, 10, '', 0, 1, 'C', 1)
-        # Firmas compactas
-        pdf.ln(6)
+        pdf.cell(40, 10, '', 0, 0, 'C', 1)
+        pdf.cell(40, 10, '', 0, 1, 'C', 1)
+
+        # --- Firmas Compactas y Armónicas ---
+        pdf.ln(8)
         pdf.set_text_color(0, 0, 0)
         pdf.set_font('Helvetica', '', 9)
         pdf.cell(0, 5, "Se firma en constancia de aceptación y compromiso:", 0, 1, 'L')
