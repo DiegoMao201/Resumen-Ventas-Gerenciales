@@ -133,7 +133,7 @@ def calcular_pesos_mensuales(df_hist: pd.DataFrame, vendedor: str, col_valor: st
 
 def distribuir_presupuesto_mensual(df_asignado: pd.DataFrame, df_hist: pd.DataFrame) -> pd.DataFrame:
     """
-    Distribuye mes a mes y aplica reglas mensuales (Ej. Opalo piso 45M).
+    Distribuye mes a mes y aplica reglas mensuales (Ej. Opalo piso 45M y Jerson especial).
     """
     df_hist_2025 = df_hist[df_hist["anio"] == 2025]
     df_hist_base = df_hist_2025 if not df_hist_2025.empty else df_hist[df_hist["anio"] == df_hist["anio"].max()]
@@ -155,6 +155,21 @@ def distribuir_presupuesto_mensual(df_asignado: pd.DataFrame, df_hist: pd.DataFr
                 })
             continue
 
+        # EXCEPCIÓN: JERSON ATEHORTUA OLARTE
+        if "JERSON" in nombre and "ATEHORTUA" in nombre:
+            for mes_idx in range(1, 13):
+                if mes_idx <= 8:
+                    valor_mensual = 100_000_000
+                else:
+                    valor_mensual = 110_000_000
+                registros.append({
+                    "nomvendedor": row["nomvendedor"],
+                    "grupo": row["grupo"],
+                    "mes": mes_idx,
+                    "presupuesto_mensual": valor_mensual
+                })
+            continue
+
         # DISTRIBUCIÓN ESTÁNDAR
         pesos = calcular_pesos_mensuales(df_hist_base, row["nomvendedor"])
         
@@ -162,9 +177,7 @@ def distribuir_presupuesto_mensual(df_asignado: pd.DataFrame, df_hist: pd.DataFr
             valor_mensual = row["presupuesto_2026"] * peso
             
             # EXCEPCIÓN: MOSTRADOR OPALO PISO 45M
-            # Aplica si el grupo es OPALO o el vendedor contiene OPALO
             if "OPALO" in grupo or "OPALO" in nombre:
-                # Si el mes es 0 o muy bajo (menor a 5 millones), sube a 45M
                 if valor_mensual < 5_000_000:
                     valor_mensual = 45_000_000
 
