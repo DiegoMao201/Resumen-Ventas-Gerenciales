@@ -351,15 +351,17 @@ def generar_pdf_presupuestos(df_mensual):
     # FPDF output(dest='S') devuelve string en versiones 1.7.x
     # Streamlit necesita bytes.
     try:
-        pdf_output = pdf.output(dest='S')
-        # Si es string, codifica a bytes
-        if isinstance(pdf_output, str):
-            return pdf_output.encode('latin-1')
-        # Si ya es bytes, retorna directo
-        return pdf_output
+        pdf_data = pdf.output(dest='S')
+        # Si es str, conviértelo a bytes
+        if isinstance(pdf_data, str):
+            pdf_bytes = pdf_data.encode('latin-1')
+        else:
+            pdf_bytes = pdf_data  # Ya es bytes
     except Exception as e:
         # Fallback para versiones nuevas de FPDF2 si se actualiza la librería
-        return pdf.output()
+        pdf_bytes = pdf.output()
+
+    return pdf_bytes
 
 # --- INTERFAZ STREAMLIT ---
 def main():
@@ -423,7 +425,7 @@ def main():
                 # Botón de descarga anidado para aparecer tras la generación
                 st.download_button(
                     label="📥 Descargar Acuerdo_Presupuestal_2026.pdf",
-                    data=pdf_bytes,  # <-- debe ser bytes
+                    data=pdf_bytes,
                     file_name="Acuerdo_Presupuestal_2026_Ferreinox.pdf",
                     mime="application/pdf",
                     use_container_width=True
