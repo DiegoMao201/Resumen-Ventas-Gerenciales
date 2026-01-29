@@ -272,7 +272,6 @@ def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf):
         pdf.set_y(y_start + 35)
         pdf.set_font('Helvetica', '', 10)
         pdf.cell(0, 8, f"Venta 2025: $ {venta_2025:,.0f}", 0, 1)
-        pdf.cell(0, 8, f"Crecimiento: $ {crecimiento_abs:,.0f} ({crecimiento_pct:.1f}%)", 0, 1)
         pdf.set_font('Helvetica', 'B', 11)
         pdf.set_text_color(70, 70, 70)
         pdf.cell(0, 7, "OBJETIVOS Y COMPROMISO", 0, 1)
@@ -296,11 +295,15 @@ def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf):
             mes_nombre = mapeo_meses.get(row_mes['mes'], str(row_mes['mes']))
             valor = row_mes['presupuesto_mensual']
             acumulado += valor
-            pct = (valor / total_vendedor * 100) if total_vendedor > 0 else 0
+            # Cálculo del % acumulado vs venta 2025
+            if venta_2025 > 0:
+                pct_acumulado = (acumulado - venta_2025) / venta_2025 * 100
+            else:
+                pct_acumulado = float('nan')
             pdf.table_row([
                 f"  {mes_nombre}",
                 f"$ {valor:,.0f}",
-                f"{pct:.1f}%",
+                f"{pct_acumulado:.1f}%" if not np.isnan(pct_acumulado) else "N/A",
                 f"$ {acumulado:,.0f}"
             ], widths_ind, fill)
             fill = not fill
