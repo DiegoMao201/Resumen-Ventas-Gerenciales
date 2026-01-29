@@ -77,26 +77,23 @@ def cargar_datos_base():
 # --- CLASE PDF PROFESIONAL ENTERPRISE ---
 class EnterpriseReport(FPDF):
     def header(self):
-        # Franja superior de color
+        # Franja superior azul
         self.set_fill_color(*COLOR_PRIMARY)
-        self.rect(0, 0, 210, 25, 'F')
-        
-        # Logo
+        self.rect(0, 0, 210, 35, 'F')
+        # Logo a la izquierda (usa archivo local)
         try:
-            self.set_fill_color(255, 255, 255)
-            self.rect(10, 5, 40, 15, 'F')
-            self.image(APP_CONFIG["url_logo"], 12, 6, 36)
-        except:
-            pass
-            
-        # Título del documento en el Header
-        self.set_font('Helvetica', 'B', 10)
+            self.image("LOGO FERREINOX SAS BIC 2024.png", x=12, y=6, w=36)
+        except Exception as e:
+            print("No se pudo cargar el logo:", e)
+        # Título a la derecha
+        self.set_font('Helvetica', 'B', 13)
         self.set_text_color(255, 255, 255)
-        self.set_xy(0, 8)
-        self.cell(200, 5, 'ACUERDO DE GESTIÓN COMERCIAL 2026', 0, 1, 'R')
-        self.set_font('Helvetica', '', 8)
-        self.cell(200, 5, 'CONFIDENCIAL - USO INTERNO EXCLUSIVO', 0, 1, 'R')
-        self.ln(20)
+        self.set_xy(60, 12)
+        self.cell(0, 8, 'ACUERDO DE GESTIÓN COMERCIAL 2026', 0, 1, 'L')
+        self.set_font('Helvetica', '', 9)
+        self.set_x(60)
+        self.cell(0, 6, 'CONFIDENCIAL - USO INTERNO EXCLUSIVO', 0, 1, 'L')
+        self.ln(10)
 
     def footer(self):
         self.set_y(-20)
@@ -225,7 +222,7 @@ def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf, df_historico)
     CORRECCIÓN: Filtra correctamente el histórico por vendedor antes de comparar mes a mes.
     """
     pdf = EnterpriseReport()
-    pdf.set_auto_page_break(auto=True, margin=18)
+    pdf.set_auto_page_break(auto=True, margin=18)  # O 15 si necesitas más espacio
     
     # Calcular total para portada
     total_compania = df_resumen_pdf['presupuesto_mensual'].sum()
@@ -237,13 +234,13 @@ def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf, df_historico)
     pdf.add_page()
     pdf.section_title("VISTA GERENCIAL: PRESUPUESTO ANUAL")
     pdf.set_font('Helvetica', '', 10)
-    pdf.multi_cell(0, 5, "Resumen ejecutivo de metas comerciales 2026. Incluye presupuesto anual, crecimiento porcentual y participación sobre el total.")
+    pdf.multi_cell(0, 5, "Resumenemenutivo de metas comerciales 2026. Incluye presupuesto anual, crecimiento porcentual y participación sobre el total.")
 
     # Filtra solo para mostrar (no afecta totales de cálculo)
     df_vista = df_resumen_pdf[~df_resumen_pdf['vendedor_unificado'].apply(utils_presupuesto.normalizar_texto).isin(EXCLUIR_PDF_NORM)].copy()
     
     # AJUSTE DE ANCHOS PARA QUE QUEPAN LOS NOMBRES (Total 190mm)
-    # Antes: [70, 50, 40, 40] -> Problema de espacio
+    # Antes: [77, 50, 40, 40] -> Problema de espacio
     # Nuevo: [80, 45, 35, 30] -> Más espacio al nombre
     widths_gerencia = [80, 45, 35, 30] 
     
@@ -251,7 +248,7 @@ def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf, df_historico)
     fill = False
     
     for _, row in df_vista.iterrows():
-        nombre = row['vendedor_unificado']
+        nombre = row['vendedor_un_un']
         valor = row['presupuesto_mensual']
         crecimiento_pct = row['crecimiento_pct']
         participacion = (valor / total_compania * 100) if total_compania > 0 else 0
@@ -261,7 +258,7 @@ def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf, df_historico)
             f"$ {valor:,.0f}",
             f"{crecimiento_pct:.1f}%" if not np.isnan(crecimiento_pct) and not np.isinf(crecimiento_pct) else "N/A",
             f"{participacion:.1f}%"
-        ], widths_gerencia, fill)
+        ], widths_gerger, fill)
         fill = not fill
         
     # Fila de Totales
@@ -361,7 +358,7 @@ def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf, df_historico)
 
             # Formateo visual
             str_pct = f"{pct_mes:+.1f}%" # Agrega signo + si es positivo
-            if pct_mes == 0 and valor_2025 == 0: str_pct = "-"
+            if pct == 0 and valor_2025 == 0: str_pct = "-"
             
             pdf.table_row([
                 f"  {mes_nombre}",
@@ -381,36 +378,32 @@ def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf, df_historico)
         pdf.cell(40, 10, '', 0, 1, 'C', 1)
 
         # --- Firmas ---
-        pdf.ln(15)
+        pdf.ln(10)
         pdf.set_text_color(0, 0, 0)
         pdf.set_font('Helvetica', '', 9)
         pdf.cell(0, 5, "Se firma en constancia de aceptación y compromiso:", 0, 1, 'L')
-        pdf.ln(10)
-        
+        pdf.ln(8)
+
         y_firma = pdf.get_y()
-        
         # Firma Vendedor
         pdf.set_draw_color(100, 100, 100)
-        pdf.line(20, y_firma, 90, y_firma)
+        pdf.line(20, y_firma, 100, y_firma)  # Línea más corta
         pdf.set_xy(20, y_firma + 2)
-        pdf.set_font('Helvetica', 'B', 8)
-        
-        # Nombre truncado si es muy largo para la firma
-        nombre_firma = (nombre[:35] + '..') if len(nombre) > 35 else nombre
-        pdf.cell(70, 5, nombre_firma.upper(), 0, 1, 'C')
-        
+        pdf.set_font('Helvetica', 'B', 9)
+        nombre_firma = (nombre[:30] + '..') if len(nombre) > 30 else nombre
+        pdf.cell(80, 5, nombre_firma.upper(), 0, 1, 'C')
         pdf.set_x(20)
         pdf.set_font('Helvetica', '', 8)
-        pdf.cell(70, 4, "Asesor / Responsable Comercial", 0, 1, 'C')
-        
+        pdf.cell(80, 4, "Asesor / Responsable Comercial", 0, 1, 'C')
+
         # Firma Gerencia
-        pdf.line(120, y_firma, 190, y_firma)
+        pdf.line(120, y_firma, 200, y_firma)
         pdf.set_xy(120, y_firma + 2)
-        pdf.set_font('Helvetica', 'B', 8)
-        pdf.cell(70, 5, "GERENCIA COMERCIAL", 0, 1, 'C')
+        pdf.set_font('Helvetica', 'B', 9)
+        pdf.cell(80, 5, "GERENCIA COMERCIAL", 0, 1, 'C')
         pdf.set_x(120)
         pdf.set_font('Helvetica', '', 8)
-        pdf.cell(70, 4, "Aprobación Gerencial", 0, 1, 'C')
+        pdf.cell(80, 4, "Aprobación Ger Manager", 0, 1, 'C')
 
     # Retornar PDF en bytes
     pdf_bytes = pdf.output(dest='S')
@@ -442,7 +435,7 @@ def main():
     grupos_cfg = APP_CONFIG['grupos_vendedores']
 
     df_anual = utils_presupuesto.asignar_presupuesto(df_historico, grupos_cfg, target_2026)
-    df_mensual = utils_presupuesto.distribuir_presupuesto_mensual(df_anual, df_historico)
+    df_m_m = utils_presupuesto.distribuir_presupuesto_mensual(df_anual, df_historico)
 
     # 3. Unificar por grupo/vendedor
     df_mensual['vendedor_unificado'] = np.where(
@@ -526,7 +519,7 @@ def main():
             )
             
             st.download_button(
-                label="📥 Descargar Acuerdo_Presupuestal_2026.pdf",
+                label="📥 Descargar Acuerdo_Presupuestal_2022.pdf",
                 data=pdf_bytes,
                 file_name="Acuerdo_Presupuestal_2026_Ferreinox.pdf",
                 mime="application/pdf",
