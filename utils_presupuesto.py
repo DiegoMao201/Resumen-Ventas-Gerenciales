@@ -89,25 +89,31 @@ def asignar_presupuesto(df: pd.DataFrame, grupos: dict, total_2026: float) -> pd
     def aplicar_reglas_anuales(row):
         nombre = normalizar_texto(row["nomvendedor"])
         presupuesto = row["presupuesto_2026"]
-        
+
         # 1. LEDUYN MELGAREJO ARIAS: Presupuesto fijo mensual -> se multiplica por 12 para el anual
         if nombre == "LEDUYN MELGAREJO ARIAS":
             return 146_000_000 * 12
-        
-        # 2. JERSON ATEHORTUA OLARTE: Aumento del 15% sobre lo calculado
+
+        # 2. JERSON ATEHORTUA OLARTE: Si presupuesto < 100M, subir con % cerrado hasta >= 100M
         if nombre == "JERSON ATEHORTUA OLARTE":
-            return presupuesto * 1.15
-            
+            if presupuesto < 100_000_000:
+                for pct in [0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 1.00]:
+                    nuevo = presupuesto * (1 + pct)
+                    if nuevo >= 100_000_000:
+                        return int(nuevo)
+                # Si ni con 100% llega, asigna 100M fijo
+                return 100_000_000
+            return presupuesto
+
         # 3. PABLO CESAR MAFLA BANOL: Aumento del 7% sobre lo calculado
         if nombre == "PABLO CESAR MAFLA BANOL":
             return presupuesto * 1.07
-            
-        # 4. JULIAN MAURICIO ORTIZ GOMEZ: Piso mínimo de 300 Millones (Ajuste porcentual implícito)
+
+        # 4. JULIAN MAURICIO ORTIZ GOMEZ: Piso mínimo de 300 Millones
         if nombre == "JULIAN MAURICIO ORTIZ GOMEZ":
-             if presupuesto < 300_000_000:
-                 # Se asigna un valor ligeramente superior a 300m para cumplir la condición
-                 return 300_000_001 
-        
+            if presupuesto < 300_000_000:
+                return 300_000_001
+
         return presupuesto
 
     agg["presupuesto_2026"] = agg.apply(aplicar_reglas_anuales, axis=1)
