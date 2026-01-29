@@ -234,13 +234,13 @@ def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf, df_historico)
     pdf.add_page()
     pdf.section_title("VISTA GERENCIAL: PRESUPUESTO ANUAL")
     pdf.set_font('Helvetica', '', 10)
-    pdf.multi_cell(0, 5, "Resumenemenutivo de metas comerciales 2026. Incluye presupuesto anual, crecimiento porcentual y participación sobre el total.")
+    pdf.multi_cell(0, 5, "Resumen ejecutivo de metas comerciales 2026. Incluye presupuesto anual, crecimiento porcentual y participación sobre el total.")
 
     # Filtra solo para mostrar (no afecta totales de cálculo)
     df_vista = df_resumen_pdf[~df_resumen_pdf['vendedor_unificado'].apply(utils_presupuesto.normalizar_texto).isin(EXCLUIR_PDF_NORM)].copy()
     
     # AJUSTE DE ANCHOS PARA QUE QUEPAN LOS NOMBRES (Total 190mm)
-    # Antes: [77, 50, 40, 40] -> Problema de espacio
+    # Antes: [70, 50, 40, 40] -> Problema de espacio
     # Nuevo: [80, 45, 35, 30] -> Más espacio al nombre
     widths_gerencia = [80, 45, 35, 30] 
     
@@ -248,7 +248,7 @@ def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf, df_historico)
     fill = False
     
     for _, row in df_vista.iterrows():
-        nombre = row['vendedor_un_un']
+        nombre = row['vendedor_unificado']
         valor = row['presupuesto_mensual']
         crecimiento_pct = row['crecimiento_pct']
         participacion = (valor / total_compania * 100) if total_compania > 0 else 0
@@ -258,7 +258,7 @@ def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf, df_historico)
             f"$ {valor:,.0f}",
             f"{crecimiento_pct:.1f}%" if not np.isnan(crecimiento_pct) and not np.isinf(crecimiento_pct) else "N/A",
             f"{participacion:.1f}%"
-        ], widths_gerger, fill)
+        ], widths_gerencia, fill)
         fill = not fill
         
     # Fila de Totales
@@ -358,7 +358,7 @@ def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf, df_historico)
 
             # Formateo visual
             str_pct = f"{pct_mes:+.1f}%" # Agrega signo + si es positivo
-            if pct == 0 and valor_2025 == 0: str_pct = "-"
+            if pct_mes == 0 and valor_2025 == 0: str_pct = "-"
             
             pdf.table_row([
                 f"  {mes_nombre}",
@@ -403,7 +403,7 @@ def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf, df_historico)
         pdf.cell(80, 5, "GERENCIA COMERCIAL", 0, 1, 'C')
         pdf.set_x(120)
         pdf.set_font('Helvetica', '', 8)
-        pdf.cell(80, 4, "Aprobación Ger Manager", 0, 1, 'C')
+        pdf.cell(80, 4, "Aprobación Gerencial", 0, 1, 'C')
 
     # Retornar PDF en bytes
     pdf_bytes = pdf.output(dest='S')
@@ -435,7 +435,7 @@ def main():
     grupos_cfg = APP_CONFIG['grupos_vendedores']
 
     df_anual = utils_presupuesto.asignar_presupuesto(df_historico, grupos_cfg, target_2026)
-    df_m_m = utils_presupuesto.distribuir_presupuesto_mensual(df_anual, df_historico)
+    df_mensual = utils_presupuesto.distribuir_presupuesto_mensual(df_anual, df_historico)
 
     # 3. Unificar por grupo/vendedor
     df_mensual['vendedor_unificado'] = np.where(
