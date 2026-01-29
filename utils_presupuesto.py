@@ -8,15 +8,21 @@ import unicodedata
 import re
 
 def normalizar_texto(texto: str) -> str:
-    """Normaliza cadenas de texto eliminando tildes y caracteres especiales."""
+    """
+    Normaliza cadenas de texto: mayúsculas, sin tildes, sin caracteres raros
+    y ELIMINA espacios dobles o sobrantes.
+    """
     if pd.isna(texto): return ""
     texto = str(texto).upper()
+    # Eliminar tildes
     texto = "".join(c for c in unicodedata.normalize("NFD", texto) if unicodedata.category(c) != "Mn")
+    # Dejar solo letras, números, espacios y guiones
     texto = re.sub(r"[^A-Z0-9\s\-]", "", texto)
-    return texto.strip()
+    # Colapsar múltiples espacios en uno solo y quitar bordes (CLAVE PARA QUE COINCIDAN NOMBRES)
+    return " ".join(texto.split())
 
 def construir_grupo(vendedor: str, grupos: dict) -> str:
-    """Asigna el nombre del grupo si el vendedor pertenece a uno, sino devuelve el nombre del vendedor."""
+    """Asigna el nombre del grupo si el vendedor pertenece a uno."""
     vend_norm = normalizar_texto(vendedor)
     for grupo, lista in grupos.items():
         if vend_norm in [normalizar_texto(v) for v in lista]:
@@ -24,7 +30,7 @@ def construir_grupo(vendedor: str, grupos: dict) -> str:
     return vend_norm
 
 def proyectar_total_2026(total_2024, total_2025):
-    """Calcula la proyección global para 2026 basada en el crecimiento histórico conservador."""
+    """Calcula la proyección global para 2026."""
     if total_2024 <= 0 or total_2025 <= 0:
         return total_2025, 0
     tasa_hist = (total_2025 - total_2024) / total_2024
@@ -34,13 +40,12 @@ def proyectar_total_2026(total_2024, total_2025):
 
 def asignar_presupuesto(df: pd.DataFrame, grupos: dict, total_2026: float) -> pd.DataFrame:
     """
-    Calcula el presupuesto anual por vendedor aplicando reglas estadísticas
-    y excepciones puntuales de negocio (Reglas de Oro: Jerson, Julian, Pablo).
+    Calcula el presupuesto anual y APLICA PISOS MÍNIMOS (Reglas de Oro).
     """
     # Filtrar años base
     base = df[df["anio"].isin([2024, 2025])]
     
-    # Agregación inicial por vendedor
+    # Agregación inicial
     agg = base.groupby("nomvendedor").agg(
         venta_2024=("valor_venta", lambda s: s[df.loc[s.index, "anio"] == 2024].sum()),
         venta_2025=("valor_venta", lambda s: s[df.loc[s.index, "anio"] == 2025].sum()),
@@ -50,8 +55,6 @@ def asignar_presupuesto(df: pd.DataFrame, grupos: dict, total_2026: float) -> pd
     ).reset_index()
 
     total_2025 = agg["venta_2025"].sum()
-    
-    # Cálculo de métricas para distribución automática
     agg["participacion_2025"] = np.where(total_2025 > 0, agg["venta_2025"] / total_2025, 0)
 
     def norm_col(col):
@@ -63,14 +66,12 @@ def asignar_presupuesto(df: pd.DataFrame, grupos: dict, total_2026: float) -> pd
     agg["crec_ajustado"] = np.clip(agg["crec_pct"], -0.15, 0.30)
     agg["diversidad"] = 0.6 * norm_col("lineas") + 0.4 * norm_col("clientes")
     
-    # Score compuesto
+    # Cálculo preliminar
     agg["score_raw"] = agg["venta_2025"] * (1 + agg["crec_ajustado"]) * (1 + 0.10 * agg["diversidad"])
-
-    # Distribución preliminar del total proyectado
     suma_scores = agg["score_raw"].sum()
     agg["presupuesto_prelim"] = np.where(suma_scores > 0, agg["score_raw"] / suma_scores * total_2026, 0)
 
-    # Aplicación de pisos y techos automáticos
+    # Pisos y techos estadísticos
     piso_pct = 0.70
     techo_pct = 1.35
     agg["presupuesto_ajustado"] = np.clip(
@@ -79,7 +80,7 @@ def asignar_presupuesto(df: pd.DataFrame, grupos: dict, total_2026: float) -> pd
         agg["venta_2025"] * techo_pct
     )
 
-    # Re-escalado para ajustar al total objetivo 2026
+    # Re-escalado al objetivo
     suma_ajustada = agg["presupuesto_ajustado"].sum()
     factor_rescale = total_2026 / suma_ajustada if suma_ajustada > 0 else 0
     agg["presupuesto_2026"] = agg["presupuesto_ajustado"] * factor_rescale
@@ -88,30 +89,32 @@ def asignar_presupuesto(df: pd.DataFrame, grupos: dict, total_2026: float) -> pd
     agg["grupo"] = agg["nomvendedor"].apply(lambda v: construir_grupo(v, grupos))
 
     # ==============================================================================
-    # APLICACIÓN DE REGLAS DE NEGOCIO (EXCEPCIONES ANUALES)
+    # REGLAS DE ORO (EXCEPCIONES ANUALES) - LÓGICA BLINDADA
     # ==============================================================================
     def aplicar_reglas_anuales(row):
+        # Normalizamos el nombre actual
         nombre = normalizar_texto(row["nomvendedor"])
         presupuesto = row["presupuesto_2026"]
 
-        # 1. LEDUYN MELGAREJO ARIAS: Presupuesto fijo mensual -> se multiplica por 12 para el anual
-        if "LEDUYN MELGAREJO" in nombre:
+        # 1. LEDUYN MELGAREJO ARIAS: Fijo Mensual x 12
+        if "LEDUYN" in nombre and "MELGAREJO" in nombre:
             return 146_000_000 * 12
 
-        # 2. JERSON ATEHORTUA OLARTE: PISO ESTRICTO DE 100 MILLONES
-        if "JERSON ATEHORTUA" in nombre:
+        # 2. JERSON ATEHORTUA: PISO 100M
+        # Usamos 'and' para que coincida aunque haya espacios o nombres intermedios
+        if "JERSON" in nombre and "ATEHORTUA" in nombre:
             if presupuesto < 100_000_000:
-                return 100_000_000  # Forzar a 100 Millones exactos si dio menos
+                return 100_000_000
             return presupuesto
 
-        # 3. PABLO CESAR MAFLA BANOL: Aumento del 7% sobre lo calculado
-        if "PABLO CESAR MAFLA" in nombre:
+        # 3. PABLO CESAR MAFLA: +7%
+        if "PABLO" in nombre and "MAFLA" in nombre:
             return presupuesto * 1.07
 
-        # 4. JULIAN MAURICIO ORTIZ GOMEZ: PISO ESTRICTO DE 300 MILLONES
-        if "JULIAN MAURICIO ORTIZ" in nombre:
+        # 4. JULIAN MAURICIO ORTIZ: PISO 300M
+        if "JULIAN" in nombre and "ORTIZ" in nombre:
             if presupuesto < 300_000_000:
-                return 300_000_000  # Forzar a 300 Millones exactos si dio menos
+                return 300_000_000
             return presupuesto
 
         return presupuesto
@@ -121,7 +124,7 @@ def asignar_presupuesto(df: pd.DataFrame, grupos: dict, total_2026: float) -> pd
     return agg
 
 def calcular_pesos_mensuales(df_hist: pd.DataFrame, vendedor: str, col_valor: str = "valor_venta") -> np.ndarray:
-    """Calcula la estacionalidad (pesos) mensual basada en el histórico."""
+    """Calcula la estacionalidad (pesos) mensual."""
     df_vend = df_hist[df_hist["nomvendedor"] == vendedor]
     df_base = df_vend if not df_vend.empty else df_hist
     pesos = df_base.groupby("mes")[col_valor].sum()
@@ -133,10 +136,8 @@ def calcular_pesos_mensuales(df_hist: pd.DataFrame, vendedor: str, col_valor: st
 
 def distribuir_presupuesto_mensual(df_asignado: pd.DataFrame, df_hist: pd.DataFrame) -> pd.DataFrame:
     """
-    Distribuye el presupuesto anual mes a mes aplicando estacionalidad
-    y reglas de negocio mensuales específicas (Ej. Opalo mes 0 -> 45M).
+    Distribuye mes a mes y aplica reglas mensuales (Ej. Opalo piso 45M).
     """
-    # Usar 2025 como base de estacionalidad, o el último año disponible
     df_hist_2025 = df_hist[df_hist["anio"] == 2025]
     df_hist_base = df_hist_2025 if not df_hist_2025.empty else df_hist[df_hist["anio"] == df_hist["anio"].max()]
     
@@ -146,9 +147,8 @@ def distribuir_presupuesto_mensual(df_asignado: pd.DataFrame, df_hist: pd.DataFr
         nombre = normalizar_texto(row["nomvendedor"])
         grupo = normalizar_texto(row["grupo"])
         
-        # --- EXCEPCIÓN MENSUAL: LEDUYN MELGAREJO ---
-        # Debe tener fijo 146m mensual (ignora estacionalidad)
-        if "LEDUYN MELGAREJO" in nombre:
+        # EXCEPCIÓN: LEDUYN FIJO
+        if "LEDUYN" in nombre and "MELGAREJO" in nombre:
             for mes_idx in range(1, 13):
                 registros.append({
                     "nomvendedor": row["nomvendedor"],
@@ -158,18 +158,17 @@ def distribuir_presupuesto_mensual(df_asignado: pd.DataFrame, df_hist: pd.DataFr
                 })
             continue
 
-        # --- DISTRIBUCIÓN ESTÁNDAR ---
+        # DISTRIBUCIÓN ESTÁNDAR
         pesos = calcular_pesos_mensuales(df_hist_base, row["nomvendedor"])
         
         for mes_idx, peso in enumerate(pesos, start=1):
             valor_mensual = row["presupuesto_2026"] * peso
             
-            # --- EXCEPCIÓN MENSUAL: MOSTRADOR OPALO ---
-            # Si el cálculo da 0 (mes vacío en histórico), forzar 45m
-            # Se aplica si es el grupo OPALO o el vendedor está en OPALO
+            # EXCEPCIÓN: MOSTRADOR OPALO PISO 45M
+            # Aplica si el grupo es OPALO o el vendedor contiene OPALO
             if "OPALO" in grupo or "OPALO" in nombre:
-                # Si el valor es muy bajo (cercano a 0) o 0, asignamos 45M
-                if valor_mensual < 1_000_000: 
+                # Si el mes es 0 o muy bajo (menor a 5 millones), sube a 45M
+                if valor_mensual < 5_000_000:
                     valor_mensual = 45_000_000
 
             registros.append({
