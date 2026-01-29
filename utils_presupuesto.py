@@ -102,7 +102,7 @@ def asignar_presupuesto(df: pd.DataFrame, grupos: dict, total_2026: float) -> pd
         # 2. JERSON ATEHORTUA OLARTE: Si presupuesto < 100M, subir con % cerrado hasta >= 100M
         if "JERSON" in nombre and "ATEHORTUA" in nombre:
             if presupuesto < 100_000_000:
-                for pct in [0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 1.00]:
+                for pct in [0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 1.00, 1.10, 1.20, 1.30, 1.40, 1.50, 1.60, 1.70]:
                     nuevo = presupuesto * (1 + pct)
                     if nuevo >= 100_000_000:
                         return int(nuevo)
