@@ -211,7 +211,10 @@ def generar_pdf_presupuestos(df_mensual):
         pdf.text(110, y_pos + 5, "Firma Gerencia General")
         pdf.text(110, y_pos + 10, "FERREINOX SAS BIC")
 
-    return pdf.output(dest='S').encode('latin-1')
+    return pdf.output(dest='S')
+    if isinstance(pdf_data, str):
+        return pdf_data.encode('latin-1')
+    return pdf_data
 
 # --- INTERFAZ STREAMLIT ---
 def main():
