@@ -31,6 +31,15 @@ APP_CONFIG = {
     }
 }
 
+VENDEDORES_EXCLUIR = [
+    "CRISTIAN CAMILO RENDON MONTES",
+    "DIEGO MAURICIO GARCIA RENGIFO",
+    "CAMILO AGUDELO MARIN",
+    "RICHARD RAFAEL FERRER ROZO",
+    "PABLO ANDRES CASTANO MONTES",
+    "CONTABILIDAD FERREINOX"
+]
+
 st.set_page_config(page_title="Generador de Acuerdos 2026", page_icon="📄", layout="centered")
 
 # --- FUNCIONES DE CARGA DE DATOS ---
@@ -104,43 +113,37 @@ class EnterpriseReport(FPDF):
 
     def draw_cover_page(self, total_compania):
         self.add_page()
-        
-        # Fondo geométrico decorativo
-        self.set_fill_color(*COLOR_SECONDARY)
-        self.rect(0, 0, 210, 297, 'F')
+        # Fondo superior azul
         self.set_fill_color(*COLOR_PRIMARY)
-        # Triángulo/Diseño esquina
-        self.rect(0, 0, 210, 100, 'F')
-        
-        # Títulos Portada
-        self.ln(40)
-        self.set_text_color(255, 255, 255)
-        self.set_font('Helvetica', 'B', 36)
-        self.cell(0, 15, 'PLAN ESTRATÉGICO', 0, 1, 'C')
-        self.cell(0, 15, 'DE VENTAS 2026', 0, 1, 'C')
-        
-        self.ln(20)
+        self.rect(0, 0, 210, 60, 'F')
+        # Logo centrado arriba
+        try:
+            self.image(APP_CONFIG["url_logo"], x=80, y=10, w=50)
+        except:
+            pass
+        # Título principal
+        self.set_xy(0, 65)
+        self.set_text_color(*COLOR_PRIMARY)
+        self.set_font('Helvetica', 'B', 22)
+        self.cell(0, 12, 'PLAN ESTRATÉGICO DE VENTAS 2026', 0, 1, 'C')
+        self.ln(2)
         self.set_font('Helvetica', '', 14)
         self.cell(0, 10, 'DOCUMENTO OFICIAL DE ASIGNACIÓN DE METAS', 0, 1, 'C')
-        
-        # Tarjeta Central de Valor
-        self.ln(30)
+        self.ln(10)
+        # Tarjeta central con meta global
         self.set_fill_color(255, 255, 255)
-        self.rect(55, 130, 100, 60, 'DF')
-        
-        self.set_y(140)
+        self.rect(40, 100, 130, 55, 'DF')
+        self.set_xy(40, 110)
         self.set_text_color(*COLOR_PRIMARY)
-        self.set_font('Helvetica', 'B', 12)
-        self.cell(0, 10, 'META GLOBAL COMPAÑÍA', 0, 1, 'C')
-        self.set_font('Helvetica', 'B', 24)
+        self.set_font('Helvetica', 'B', 13)
+        self.cell(130, 8, 'META GLOBAL FERREINOX S.A.S. BIC', 0, 2, 'C')
+        self.set_font('Helvetica', 'B', 22)
         self.set_text_color(*COLOR_ACCENT) # Rojo/Naranja
-        self.cell(0, 15, f"$ {total_compania:,.0f}", 0, 1, 'C')
+        self.cell(130, 14, f"$ {total_compania:,.0f}", 0, 2, 'C')
         self.set_font('Helvetica', 'I', 10)
         self.set_text_color(100, 100, 100)
-        self.cell(0, 10, 'Moneda: COP', 0, 1, 'C')
-
-        # Pie de portada
-        self.set_y(-50)
+        self.cell(130, 8, 'Moneda: COP', 0, 2, 'C')
+        self.set_y(-40)
         self.set_text_color(*COLOR_PRIMARY)
         self.set_font('Helvetica', 'B', 12)
         self.cell(0, 10, 'FERREINOX S.A.S. BIC', 0, 1, 'C')
@@ -208,15 +211,12 @@ class EnterpriseReport(FPDF):
 def generar_pdf_presupuestos(df_mensual):
     pdf = EnterpriseReport()
     pdf.set_auto_page_break(auto=True, margin=20)
-    
     # Agrupación para totales
     df_resumen = df_mensual.groupby("nomvendedor")['presupuesto_mensual'].sum().reset_index()
     df_resumen = df_resumen.sort_values('presupuesto_mensual', ascending=False)
     total_compania = df_resumen['presupuesto_mensual'].sum()
-    
     # 1. PORTADA
     pdf.draw_cover_page(total_compania)
-    
     # 2. RESUMEN EJECUTIVO
     pdf.add_page()
     pdf.section_title("Resumen Ejecutivo de Asignación")
@@ -250,19 +250,42 @@ def generar_pdf_presupuestos(df_mensual):
     pdf.cell(50, 10, f"$ {total_compania:,.0f}", 0, 0, 'R', 1)
     pdf.cell(30, 10, '100.0%', 0, 1, 'C', 1)
 
-    # 3. PÁGINAS INDIVIDUALES POR VENDEDOR
-    vendedores_unicos = df_mensual['nomvendedor'].unique()
+    # 3. PÁGINAS INDIVIDUALES/GROUPS
+    grupos_vendedores = APP_CONFIG["grupos_vendedores"]
+    vendedores_en_grupos = {utils_presupuesto.normalizar_texto(v) for lista in grupos_vendedores.values() for v in lista}
+    grupos = set(grupos_vendedores.keys())
+    VENDEDORES_EXCLUIR = [
+        "CRISTIAN CAMILO RENDON MONTES",
+        "DIEGO MAURICIO GARCIA RENGIFO",
+        "CAMILO AGUDELO MARIN",
+        "RICHARD RAFAEL FERRER ROZO",
+        "PABLO ANDRES CASTANO MONTES",
+        "CONTABILIDAD FERREINOX"
+    ]
+    VENDEDORES_EXCLUIR_NORM = [utils_presupuesto.normalizar_texto(v) for v in VENDEDORES_EXCLUIR]
+    vendedores_individuales = [
+        v for v in df_mensual['nomvendedor'].unique()
+        if v not in vendedores_en_grupos and v not in VENDEDORES_EXCLUIR_NORM
+    ]
+    paginas_pdf = list(grupos) + vendedores_individuales
     mapeo_meses = {1:"Enero", 2:"Febrero", 3:"Marzo", 4:"Abril", 5:"Mayo", 6:"Junio", 7:"Julio", 8:"Agosto", 9:"Septiembre", 10:"Octubre", 11:"Noviembre", 12:"Diciembre"}
-
-    for nombre in vendedores_unicos:
+    for nombre in paginas_pdf:
         pdf.add_page()
-        
+        if nombre in grupos:
+            # Agrupa ventas de todos los vendedores del grupo
+            df_v = df_mensual[df_mensual['grupo'] == nombre].groupby(['grupo', 'mes'], as_index=False)['presupuesto_mensual'].sum()
+            total_vendedor = df_v['presupuesto_mensual'].sum()
+            nombre_mostrar = nombre
+        else:
+            df_v = df_mensual[df_mensual['nomvendedor'] == nombre].sort_values('mes')
+            total_vendedor = df_v['presupuesto_mensual'].sum()
+            nombre_mostrar = nombre
         # Datos Vendedor
         df_v = df_mensual[df_mensual['nomvendedor'] == nombre].sort_values('mes')
         total_vendedor = df_v['presupuesto_mensual'].sum()
         
         # Encabezado Personalizado
-        pdf.section_title(f"META INDIVIDUAL: {nombre}")
+        pdf.section_title(f"META INDIVIDUAL: {nombre_mostrar}")
         
         # Cards de Resumen Rápido (KPIs)
         y_start = pdf.get_y()
@@ -273,7 +296,7 @@ def generar_pdf_presupuestos(df_mensual):
         q1_val = df_v[df_v['mes'].isin([1,2,3])]['presupuesto_mensual'].sum()
         pdf.draw_kpi_card(140, y_start, 60, 28, "META PRIMER TRIMESTRE", f"$ {q1_val:,.0f}", "Ene - Feb - Mar")
         
-        pdf.ln(15)
+        pdf.ln(8)
         
         # Texto Contractual
         pdf.set_font('Helvetica', 'B', 10)
@@ -320,25 +343,23 @@ def generar_pdf_presupuestos(df_mensual):
         pdf.cell(80, 10, '', 0, 1, 'C', 1)
         
         # Sección de Firmas (Footer visual de la página)
-        pdf.ln(15)
+        pdf.ln(6)
         pdf.set_text_color(0, 0, 0)
         pdf.set_font('Helvetica', '', 9)
         pdf.cell(0, 5, "Se firma en constancia de aceptación y compromiso:", 0, 1, 'L')
-        pdf.ln(15)
-        
-        y_sig = pdf.get_y()
+        pdf.ln(4)
+        y_firma = pdf.get_y()
         
         # Firma 1
         pdf.set_draw_color(100, 100, 100)
-        y_firma = pdf.get_y()
         pdf.line(20, y_firma, 90, y_firma)
         pdf.set_xy(20, y_firma + 2)
         pdf.set_font('Helvetica', 'B', 9)
-        pdf.cell(70, 5, str(nombre).upper(), 0, 1, 'C')
+        pdf.cell(70, 5, str(nombre_mostrar).upper(), 0, 1, 'C')
         pdf.set_x(20)
         pdf.set_font('Helvetica', '', 8)
         pdf.cell(70, 4, "Asesor / Responsable Comercial", 0, 1, 'C')
-
+        
         # Firma 2
         pdf.line(120, y_firma, 190, y_firma)
         pdf.set_xy(120, y_firma + 2)
