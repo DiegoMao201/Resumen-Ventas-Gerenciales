@@ -270,7 +270,7 @@ def main():
                 
                 st.download_button(
                     label="📥 Descargar Acuerdo_Presupuestal_2026.pdf",
-                    data=pdf_bytes,
+                    data=pdf_bytes,  # <-- debe ser bytes
                     file_name="Acuerdo_Presupuestal_2026_Ferreinox.pdf",
                     mime="application/pdf",
                     use_container_width=True
