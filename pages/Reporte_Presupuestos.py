@@ -39,9 +39,9 @@ VENDEDORES_EXCLUIR = [
     "CAMILO AGUDELO MARIN",
     "RICHARD RAFAEL FERRER ROZO",
     "PABLO ANDRES CASTANO MONTES",
-    "CONTABILIDAD FERREINOX"
-    "SUPERVISOR FERREINOX"
-    "SIN VENDEDOR"
+    "CONTABILIDAD FERREINOX",
+    "SUPERVISOR FERREINOX",
+    "SIN VENDEDOR",
     " "
 ]
 VENDEDORES_EXCLUIR_NORM = [utils_presupuesto.normalizar_texto(v) for v in VENDEDORES_EXCLUIR]
@@ -87,7 +87,7 @@ class EnterpriseReport(FPDF):
         try:
             self.image("LOGO FERREINOX SAS BIC 2024.png", x=12, y=6, w=36)
         except Exception as e:
-            print("No se pudo cargar el logo:", e)
+            pass # Si falla el logo local, no rompe el flujo
         # Título a la derecha
         self.set_font('Helvetica', 'B', 13)
         self.set_text_color(255, 255, 255)
@@ -193,12 +193,16 @@ class EnterpriseReport(FPDF):
         self.set_text_color(128, 128, 128)
         self.cell(w, 4, subtitle, 0, 1, 'C')
 
-    def table_header(self, headers, widths):
+    def table_header(self, headers, widths, align='C'):
         self.set_font('Helvetica', 'B', 10)
         self.set_fill_color(30, 58, 138)
         self.set_text_color(255, 255, 255)
-        for header, w in zip(headers, widths):
-            self.cell(w, 10, str(header), 0, 0, 'C', 1)
+        
+        for i, (header, w) in enumerate(zip(headers, widths)):
+            # Determinar alineación (si es lista usa la específica, si no la global)
+            curr_align = align[i] if isinstance(align, list) else align
+            self.cell(w, 10, str(header), 0, 0, curr_align, 1)
+            
         self.ln()
         self.set_text_color(50, 50, 50)  # Restaura color texto para las filas
 
@@ -223,7 +227,6 @@ class EnterpriseReport(FPDF):
 def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf, df_historico):
     """
     Genera el PDF iterando sobre el DataFrame unificado (Agrupado por Mostradores/Vendedores).
-    CORRECCIÓN: Filtra correctamente el histórico por vendedor antes de comparar mes a mes.
     """
     pdf = EnterpriseReport()
     pdf.set_auto_page_break(auto=True, margin=18)  # O 15 si necesitas más espacio
@@ -243,15 +246,22 @@ def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf, df_historico)
     # Filtra solo para mostrar (no afecta totales de cálculo)
     df_vista = df_resumen_pdf[~df_resumen_pdf['vendedor_unificado'].apply(utils_presupuesto.normalizar_texto).isin(EXCLUIR_PDF_NORM)].copy()
     
-    # AJUSTE DE ANCHOS PARA QUE QUEPAN LOS NOMBRES (Total 190mm)
-    # Antes: [70, 50, 40, 40] -> Problema de espacio
-    # Nuevo: [80, 45, 35, 30] -> Más espacio al nombre
-    widths_gerencia = [80, 45, 35, 30] 
+    # AJUSTE DE ANCHOS PARA QUE QUEPAN LOS NOMBRES (Total 189mm)
+    # Nuevo: [80, 45, 35, 29] -> Ajustado para margen seguro
+    widths_gerencia = [80, 45, 35, 29] 
     
+    # CONFIGURACIÓN PERFECTA DE ENCABEZADO CON ALINEACIÓN
     pdf.set_font('Helvetica', 'B', 10)
     pdf.set_fill_color(30, 58, 138)  # Azul corporativo
     pdf.set_text_color(255, 255, 255)  # Blanco
-    pdf.table_header(['Vendedor / Grupo', 'Presupuesto 2026', '% Crecimiento', 'Part.%'], widths_gerencia)
+    
+    # Pasamos alineaciones explícitas: Izq, Der, Centro, Centro
+    pdf.table_header(
+        ['Vendedor / Grupo', 'Presupuesto 2026', '% Crecimiento', 'Part.%'], 
+        widths_gerencia, 
+        align=['L', 'R', 'C', 'C']
+    )
+    
     pdf.set_text_color(50, 50, 50)  # Restaura color texto para las filas
 
     fill = False
@@ -528,7 +538,7 @@ def main():
             )
             
             st.download_button(
-                label="📥 Descargar Acuerdo_Presupuestal_2022.pdf",
+                label="📥 Descargar Acuerdo_Presupuestal_2026.pdf",
                 data=pdf_bytes,
                 file_name="Acuerdo_Presupuestal_2026_Ferreinox.pdf",
                 mime="application/pdf",
