@@ -210,7 +210,7 @@ class EnterpriseReport(FPDF):
         self.ln()
 
 # --- LÓGICA DE GENERACIÓN ---
-def generar_pdf_presupuestos(df_mensual_unificado):
+def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf):
     """
     Genera el PDF iterando sobre el DataFrame unificado (Agrupado por Mostradores/Vendedores).
     """
@@ -224,35 +224,43 @@ def generar_pdf_presupuestos(df_mensual_unificado):
     pdf.multi_cell(0, 5, "El siguiente resumen presenta la distribución estratégica de metas para el año fiscal 2026. Los valores han sido calculados considerando históricos de venta, estacionalidad y objetivos de crecimiento corporativo.")
     pdf.ln(10)
 
-    resumen = (
-        df_mensual_unificado.groupby('vendedor_unificado')['presupuesto_mensual']
-        .sum()
-        .reset_index()
-        .sort_values('presupuesto_mensual', ascending=False)
-    )
-    widths = [110, 50, 30]
-    pdf.table_header(['Vendedor / Grupo', 'Meta Anual ($)', '% Part.'], widths)
+    # --- TABLA RESUMEN ---
+    widths = [70, 40, 40, 40, 40, 30]
+    pdf.table_header(['Vendedor / Grupo', 'Meta Anual ($)', 'Venta 2025', 'Crecimiento', '% Crec.', '% Part.'], widths)
     fill = False
-    for _, row in resumen.iterrows():
+    for _, row in df_resumen_pdf.iterrows():
         nombre = row['vendedor_unificado']
         valor = row['presupuesto_mensual']
+        venta_2025 = row['venta_2025']
+        crecimiento_abs = row['crecimiento_abs']
+        crecimiento_pct = row['crecimiento_pct']
         participacion = (valor / total_compania * 100) if total_compania > 0 else 0
         pdf.table_row([
             f"  {nombre}",
             f"$ {valor:,.0f}",
+            f"$ {venta_2025:,.0f}",
+            f"$ {crecimiento_abs:,.0f}",
+            f"{crecimiento_pct:.1f}%" if not np.isnan(crecimiento_pct) else "N/A",
             f"{participacion:.1f}%"
         ], widths, fill)
         fill = not fill
     pdf.ln(2)
     pdf.set_font('Helvetica', 'B', 10)
     pdf.set_fill_color(220, 220, 220)
-    pdf.cell(110, 10, '  TOTAL GENERAL', 0, 0, 'L', 1)
-    pdf.cell(50, 10, f"$ {total_compania:,.0f}", 0, 0, 'R', 1)
+    pdf.cell(70, 10, '  TOTAL GENERAL', 0, 0, 'L', 1)
+    pdf.cell(40, 10, f"$ {total_compania:,.0f}", 0, 0, 'R', 1)
+    pdf.cell(40, 10, '', 0, 0, 'R', 1)
+    pdf.cell(40, 10, '', 0, 0, 'R', 1)
+    pdf.cell(40, 10, '', 0, 0, 'R', 1)
     pdf.cell(30, 10, '100.0%', 0, 1, 'C', 1)
 
     # --- PÁGINAS INDIVIDUALES/GROUPS ---
     mapeo_meses = {1:"Enero", 2:"Febrero", 3:"Marzo", 4:"Abril", 5:"Mayo", 6:"Junio", 7:"Julio", 8:"Agosto", 9:"Septiembre", 10:"Octubre", 11:"Noviembre", 12:"Diciembre"}
-    for nombre in resumen['vendedor_unificado']:
+    for _, row in df_resumen_pdf.iterrows():
+        nombre = row['vendedor_unificado']
+        venta_2025 = row['venta_2025']
+        crecimiento_abs = row['crecimiento_abs']
+        crecimiento_pct = row['crecimiento_pct']
         df_v = df_mensual_unificado[df_mensual_unificado['vendedor_unificado'] == nombre].sort_values('mes')
         total_vendedor = df_v['presupuesto_mensual'].sum()
         pdf.add_page()
@@ -262,6 +270,9 @@ def generar_pdf_presupuestos(df_mensual_unificado):
         pdf.draw_kpi_card("PROMEDIO MENSUAL", f"$ {total_vendedor/12:,.0f}", "Base de cumplimiento", x=80, y=y_start, w=60, h=28)
         pdf.draw_kpi_card("META PRIMER TRIMESTRE", f"$ {df_v[df_v['mes']<=3]['presupuesto_mensual'].sum():,.0f}", "Ene - Feb - Mar", x=145, y=y_start, w=60, h=28)
         pdf.set_y(y_start + 35)
+        pdf.set_font('Helvetica', '', 10)
+        pdf.cell(0, 8, f"Venta 2025: $ {venta_2025:,.0f}", 0, 1)
+        pdf.cell(0, 8, f"Crecimiento: $ {crecimiento_abs:,.0f} ({crecimiento_pct:.1f}%)", 0, 1)
         pdf.set_font('Helvetica', 'B', 11)
         pdf.set_text_color(70, 70, 70)
         pdf.cell(0, 7, "OBJETIVOS Y COMPROMISO", 0, 1)
@@ -281,9 +292,9 @@ def generar_pdf_presupuestos(df_mensual_unificado):
         pdf.table_header(['MES', 'META DE VENTA', '% ANUAL', 'ACUMULADO'], widths_ind)
         acumulado = 0
         fill = False
-        for _, row in df_v.iterrows():
-            mes_nombre = mapeo_meses.get(row['mes'], str(row['mes']))
-            valor = row['presupuesto_mensual']
+        for _, row_mes in df_v.iterrows():
+            mes_nombre = mapeo_meses.get(row_mes['mes'], str(row_mes['mes']))
+            valor = row_mes['presupuesto_mensual']
             acumulado += valor
             pct = (valor / total_vendedor * 100) if total_vendedor > 0 else 0
             pdf.table_row([
@@ -339,10 +350,10 @@ def main():
     st.markdown("Generación de documentos oficiales para firma y legalización de presupuestos.")
     
     # 1. Cargar datos históricos
-    df_historico = cargar_datos_base()  # Debe devolver el DataFrame de ventas históricas limpio
+    df_historico = cargar_datos_base()  # Tu función de carga
     if df_historico.empty:
         st.error("No hay datos históricos disponibles o error en conexión Dropbox.")
-        return
+        st.stop()
 
     # 2. Calcular presupuesto anual y mensual con utils_presupuesto
     total_2024 = df_historico[df_historico['anio'] == 2024]['valor_venta'].sum()
@@ -353,37 +364,64 @@ def main():
     df_anual = utils_presupuesto.asignar_presupuesto(df_historico, grupos_cfg, target_2026)
     df_mensual = utils_presupuesto.distribuir_presupuesto_mensual(df_anual, df_historico)
 
-    # 3. Unificar por grupo/vendedor (igual que en dashboard y presupuesto)
+    # 3. Unificar por grupo/vendedor (igual que en dashboard)
     df_mensual['vendedor_unificado'] = np.where(
         df_mensual['grupo'].notna() & (df_mensual['grupo'] != '') & (df_mensual['grupo'] != df_mensual['nomvendedor']),
         df_mensual['grupo'],
         df_mensual['nomvendedor']
     )
 
-    # 4. Agrupa para la vista y el PDF (¡NO excluyas antes de agrupar!)
+    # 4. Agrupar para la vista y el PDF
     df_mensual_unificado = (
         df_mensual
         .groupby(['vendedor_unificado', 'mes'], as_index=False)['presupuesto_mensual']
         .sum()
     )
 
-    # 5. Para la tabla y el PDF:
-    #    - Los grupos mostrador SIEMPRE suman todos sus vendedores (aunque estén en la lista de exclusión)
-    #    - Los vendedores individuales SÓLO si no están en la lista de exclusión y no pertenecen a un grupo
+    # 5. Calcular ventas 2025 por vendedor_unificado (incluyendo grupos)
+    ventas_2025_map = dict(zip(
+        df_anual['nomvendedor'], df_anual['venta_2025']
+    ))
+    for grupo, lista in grupos_cfg.items():
+        ventas_2025_map[utils_presupuesto.normalizar_texto(grupo)] = sum(
+            ventas_2025_map.get(utils_presupuesto.normalizar_texto(v), 0) for v in lista
+        )
 
-    # Vendedores individuales permitidos
+    # 6. Excluir vendedores individuales según tu lógica
+    VENDEDORES_EXCLUIR = [
+        "CRISTIAN CAMILO RENDON MONTES",
+        "DIEGO MAURICIO GARCIA RENGIFO",
+        "CAMILO AGUDELO MARIN",
+        "RICHARD RAFAEL FERRER ROZO",
+        "PABLO ANDRES CASTANO MONTES",
+        "CONTABILIDAD FERREINOX"
+    ]
+    VENDEDORES_EXCLUIR_NORM = [utils_presupuesto.normalizar_texto(v) for v in VENDEDORES_EXCLUIR]
     vendedores_en_grupos = {utils_presupuesto.normalizar_texto(v) for lista in grupos_cfg.values() for v in lista}
     vendedores_individuales = [
         v for v in df_mensual['nomvendedor'].unique()
         if utils_presupuesto.normalizar_texto(v) not in VENDEDORES_EXCLUIR_NORM and
            utils_presupuesto.normalizar_texto(v) not in vendedores_en_grupos
     ]
-    # Grupos mostrador
     grupos = list(grupos_cfg.keys())
-    # Orden final para el PDF y la tabla
     paginas_pdf = grupos + vendedores_individuales
 
-    # 6. Mostrar tabla previa (igual que en dashboard)
+    # 7. DataFrame resumen para el PDF
+    df_resumen_pdf = (
+        df_mensual_unificado.groupby('vendedor_unificado')['presupuesto_mensual']
+        .sum()
+        .reset_index()
+    )
+    df_resumen_pdf['venta_2025'] = df_resumen_pdf['vendedor_unificado'].map(ventas_2025_map).fillna(0)
+    df_resumen_pdf['crecimiento_abs'] = df_resumen_pdf['presupuesto_mensual'] - df_resumen_pdf['venta_2025']
+    df_resumen_pdf['crecimiento_pct'] = np.where(
+        df_resumen_pdf['venta_2025'] > 0,
+        (df_resumen_pdf['presupuesto_mensual'] - df_resumen_pdf['venta_2025']) / df_resumen_pdf['venta_2025'] * 100,
+        np.nan
+    )
+    df_resumen_pdf = df_resumen_pdf.loc[df_resumen_pdf['vendedor_unificado'].isin(paginas_pdf)]
+
+    # 8. Mostrar tabla previa (igual que en dashboard)
     st.subheader("Vista Previa (Resumen)")
     tabla_mensual_preview = df_mensual_unificado.pivot_table(
         index="vendedor_unificado", columns="mes", values="presupuesto_mensual", aggfunc="sum"
@@ -395,12 +433,12 @@ def main():
         use_container_width=True
     )
 
-    # 7. Botón para generar PDF
+    # 9. Botón para generar PDF
     st.subheader("Descargar Documento")
     st.info("Generar PDF Enterprise con portadas, indicadores y formato contractual.")
     if st.button("Generar PDF Oficial", type="primary"):
         with st.spinner("Diseñando documento de alta calidad..."):
-            pdf_bytes = generar_pdf_presupuestos(df_mensual_unificado.loc[df_mensual_unificado['vendedor_unificado'].isin(paginas_pdf)])
+            pdf_bytes = generar_pdf_presupuestos(df_mensual_unificado.loc[df_mensual_unificado['vendedor_unificado'].isin(paginas_pdf)], df_resumen_pdf)
             st.download_button(
                 label="📥 Descargar Acuerdo_Presupuestal_2026.pdf",
                 data=pdf_bytes,
