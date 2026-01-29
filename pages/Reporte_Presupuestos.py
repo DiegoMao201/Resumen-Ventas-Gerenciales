@@ -355,12 +355,15 @@ def generar_pdf_presupuestos(df_mensual):
         # Si es str, conviértelo a bytes
         if isinstance(pdf_data, str):
             pdf_bytes = pdf_data.encode('latin-1')
+        elif isinstance(pdf_data, bytearray):
+            pdf_bytes = bytes(pdf_data)  # <-- CORRECCIÓN AQUÍ
         else:
             pdf_bytes = pdf_data  # Ya es bytes
     except Exception as e:
         # Fallback para versiones nuevas de FPDF2 si se actualiza la librería
         pdf_bytes = pdf.output()
-
+        if isinstance(pdf_bytes, bytearray):
+            pdf_bytes = bytes(pdf_bytes)
     return pdf_bytes
 
 # --- INTERFAZ STREAMLIT ---
