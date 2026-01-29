@@ -210,7 +210,7 @@ class EnterpriseReport(FPDF):
         self.ln()
 
 # --- LÓGICA DE GENERACIÓN ---
-def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf):
+def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf, df_historico):
     """
     Genera el PDF iterando sobre el DataFrame unificado (Agrupado por Mostradores/Vendedores).
     """
@@ -258,52 +258,41 @@ def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf):
     mapeo_meses = {1:"Enero", 2:"Febrero", 3:"Marzo", 4:"Abril", 5:"Mayo", 6:"Junio", 7:"Julio", 8:"Agosto", 9:"Septiembre", 10:"Octubre", 11:"Noviembre", 12:"Diciembre"}
     for _, row in df_resumen_pdf.iterrows():
         nombre = row['vendedor_unificado']
-        venta_2025 = row['venta_2025']
-        crecimiento_abs = row['crecimiento_abs']
-        crecimiento_pct = row['crecimiento_pct']
         df_v = df_mensual_unificado[df_mensual_unificado['vendedor_unificado'] == nombre].sort_values('mes')
         total_vendedor = df_v['presupuesto_mensual'].sum()
-        pdf.add_page()
-        pdf.section_title(f"META INDIVIDUAL: {nombre}")
-        y_start = pdf.get_y()
-        pdf.draw_kpi_card("META ANUAL 2026", f"$ {total_vendedor:,.0f}", "Presupuesto Total Asignado", x=15, y=y_start, w=60, h=28)
-        pdf.draw_kpi_card("PROMEDIO MENSUAL", f"$ {total_vendedor/12:,.0f}", "Base de cumplimiento", x=80, y=y_start, w=60, h=28)
-        pdf.draw_kpi_card("META PRIMER TRIMESTRE", f"$ {df_v[df_v['mes']<=3]['presupuesto_mensual'].sum():,.0f}", "Ene - Feb - Mar", x=145, y=y_start, w=60, h=28)
-        pdf.set_y(y_start + 35)
-        pdf.set_font('Helvetica', '', 10)
-        pdf.cell(0, 8, f"Venta 2025: $ {venta_2025:,.0f}", 0, 1)
-        pdf.set_font('Helvetica', 'B', 11)
-        pdf.set_text_color(70, 70, 70)
-        pdf.cell(0, 7, "OBJETIVOS Y COMPROMISO", 0, 1)
-        pdf.set_font('Helvetica', '', 10)
-        intro_text = (
-            "El presente acuerdo establece las metas comerciales para el periodo 2026. "
-            "Este presupuesto ha sido diseñado para impulsar un crecimiento sostenible, respetando la estacionalidad "
-            "histórica de su zona/segmento. El cumplimiento de estas cifras es fundamental para garantizar "
-            "la viabilidad financiera y operativa de FERREINOX S.A.S. BIC."
-        )
-        pdf.multi_cell(0, 5, intro_text)
-        pdf.ln(8)
-        # Tabla Mensual
+
+        # --- OBTENER VENTA 2025 POR MES ---
+        nombre_norm = utils_presupuesto.normalizar_texto(nombre)
+        df_hist_2025 = df_historico[df_historico['anio'] == 2025]
+        # Si es grupo, suma ventas de todos los vendedores del grupo
+        if nombre_norm in APP_CONFIG['grupos_vendedores']:
+            vendedores_grupo = [utils_presupuesto.normalizar_texto(v) for v in APP_CONFIG['grupos_vendedores'][nombre_norm]]
+            df_hist_2025_v = df_hist_2025[df_hist_2025['nomvendedor'].isin(vendedores_grupo)]
+        else:
+            df_hist_2025_v = df_hist_2025[df_hist_2025['nomvendedor'] == nombre_norm]
+        ventas_2025_mes = df_hist_2025_v.groupby('mes')['valor_venta'].sum().reindex(range(1, 13), fill_value=0)
+
+        # --- TABLA MENSUAL CON % CRECIMIENTO MENSUAL ---
         pdf.set_font('Helvetica', 'B', 10)
         pdf.cell(0, 6, "DETALLE DE EJECUCIÓN MENSUAL", 0, 1)
         widths_ind = [50, 60, 40, 40]
-        pdf.table_header(['MES', 'META DE VENTA', '% ANUAL', 'ACUMULADO'], widths_ind)
+        pdf.table_header(['MES', 'META DE VENTA', '% CRECIMIENTO', 'ACUMULADO'], widths_ind)
         acumulado = 0
         fill = False
         for _, row_mes in df_v.iterrows():
-            mes_nombre = mapeo_meses.get(row_mes['mes'], str(row_mes['mes']))
-            valor = row_mes['presupuesto_mensual']
-            acumulado += valor
-            # Cálculo del % acumulado vs venta 2025
-            if venta_2025 > 0:
-                pct_acumulado = (acumulado - venta_2025) / venta_2025 * 100
+            mes = row_mes['mes']
+            mes_nombre = mapeo_meses.get(mes, str(mes))
+            valor_2026 = row_mes['presupuesto_mensual']
+            valor_2025 = ventas_2025_mes.get(mes, 0)
+            acumulado += valor_2026
+            if valor_2025 > 0:
+                pct_mes = (valor_2026 - valor_2025) / valor_2025 * 100
             else:
-                pct_acumulado = float('nan')
+                pct_mes = float('nan')
             pdf.table_row([
                 f"  {mes_nombre}",
-                f"$ {valor:,.0f}",
-                f"{pct_acumulado:.1f}%" if not np.isnan(pct_acumulado) else "N/A",
+                f"$ {valor_2026:,.0f}",
+                f"{pct_mes:.1f}%" if not np.isnan(pct_mes) else "N/A",
                 f"$ {acumulado:,.0f}"
             ], widths_ind, fill)
             fill = not fill
@@ -441,7 +430,11 @@ def main():
     st.info("Generar PDF Enterprise con portadas, indicadores y formato contractual.")
     if st.button("Generar PDF Oficial", type="primary"):
         with st.spinner("Diseñando documento de alta calidad..."):
-            pdf_bytes = generar_pdf_presupuestos(df_mensual_unificado.loc[df_mensual_unificado['vendedor_unificado'].isin(paginas_pdf)], df_resumen_pdf)
+            pdf_bytes = generar_pdf_presupuestos(
+                df_mensual_unificado.loc[df_mensual_unificado['vendedor_unificado'].isin(paginas_pdf)],
+                df_resumen_pdf,
+                df_historico
+            )
             st.download_button(
                 label="📥 Descargar Acuerdo_Presupuestal_2026.pdf",
                 data=pdf_bytes,
