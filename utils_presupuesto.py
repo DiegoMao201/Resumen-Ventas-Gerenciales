@@ -90,7 +90,7 @@ def asignar_presupuesto(df: pd.DataFrame, grupos: dict, total_2026: float) -> pd
 
     # --- REGLAS DE ORO (EXCEPCIONES ANUALES) ---
     def aplicar_reglas_finales(row):
-        nombre = normalizar_texto(row["nomvendedor"])
+        nombre = row["nomvendedor"]  # Ya normalizado antes de entrar aquí
         presupuesto = row["presupuesto_2026"]
 
         # LEDUYN MELGAREJO ARIAS: Fijo Mensual x 12
