@@ -40,6 +40,9 @@ VENDEDORES_EXCLUIR = [
     "RICHARD RAFAEL FERRER ROZO",
     "PABLO ANDRES CASTANO MONTES",
     "CONTABILIDAD FERREINOX"
+    "SUPERVISOR FERREINOX"
+    "SIN VENDEDOR"
+    " "
 ]
 VENDEDORES_EXCLUIR_NORM = [utils_presupuesto.normalizar_texto(v) for v in VENDEDORES_EXCLUIR]
 
@@ -191,12 +194,13 @@ class EnterpriseReport(FPDF):
         self.cell(w, 4, subtitle, 0, 1, 'C')
 
     def table_header(self, headers, widths):
-        self.set_font('Helvetica', 'B', 9)
-        self.set_fill_color(*COLOR_PRIMARY)
+        self.set_font('Helvetica', 'B', 10)
+        self.set_fill_color(30, 58, 138)
         self.set_text_color(255, 255, 255)
-        for h, w in zip(headers, widths):
-            self.cell(w, 10, h, 0, 0, 'C', 1)
+        for header, w in zip(headers, widths):
+            self.cell(w, 10, str(header), 0, 0, 'C', 1)
         self.ln()
+        self.set_text_color(50, 50, 50)  # Restaura color texto para las filas
 
     def table_row(self, data, widths, fill=False):
         self.set_font('Helvetica', '', 8) # Fuente ligeramente más pequeña para que quepan nombres largos
@@ -244,7 +248,12 @@ def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf, df_historico)
     # Nuevo: [80, 45, 35, 30] -> Más espacio al nombre
     widths_gerencia = [80, 45, 35, 30] 
     
+    pdf.set_font('Helvetica', 'B', 10)
+    pdf.set_fill_color(30, 58, 138)  # Azul corporativo
+    pdf.set_text_color(255, 255, 255)  # Blanco
     pdf.table_header(['Vendedor / Grupo', 'Presupuesto 2026', '% Crecimiento', 'Part.%'], widths_gerencia)
+    pdf.set_text_color(50, 50, 50)  # Restaura color texto para las filas
+
     fill = False
     
     for _, row in df_vista.iterrows():
