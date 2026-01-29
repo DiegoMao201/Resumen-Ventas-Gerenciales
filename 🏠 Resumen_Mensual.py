@@ -15,8 +15,6 @@ import datetime
 import calendar
 import functools
 import hashlib
-
-# Importamos tu módulo de utilidades de presupuesto
 import utils_presupuesto
 
 # ==============================================================================
