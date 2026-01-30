@@ -195,8 +195,8 @@ class EnterpriseReport(FPDF):
 
     def table_header(self, headers, widths, align='C'):
         self.set_font('Helvetica', 'B', 10)
-        self.set_fill_color(30, 58, 138)
-        self.set_text_color(255, 255, 255)
+        self.set_fill_color(255, 255, 255)  # Fondo blanco
+        self.set_text_color(0, 0, 0)        # Texto negro
         
         # --- FIX: FORZAR MARGEN IZQUIERDO ---
         self.set_x(10) 
