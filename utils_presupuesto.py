@@ -113,6 +113,14 @@ def asignar_presupuesto(df: pd.DataFrame, grupos: dict, total_2026: float) -> pd
             if presupuesto < 300_000_000:
                 return 300_000_000
 
+        # TANIA RESTREPO BENJUMEA: +7%
+        if "TANIA" in nombre and "RESTREPO" in nombre and "BENJUMEA" in nombre:
+            return presupuesto * 1.07
+
+        # JAIME ANDRES LONDONO MONTENEGRO: +7%
+        if "JAIME" in nombre and "LONDONO" in nombre and "MONTENEGRO" in nombre:
+            return presupuesto * 1.07
+
         return presupuesto
 
     # APLICA LAS REGLAS FINALES DESPUÉS DEL REESCALADO
