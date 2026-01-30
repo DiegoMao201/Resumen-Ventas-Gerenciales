@@ -1,7 +1,7 @@
 # ==============================================================================
 # ARCHIVO: pages/Reporte_Presupuestos.py
 # DESCRIPCIÓN: Generador de Acuerdos de Gestión Comercial 2026 (PDF Enterprise)
-# ESTADO: CORREGIDO Y OPTIMIZADO
+# ESTADO: CORREGIDO Y OPTIMIZADO (ALINEACIÓN DE TABLAS FIX)
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -198,6 +198,9 @@ class EnterpriseReport(FPDF):
         self.set_fill_color(30, 58, 138)
         self.set_text_color(255, 255, 255)
         
+        # --- FIX: FORZAR MARGEN IZQUIERDO ---
+        self.set_x(10) 
+        
         for i, (header, w) in enumerate(zip(headers, widths)):
             # Determinar alineación (si es lista usa la específica, si no la global)
             curr_align = align[i] if isinstance(align, list) else align
@@ -207,13 +210,16 @@ class EnterpriseReport(FPDF):
         self.set_text_color(50, 50, 50)  # Restaura color texto para las filas
 
     def table_row(self, data, widths, fill=False):
-        self.set_font('Helvetica', '', 8) # Fuente ligeramente más pequeña para que quepan nombres largos
+        self.set_font('Helvetica', '', 8) # Fuente ligeramente más pequeña
         self.set_text_color(50, 50, 50)
         if fill:
             self.set_fill_color(245, 247, 250) 
         else:
             self.set_fill_color(255, 255, 255)
             
+        # --- FIX: FORZAR MARGEN IZQUIERDO EN CADA FILA ---
+        self.set_x(10)
+        
         for i, (datum, w) in enumerate(zip(data, widths)):
             align = 'L' if i == 0 else 'R' # Primer columna izq, resto derecha
             if i == 2: align = 'C' # Centrar porcentajes
@@ -246,11 +252,16 @@ def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf, df_historico)
     # Filtra solo para mostrar (no afecta totales de cálculo)
     df_vista = df_resumen_pdf[~df_resumen_pdf['vendedor_unificado'].apply(utils_presupuesto.normalizar_texto).isin(EXCLUIR_PDF_NORM)].copy()
     
-    # AJUSTE DE ANCHOS PARA QUE QUEPAN LOS NOMBRES (Total 189mm)
-    # Nuevo: [80, 45, 35, 29] -> Ajustado para margen seguro
-    widths_gerencia = [80, 45, 35, 29] 
+    # AJUSTE DE ANCHOS:
+    # Reducimos el total a 185mm (75+45+35+30) para asegurar que quepa dentro de los márgenes estándar (190mm).
+    # Antes: [80, 45, 35, 29] -> 189mm (Muy justo)
+    # Nuevo: [75, 45, 35, 30] -> 185mm (Seguro)
+    widths_gerencia = [75, 45, 35, 30] 
     
-    # CONFIGURACIÓN PERFECTA DE ENCABEZADO CON ALINEACIÓN
+    # Espacio antes de la tabla
+    pdf.ln(5)
+
+    # CONFIGURACIÓN DE ENCABEZADO CON ALINEACIÓN
     pdf.set_font('Helvetica', 'B', 10)
     pdf.set_fill_color(30, 58, 138)  # Azul corporativo
     pdf.set_text_color(255, 255, 255)  # Blanco
@@ -284,6 +295,7 @@ def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf, df_historico)
     pdf.set_font('Helvetica', 'B', 9)
     pdf.set_fill_color(30, 58, 138)
     pdf.set_text_color(255, 255, 255)
+    pdf.set_x(10) # FIX: Forzar margen también en el total
     pdf.cell(widths_gerencia[0], 10, '  TOTAL GENERAL', 0, 0, 'L', 1)
     pdf.cell(widths_gerencia[1], 10, f"$ {total_compania:,.0f}", 0, 0, 'R', 1)
     pdf.cell(widths_gerencia[2], 10, '', 0, 0, 'C', 1)
@@ -304,7 +316,7 @@ def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf, df_historico)
         df_v = df_mensual_unificado[df_mensual_unificado['vendedor_unificado'] == nombre].sort_values('mes')
         total_vendedor = df_v['presupuesto_mensual'].sum()
 
-        # --- CORRECCIÓN CRÍTICA: FILTRAR HISTÓRICO 2025 ESPECÍFICO ---
+        # Filtrar Histórico
         nombre_norm = utils_presupuesto.normalizar_texto(nombre)
         
         # Verificar si es un grupo
@@ -391,6 +403,7 @@ def generar_pdf_presupuestos(df_mensual_unificado, df_resumen_pdf, df_historico)
         pdf.set_font('Helvetica', 'B', 10)
         pdf.set_fill_color(30, 58, 138)
         pdf.set_text_color(255, 255, 255)
+        pdf.set_x(10) # FIX MARGEN
         pdf.cell(50, 10, '  TOTAL 2026', 0, 0, 'L', 1)
         pdf.cell(60, 10, f"$ {total_vendedor:,.0f}", 0, 0, 'R', 1)
         pdf.cell(40, 10, '', 0, 0, 'C', 1)
