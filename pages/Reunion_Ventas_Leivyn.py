@@ -6,6 +6,8 @@ from plotly.subplots import make_subplots
 import numpy as np
 from openai import OpenAI  # Librería oficial de OpenAI
 
+st.write("Secrets disponibles:", dict(st.secrets))
+
 # -----------------------------------------------------------------------------
 # 1. CONFIGURACIÓN DE LA PÁGINA Y ESTILOS CSS
 # -----------------------------------------------------------------------------
