@@ -137,18 +137,13 @@ def cargar_y_validar_datos() -> Tuple[pd.DataFrame, Dict]:
         
         # Limpiar tipos de datos
         df_clean = _limpiar_tipos_datos(df_clean)
-        # Clasificar líneas y enriquecer
-        df_clean = _unificar_lineas_marcas(df_clean)
-        df_clean = _clasificar_lineas_estrategicas(df_clean)
-        df_clean = _enriquecer_geografia(df_clean)
-        anios_disponibles = sorted(df_clean['anio'].unique(), reverse=True)
-        config_filtros = {
-            'anios_disponibles': anios_disponibles,
-            'ciudades_disponibles': obtener_lista_ordenada(df_clean['Poblacion_Real']) if 'Poblacion_Real' in df_clean.columns else [],
-            'lineas_disponibles': obtener_lista_ordenada(df_clean['Linea_Estrategica']) if 'Linea_Estrategica' in df_clean.columns else [],
-            'marcas_disponibles': obtener_lista_ordenada(df_clean['marca_producto']) if 'marca_producto' in df_clean.columns else [],
-            'vendedores_disponibles': obtener_lista_ordenada(df_clean['nomvendedor']) if 'nomvendedor' in df_clean.columns else []
-        }
+        # Clasificar líneas y enriquecer (ya incluye geografía)
+        df_clean, config_filtros = _clasificar_lineas_estrategicas(df_clean)
+
+        # Filtro YTD opcional
+        if st.session_state.get("filtro_ytd", False):
+            df_clean = _aplicar_filtro_ytd(df_clean)
+
         return df_clean, config_filtros
         
     except Exception as e:
