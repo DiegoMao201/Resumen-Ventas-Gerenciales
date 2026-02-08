@@ -510,7 +510,13 @@ class TabPortafolioMarcasCategorias(BaseTab):
         self._panel_segmento("Categorías", self.col_linea, top_n=12)
 
         st.markdown("---")
-        self._insights_clave()
+        self._alertas_gerenciales()
+
+        st.markdown("---")
+        self._simulador_penetracion()
+
+        st.markdown("---")
+        self._insights_ia()
 
     def _kpis_portafolio(self):
         total_actual = self.df_actual[self.col_valor].sum()
@@ -525,8 +531,12 @@ class TabPortafolioMarcasCategorias(BaseTab):
         col4.metric("Clientes activos", f"{self.df_actual[self.col_cliente].nunique():,}")
 
     def _panel_segmento(self, label: str, col_group: str, top_n: int = 10):
-        st.subheader(f"⚡ {label}: Motores, Frenos y Cobertura")
+        st.subheader(f"⚡ {label}: Ranking, Pareto y Penetración")
         resumen = self._resumen_crecimiento(col_group)
+
+        # Pareto
+        resumen["Acumulado"] = resumen["Actual"].cumsum()
+        resumen["%Acumulado"] = resumen["Acumulado"] / resumen["Actual"].sum() * 100
 
         st.dataframe(
             resumen.head(top_n),
@@ -537,6 +547,8 @@ class TabPortafolioMarcasCategorias(BaseTab):
                 "Var_abs": st.column_config.NumberColumn("Var Abs", format="$%d"),
                 "Var_pct": st.column_config.NumberColumn("Var %", format="%.1f%%"),
                 "Clientes": st.column_config.NumberColumn("Clientes", format="%d"),
+                "Penetracion": st.column_config.ProgressColumn("Penetración", format="%.1f%%"),
+                "%Acumulado": st.column_config.ProgressColumn("% Acumulado", format="%.1f%%"),
                 "Impacto": "Impacto"
             },
             use_container_width=True,
@@ -558,26 +570,35 @@ class TabPortafolioMarcasCategorias(BaseTab):
             st.plotly_chart(fig, use_container_width=True)
 
         with col_b:
-            st.markdown("Motores vs. Frenos (variación)")
-            top_mov = pd.concat([
-                resumen.sort_values("Var_abs", ascending=False).head(5),
-                resumen.sort_values("Var_abs", ascending=True).head(5)
-            ]).drop_duplicates(subset=[col_group])
+            st.markdown("Pareto (Acumulado %)")
             fig2 = go.Figure()
             fig2.add_trace(go.Bar(
-                x=top_mov[col_group],
-                y=top_mov["Var_abs"],
-                marker_color=["#10b981" if v > 0 else "#ef4444" for v in top_mov["Var_abs"]],
-                text=[f"{v:,.0f}" for v in top_mov["Var_abs"]],
-                textposition="outside"
+                x=resumen.head(top_n)[col_group],
+                y=resumen.head(top_n)["Actual"],
+                name="Venta",
+                marker_color="#3b82f6"
             ))
-            fig2.update_layout(title="Impacto absoluto", xaxis_tickangle=-35, height=380)
+            fig2.add_trace(go.Scatter(
+                x=resumen.head(top_n)[col_group],
+                y=resumen.head(top_n)["%Acumulado"],
+                name="% Acumulado",
+                yaxis="y2",
+                mode="lines+markers",
+                marker_color="#f59e0b"
+            ))
+            fig2.update_layout(
+                yaxis=dict(title="Venta"),
+                yaxis2=dict(title="% Acumulado", overlaying="y", side="right", range=[0, 100]),
+                height=380,
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
             st.plotly_chart(fig2, use_container_width=True)
 
     def _resumen_crecimiento(self, col_group: str) -> pd.DataFrame:
         actual = self.df_actual.groupby(col_group)[self.col_valor].sum()
         anterior = self.df_anterior.groupby(col_group)[self.col_valor].sum()
         clientes = self.df_actual.groupby(col_group)[self.col_cliente].nunique() if col_group in self.df_actual else pd.Series(dtype=int)
+        total_clientes = self.df_actual[self.col_cliente].nunique()
 
         df_comp = pd.DataFrame({
             col_group: actual.index,
@@ -592,6 +613,11 @@ class TabPortafolioMarcasCategorias(BaseTab):
             (df_comp["Var_abs"] / df_comp["Anterior"]) * 100,
             100
         )
+        df_comp["Penetracion"] = np.where(
+            total_clientes > 0,
+            df_comp["Clientes"] / total_clientes * 100,
+            0
+        )
         df_comp["Impacto"] = np.select(
             [
                 df_comp["Var_pct"] >= 10,
@@ -602,20 +628,53 @@ class TabPortafolioMarcasCategorias(BaseTab):
         )
         return df_comp.sort_values("Actual", ascending=False).reset_index(drop=True)
 
-    def _insights_clave(self):
+    def _alertas_gerenciales(self):
+        st.subheader("🚨 Alertas y Oportunidades Automáticas")
         resumen_m = self._resumen_crecimiento(self.col_marca)
         resumen_c = self._resumen_crecimiento(self.col_linea)
 
-        motores_m = resumen_m[resumen_m["Impacto"] == "MOTOR"].head(3)[self.col_marca].tolist()
-        frenos_m = resumen_m[resumen_m["Impacto"] == "FRENO"].head(3)[self.col_marca].tolist()
-        motores_c = resumen_c[resumen_c["Impacto"] == "MOTOR"].head(3)[self.col_linea].tolist()
-        frenos_c = resumen_c[resumen_c["Impacto"] == "FRENO"].head(3)[self.col_linea].tolist()
+        # Oportunidad: Alta penetración y alto margen (simulado)
+        oportunidades = resumen_c[(resumen_c["Penetracion"] < 40) & (resumen_c["Var_pct"] > 10)]
+        cuidado = resumen_c[(resumen_c["Var_pct"] < -10) & (resumen_c["Penetracion"] > 30)]
 
-        st.subheader("📝 Insights automáticos")
-        st.markdown(f"""
-- **Motores por marca:** {", ".join(motores_m) if motores_m else "N/A"}
-- **Frenos por marca:** {", ".join(frenos_m) if frenos_m else "N/A"}
-- **Motores por categoría:** {", ".join(motores_c) if motores_c else "N/A"}
-- **Frenos por categoría:** {", ".join(frenos_c) if frenos_c else "N/A"}
-- **Cobertura clientes (actual):** {self.df_actual[self.col_cliente].nunique():,}
-        """)
+        if not oportunidades.empty:
+            st.success(f"**Oportunidad:** {', '.join(oportunidades[self.col_linea].head(3))} tienen baja penetración pero están creciendo rápido.")
+        if not cuidado.empty:
+            st.warning(f"**Cuidado:** {', '.join(cuidado[self.col_linea].head(3))} están cayendo con alta penetración, requieren plan de acción.")
+        if oportunidades.empty and cuidado.empty:
+            st.info("No se detectaron alertas críticas en las categorías principales.")
+
+    def _simulador_penetracion(self):
+        st.subheader("🧮 Simulador de Escenarios de Penetración")
+        resumen_c = self._resumen_crecimiento(self.col_linea)
+        total_clientes = self.df_actual[self.col_cliente].nunique()
+
+        categoria_sel = st.selectbox("Selecciona una categoría para simular", resumen_c[self.col_linea])
+        row = resumen_c[resumen_c[self.col_linea] == categoria_sel].iloc[0]
+        actual_pen = row["Penetracion"]
+        actual_venta = row["Actual"]
+
+        st.write(f"Penetración actual: **{actual_pen:.1f}%** ({int(row['Clientes'])} clientes)")
+        objetivo_pen = st.slider("Penetración objetivo (%)", min_value=int(actual_pen)+1, max_value=100, value=min(int(actual_pen)+10, 100))
+        clientes_objetivo = int(total_clientes * objetivo_pen / 100)
+        venta_prom_cliente = actual_venta / row["Clientes"] if row["Clientes"] > 0 else 0
+        venta_potencial = venta_prom_cliente * clientes_objetivo
+
+        st.info(f"Si {categoria_sel} llegara a {objetivo_pen}% de penetración, la venta potencial sería **${venta_potencial:,.0f}** (+${venta_potencial-actual_venta:,.0f} vs actual)")
+
+    def _insights_ia(self):
+        st.subheader("🤖 Insights de IA sobre Marcas y Categorías")
+        # Puedes personalizar el prompt en ai_analysis.py si lo deseas
+        metricas = {
+            "venta_actual": self.df_actual[self.col_valor].sum(),
+            "venta_anterior": self.df_anterior[self.col_valor].sum(),
+            "diferencia": self.df_actual[self.col_valor].sum() - self.df_anterior[self.col_valor].sum(),
+            "pct_variacion": (
+                (self.df_actual[self.col_valor].sum() - self.df_anterior[self.col_valor].sum())
+                / self.df_anterior[self.col_valor].sum() * 100
+            ) if self.df_anterior[self.col_valor].sum() > 0 else 0
+        }
+        lineas_presentes = sorted(self.df_actual[self.col_linea].dropna().unique())
+        with st.spinner("🧠 Analizando con IA..."):
+            analisis = analizar_con_ia_avanzado(self.df_actual, self.df_anterior, metricas, lineas_presentes)
+        st.markdown(analisis.get("analisis_ejecutivo", "Sin respuesta de IA."))
