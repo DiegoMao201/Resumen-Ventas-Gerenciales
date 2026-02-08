@@ -25,7 +25,7 @@ class BaseTab(ABC):
 
         self.col_valor = "valor_venta" if "valor_venta" in df.columns else pick(["VALOR"])
         self.col_linea = "Linea_Estrategica" if "Linea_Estrategica" in df.columns else pick(["linea_producto"])
-        self.col_marca = "marca_producto" if "marca_producto" in df.columns else pick(["Marca_Master"])
+        self.col_marca = pick(["nombre_marca", "marca_producto", "Marca_Master"])
         self.col_cliente = pick(["nombre_cliente", "CLIENTE"])
         self.col_producto = pick(["nombre_articulo", "NOMBRE_PRODUCTO"])
         self.col_vendedor = pick(["nomvendedor", "Vendedor"])
@@ -141,25 +141,25 @@ class TabADNCrecimiento(BaseTab):
     def _analisis_marcas(self):
         """Análisis por marca"""
         st.subheader("🏷️ Desempeño por Marca")
-        
-        marcas_actual = self.df_actual.groupby(self.col_marca)[self.col_valor].sum().sort_values(ascending=False).head(10)
-        marcas_anterior = self.df_anterior.groupby(self.col_marca)[self.col_valor].sum()
-        
+        col_marca = "nombre_marca" if "nombre_marca" in self.df.columns else self.col_marca
+
+        marcas_actual = (
+            self.df_actual.groupby(col_marca)[self.col_valor]
+            .sum()
+            .sort_values(ascending=False)
+            .head(10)
+        )
+        marcas_anterior = self.df_anterior.groupby(col_marca)[self.col_valor].sum()
+
         df_comp = pd.DataFrame({
             'Actual': marcas_actual,
-            'Anterior': marcas_anterior
+            'Anterior': [marcas_anterior.get(m, 0) for m in marcas_actual.index]
         }).fillna(0)
-        
+
         fig = go.Figure()
         fig.add_trace(go.Bar(name=f'{self.filtros["anio_base"]}', x=df_comp.index, y=df_comp['Anterior']))
         fig.add_trace(go.Bar(name=f'{self.filtros["anio_objetivo"]}', x=df_comp.index, y=df_comp['Actual']))
-        
-        fig.update_layout(
-            barmode='group',
-            title="Top 10 Marcas - Comparativo",
-            xaxis_tickangle=-45
-        )
-        
+        fig.update_layout(barmode='group', title="Top 10 Marcas - Comparativo", xaxis_tickangle=-45)
         st.plotly_chart(fig, use_container_width=True)
 
 
