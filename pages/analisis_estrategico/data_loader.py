@@ -119,16 +119,17 @@ def cargar_y_validar_datos() -> Tuple[pd.DataFrame, Dict]:
         
         df_clean = df_raw.copy()
 
-        # --- CORRECCIÓN DE MARCAS Y CATEGORÍAS ---
-        # Mapea marcas numéricas a nombres
+        # Mapear marcas a nombre y asegurar líneas/categorías en texto
         if 'marca_producto' in df_clean.columns and 'nombre_marca' not in df_clean.columns:
-            DATA_CONFIG = st.session_state.DATA_CONFIG  # <-- Usa la variable de sesión
+            DATA_CONFIG = st.session_state.DATA_CONFIG
             df_clean['nombre_marca'] = df_clean['marca_producto'].map(DATA_CONFIG["mapeo_marcas"]).fillna('No Especificada')
 
-        # Normaliza categorías si es necesario
-        if 'categoria_producto' in df_clean.columns:
-            df_clean['categoria_producto'] = df_clean['categoria_producto'].astype(str)
-
+        # Preferir super_categoria/categoria_producto como Linea_Estrategica
+        if 'super_categoria' in df_clean.columns:
+            df_clean['Linea_Estrategica'] = df_clean['super_categoria'].astype(str).str.strip()
+        elif 'categoria_producto' in df_clean.columns:
+            df_clean['Linea_Estrategica'] = df_clean['categoria_producto'].astype(str).str.strip()
+        
         # Limpiar tipos de datos
         df_clean = _limpiar_tipos_datos(df_clean)
         # Clasificar líneas y enriquecer
