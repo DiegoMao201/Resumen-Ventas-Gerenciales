@@ -79,13 +79,18 @@ def _unificar_lineas_marcas(df: pd.DataFrame) -> pd.DataFrame:
             return ""
         return s
 
-    # 1) Preferir linea_producto con nombres reales
-    if "linea_producto" in df.columns:
-        df["Linea_Estrategica"] = df["linea_producto"].apply(_fmt_linea)
+    # Si ya viene Linea_Estrategica, no la pierdas
+    if "Linea_Estrategica" in df.columns:
+        df["Linea_Estrategica"] = df["Linea_Estrategica"].fillna("").astype(str)
     else:
         df["Linea_Estrategica"] = ""
 
-    # 2) Fallback a categoria_producto solo donde quedó vacío
+    # 1) Completar vacíos con linea_producto
+    if "linea_producto" in df.columns:
+        mask = df["Linea_Estrategica"].eq("")
+        df.loc[mask, "Linea_Estrategica"] = df.loc[mask, "linea_producto"].apply(_fmt_linea)
+
+    # 2) Fallback a categoria_producto donde siga vacío
     if "categoria_producto" in df.columns:
         mask = df["Linea_Estrategica"].eq("")
         df.loc[mask, "Linea_Estrategica"] = df.loc[mask, "categoria_producto"].apply(_fmt_linea)
@@ -177,42 +182,30 @@ def _limpiar_tipos_datos(df: pd.DataFrame) -> pd.DataFrame:
 def _clasificar_lineas_estrategicas(df: pd.DataFrame) -> pd.DataFrame:
     """Clasifica productos en líneas estratégicas"""
     config = AppConfig()
-    
-    if 'linea_producto' in df.columns:
-        df['Linea_Estrategica'] = df['linea_producto'].fillna('Otros').astype(str)
+
+    if "Linea_Estrategica" in df.columns and df["Linea_Estrategica"].notna().any():
+        df["Linea_Estrategica"] = df["Linea_Estrategica"].astype(str).str.strip()
+    elif "super_categoria" in df.columns:
+        df["Linea_Estrategica"] = df["super_categoria"].fillna("Otros").astype(str).str.strip()
+    elif "categoria_producto" in df.columns:
+        df["Linea_Estrategica"] = df["categoria_producto"].fillna("Otros").astype(str).str.strip()
+    elif "linea_producto" in df.columns:
+        df["Linea_Estrategica"] = df["linea_producto"].fillna("Otros").astype(str).str.strip()
     else:
-        if 'nombre_articulo' in df.columns:
-            def clasificar_por_nombre(nombre):
-                if pd.isna(nombre):
-                    return 'Otros'
-                nombre_upper = str(nombre).upper()
-                for linea in config.LINEAS_ESTRATEGICAS:
-                    if linea.upper() in nombre_upper:
-                        return linea
-                return 'Otros'
-            
-            df['Linea_Estrategica'] = df['nombre_articulo'].apply(clasificar_por_nombre)
-        else:
-            df['Linea_Estrategica'] = 'Sin Clasificar'
-    
-    df['Linea_Estrategica'] = df['Linea_Estrategica'].astype(str).str.strip()
-    
-    if 'marca_producto' in df.columns:
-        def clasificar_categoria(marca):
-            if pd.isna(marca):
-                return 'Otros'
-            marca_upper = str(marca).upper()
-            if any(x in marca_upper for x in ['PINTUCO', 'SIKA', 'CORONA']):
-                return 'Premium'
-            elif any(x in marca_upper for x in ['MEGA', 'MASTER']):
-                return 'Estandar'
-            return 'Otros'
-        
-        df['Categoria_Master'] = df['marca_producto'].apply(clasificar_categoria)
-    else:
-        df['Categoria_Master'] = 'Sin Categoría'
-    
-    return df
+        df["Linea_Estrategica"] = "Sin Clasificar"
+
+    # Clasificar líneas y enriquecer
+    df_clean = _unificar_lineas_marcas(df)
+    df_clean = _enriquecer_geografia(df_clean)
+    anios_disponibles = sorted(df_clean['anio'].unique(), reverse=True)
+    config_filtros = {
+        'anios_disponibles': anios_disponibles,
+        'ciudades_disponibles': obtener_lista_ordenada(df_clean['Poblacion_Real']) if 'Poblacion_Real' in df_clean.columns else [],
+        'lineas_disponibles': obtener_lista_ordenada(df_clean['Linea_Estrategica']) if 'Linea_Estrategica' in df_clean.columns else [],
+        'marcas_disponibles': obtener_lista_ordenada(df_clean['marca_producto']) if 'marca_producto' in df_clean.columns else [],
+        'vendedores_disponibles': obtener_lista_ordenada(df_clean['nomvendedor']) if 'nomvendedor' in df_clean.columns else []
+    }
+    return df_clean, config_filtros
 
 def _enriquecer_geografia(df: pd.DataFrame) -> pd.DataFrame:
     """Agrega información geográfica"""
