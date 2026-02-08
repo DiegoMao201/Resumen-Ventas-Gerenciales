@@ -420,7 +420,7 @@ with tab_master:
         fig_lorenz.add_trace(go.Scatter(x=[0,1], y=[0,1], mode='lines', name='Igualdad Perfecta', line=dict(dash='dash', color='gray')))
         
         # Calculo Gini aproximado
-        B = np.sum((lorenz_v[1:] + lorenz_v[:-1]) * (xaxis[1:] - xaxis[:-1]) / 2)
+        B = np.trapz(lorenz_v, xaxis)
         gini = 1 - 2*B
         
         fig_lorenz.update_layout(title=f"Concentración de Ventas (Gini: {gini:.2f})", xaxis_title="% Acumulado Vendedores", yaxis_title="% Acumulado Ventas")
