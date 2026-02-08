@@ -494,3 +494,128 @@ class TabProyeccion2026(BaseTab):
             col3.metric("Proyección 2026", f"${proyeccion['proyeccion_2026']:,.0f}")
         else:
             st.error(f"Error: {error}")
+
+
+class TabPortafolioMarcasCategorias(BaseTab):
+    """Tab de análisis integral de marcas y categorías"""
+
+    def render(self):
+        st.header("🧭 Análisis Integral de Marcas y Categorías")
+        self._kpis_portafolio()
+
+        st.markdown("---")
+        self._panel_segmento("Marcas", self.col_marca, top_n=12)
+
+        st.markdown("---")
+        self._panel_segmento("Categorías", self.col_linea, top_n=12)
+
+        st.markdown("---")
+        self._insights_clave()
+
+    def _kpis_portafolio(self):
+        total_actual = self.df_actual[self.col_valor].sum()
+        total_anterior = self.df_anterior[self.col_valor].sum()
+        var_abs = total_actual - total_anterior
+        var_pct = (var_abs / total_anterior * 100) if total_anterior > 0 else 0
+
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Venta actual", f"${total_actual:,.0f}", f"{var_pct:+.1f}%")
+        col2.metric("Venta anterior", f"${total_anterior:,.0f}")
+        col3.metric("Diferencia", f"${var_abs:,.0f}", delta_color="inverse" if var_abs < 0 else "normal")
+        col4.metric("Clientes activos", f"{self.df_actual[self.col_cliente].nunique():,}")
+
+    def _panel_segmento(self, label: str, col_group: str, top_n: int = 10):
+        st.subheader(f"⚡ {label}: Motores, Frenos y Cobertura")
+        resumen = self._resumen_crecimiento(col_group)
+
+        st.dataframe(
+            resumen.head(top_n),
+            column_config={
+                col_group: label,
+                "Actual": st.column_config.NumberColumn("Actual", format="$%d"),
+                "Anterior": st.column_config.NumberColumn("Anterior", format="$%d"),
+                "Var_abs": st.column_config.NumberColumn("Var Abs", format="$%d"),
+                "Var_pct": st.column_config.NumberColumn("Var %", format="%.1f%%"),
+                "Clientes": st.column_config.NumberColumn("Clientes", format="%d"),
+                "Impacto": "Impacto"
+            },
+            use_container_width=True,
+            hide_index=True
+        )
+
+        col_a, col_b = st.columns([0.55, 0.45])
+        with col_a:
+            st.markdown(f"Top {top_n} por venta actual")
+            fig = px.bar(
+                resumen.head(top_n),
+                x=col_group,
+                y="Actual",
+                color="Impacto",
+                text_auto=".2s",
+                title=f"{label} líderes"
+            )
+            fig.update_layout(xaxis_tickangle=-35, height=380)
+            st.plotly_chart(fig, use_container_width=True)
+
+        with col_b:
+            st.markdown("Motores vs. Frenos (variación)")
+            top_mov = pd.concat([
+                resumen.sort_values("Var_abs", ascending=False).head(5),
+                resumen.sort_values("Var_abs", ascending=True).head(5)
+            ]).drop_duplicates(subset=[col_group])
+            fig2 = go.Figure()
+            fig2.add_trace(go.Bar(
+                x=top_mov[col_group],
+                y=top_mov["Var_abs"],
+                marker_color=["#10b981" if v > 0 else "#ef4444" for v in top_mov["Var_abs"]],
+                text=[f"{v:,.0f}" for v in top_mov["Var_abs"]],
+                textposition="outside"
+            ))
+            fig2.update_layout(title="Impacto absoluto", xaxis_tickangle=-35, height=380)
+            st.plotly_chart(fig2, use_container_width=True)
+
+    def _resumen_crecimiento(self, col_group: str) -> pd.DataFrame:
+        actual = self.df_actual.groupby(col_group)[self.col_valor].sum()
+        anterior = self.df_anterior.groupby(col_group)[self.col_valor].sum()
+        clientes = self.df_actual.groupby(col_group)[self.col_cliente].nunique() if col_group in self.df_actual else pd.Series(dtype=int)
+
+        df_comp = pd.DataFrame({
+            col_group: actual.index,
+            "Actual": actual.values,
+            "Anterior": [anterior.get(x, 0) for x in actual.index],
+            "Clientes": [clientes.get(x, 0) for x in actual.index]
+        }).fillna(0)
+
+        df_comp["Var_abs"] = df_comp["Actual"] - df_comp["Anterior"]
+        df_comp["Var_pct"] = np.where(
+            df_comp["Anterior"] > 0,
+            (df_comp["Var_abs"] / df_comp["Anterior"]) * 100,
+            100
+        )
+        df_comp["Impacto"] = np.select(
+            [
+                df_comp["Var_pct"] >= 10,
+                df_comp["Var_pct"] <= -10
+            ],
+            ["MOTOR", "FRENO"],
+            default="ESTABLE"
+        )
+        return df_comp.sort_values("Actual", ascending=False).reset_index(drop=True)
+
+    def _insights_clave(self):
+        resumen_m = self._resumen_crecimiento(self.col_marca)
+        resumen_c = self._resumen_crecimiento(self.col_linea)
+
+        motores_m = resumen_m[resumen_m["Impacto"] == "MOTOR"].head(3)[self.col_marca].tolist()
+        frenos_m = resumen_m[resumen_m["Impacto"] == "FRENO"].head(3)[self.col_marca].tolist()
+        motores_c = resumen_c[resumen_c["Impacto"] == "MOTOR"].head(3)[self.col_linea].tolist()
+        frenos_c = resumen_c[resumen_c["Impacto"] == "FRENO"].head(3)[self.col_linea].tolist()
+
+        st.subheader("📝 Insights automáticos")
+        st.markdown(f"""
+- **Motores por marca:** {", ".join(motores_m) if motores_m else "N/A"}
+- **Frenos por marca:** {", ".join(frenos_m) if frenos_m else "N/A"}
+- **Motores por categoría:** {", ".join(motores_c) if motores_c else "N/A"}
+- **Frenos por categoría:** {", ".join(frenos_c) if frenos_c else "N/A"}
+- **Cobertura clientes (actual):** {self.df_actual[self.col_cliente].nunique():,}
+        """)

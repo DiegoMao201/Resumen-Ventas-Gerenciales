@@ -13,7 +13,7 @@ from .ui_components import (
 )
 from .processors import (
     TabADNCrecimiento,
-    TabOportunidadGeografica,
+    TabPortafolioMarcasCategorias,
     TabTopClientes,
     TabProductosEstrella,
     TabGestionRiesgo,
@@ -32,7 +32,7 @@ __all__ = [
     'validar_datos_filtrados',
     'tarjeta_metrica',
     'TabADNCrecimiento',
-    'TabOportunidadGeografica',
+    'TabPortafolioMarcasCategorias',
     'TabTopClientes',
     'TabProductosEstrella',
     'TabGestionRiesgo',

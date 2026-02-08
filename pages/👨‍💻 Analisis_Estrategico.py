@@ -25,7 +25,7 @@ try:
         aplicar_filtros,
         validar_datos_filtrados,
         TabADNCrecimiento,
-        TabOportunidadGeografica,
+        TabPortafolioMarcasCategorias,
         TabTopClientes,
         TabProductosEstrella,
         TabGestionRiesgo,
@@ -78,7 +78,7 @@ if not validar_datos_filtrados(df_filtrado, filtros):
 # ===== CREAR PESTAÑAS DE ANÁLISIS =====
 tabs = st.tabs([
     "📊 ADN de Crecimiento",
-    "📍 Oportunidad Geográfica",
+    "🧭 Marcas & Categorías",
     "👥 Top 50 Clientes",
     "📦 Productos Estrella",
     "⚠️ Gestión de Riesgo",
@@ -91,7 +91,7 @@ with tabs[0]:
     TabADNCrecimiento(df_filtrado, filtros).render()
 
 with tabs[1]:
-    TabOportunidadGeografica(df_filtrado, filtros).render()
+    TabPortafolioMarcasCategorias(df_filtrado, filtros).render()
 
 with tabs[2]:
     TabTopClientes(df_filtrado, filtros).render()
