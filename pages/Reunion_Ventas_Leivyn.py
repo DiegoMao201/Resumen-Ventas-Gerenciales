@@ -155,8 +155,8 @@ with tab3:
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Ventas 2025", f"${seller_data['Importe 2025']:,.0f}")
     c2.metric("Crecimiento vs 2024", f"{seller_data['% Crecimiento Real']:.2f}%")
-    c3.metric("Clientes Nuevos", int(seller_data.get('Clientes Nuevo', 0)))
-    c4.metric("Clientes Perdidos", int(seller_data.get('Clientes Descodificado', 0)))
+    c3.metric("Clientes Nuevos", int(seller_data['Clientes Nuevo']) if 'Clientes Nuevo' in seller_data.index else 0)
+    c4.metric("Clientes Perdidos", int(seller_data['Clientes Descodificado']) if 'Clientes Descodificado' in seller_data.index else 0)
     labels = ['Nuevos', 'Reactivados', 'Crecimiento Clientes', 'Decrecimiento Clientes', 'Descodificados']
     values = [
         seller_data.get('Valor Nuevo', 0), 
