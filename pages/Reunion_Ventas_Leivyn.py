@@ -4,6 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
+from openai import OpenAI  # Librería oficial de OpenAI
 
 # -----------------------------------------------------------------------------
 # 1. CONFIGURACIÓN DE LA PÁGINA Y ESTILOS CSS
@@ -67,8 +68,71 @@ st.markdown("""
         margin-bottom: 10px;
         border-radius: 4px;
     }
+    
+    /* Botones de IA */
+    .stButton > button {
+        background-color: #f0f2f6;
+        border: 1px solid #4682B4;
+        color: #4682B4;
+        font-weight: bold;
+    }
+    .stButton > button:hover {
+        background-color: #4682B4;
+        color: white;
+    }
 </style>
 """, unsafe_allow_html=True)
+
+# -----------------------------------------------------------------------------
+# 1.1 CONFIGURACIÓN DE IA (OPENAI)
+# -----------------------------------------------------------------------------
+def obtener_analisis_ia(contexto_grafico, datos_relevantes):
+    """
+    Función centralizada para consultar a la IA.
+    """
+    # Intentar obtener la API KEY de los secrets
+    api_key = st.secrets.get("OPENAI_API_KEY", None)
+    
+    if not api_key:
+        return "⚠️ Error: No se encontró la API Key en .streamlit/secrets.toml. Por favor configúrala."
+
+    try:
+        client = OpenAI(api_key=api_key)
+        
+        prompt_sistema = """
+        Eres un Consultor de Estrategia de Negocios Senior experto en Business Intelligence.
+        Tu objetivo es analizar datos de la empresa 'Ferreinox SAS BIC'.
+        
+        Para cada análisis debes responder OBLIGATORIAMENTE con esta estructura:
+        
+        1. 📘 **¿Qué muestra este gráfico? (Contexto)**: Explica brevemente "cómo se come" este gráfico, qué ejes cruza y para qué sirve en gerencia.
+        2. 🔍 **Análisis de los Datos**: Interpreta los números específicos que te doy. No generalices, usa las cifras.
+        3. 💡 **Oportunidad y Conclusión Gerencial**: Da una recomendación clara, accionable y estratégica basada en el hallazgo.
+        
+        Sé directo, profesional y enfocado en rentabilidad.
+        """
+        
+        prompt_usuario = f"""
+        Analiza el siguiente componente del tablero:
+        
+        TIPO DE GRÁFICO/ANÁLISIS: {contexto_grafico}
+        
+        DATOS EXTRAÍDOS DEL SISTEMA:
+        {datos_relevantes}
+        """
+
+        response = client.chat.completions.create(
+            model="gpt-4o-mini", # O usa "gpt-3.5-turbo" si prefieres
+            messages=[
+                {"role": "system", "content": prompt_sistema},
+                {"role": "user", "content": prompt_usuario}
+            ],
+            temperature=0.7
+        )
+        return response.choices[0].message.content
+
+    except Exception as e:
+        return f"❌ Ocurrió un error al conectar con la IA: {str(e)}"
 
 # -----------------------------------------------------------------------------
 # 2. PROCESAMIENTO DE DATOS AVANZADO
@@ -79,7 +143,6 @@ def load_data():
         # Intentar cargar, si no existe crea un dummy para que el usuario vea el ejemplo
         df = pd.read_excel("analisis_2025.xlsx")
     except FileNotFoundError:
-        st.error("⚠️ No se encontró 'analisis_2025.xlsx'. Usando datos simulados para demostración.")
         # DATOS SIMULADOS PARA QUE EL CÓDIGO NO FALLE SI NO TIENES EL EXCEL
         data = {
             'Vendedor': [f'Vendedor {i}' for i in range(1, 21)],
@@ -262,6 +325,21 @@ with tab_exec:
     fig_waterfall.update_layout(title="Bridge de Variación de Ventas (YoY)", showlegend = False, height=500)
     st.plotly_chart(fig_waterfall, use_container_width=True)
 
+    # --- IA INTEGRATION: WATERFALL ---
+    if st.button("✨ Analizar Gráfico Waterfall con IA", key="btn_waterfall"):
+        with st.spinner("La IA está analizando los componentes de tu venta..."):
+            datos_wf = f"""
+            Venta Año Anterior (Base): ${sum_2024:,.0f}
+            Aporte Clientes Nuevos: ${sum_nuevos:,.0f}
+            Aporte Reactivación: ${sum_react:,.0f}
+            Crecimiento Orgánico (Mismos clientes comprando más): ${sum_crec:,.0f}
+            Decrecimiento (Mismos clientes comprando menos): ${sum_decrec:,.0f}
+            Fuga de Clientes (Perdidos): ${sum_perds:,.0f}
+            Venta Año Actual: ${calculated_2025:,.0f}
+            """
+            analisis = obtener_analisis_ia("Gráfico Waterfall (Puente de Ventas)", datos_wf)
+            st.info(analisis)
+
 # --- TAB 2: DESEMPEÑO COMERCIAL ---
 with tab_comm:
     c1, c2 = st.columns([2, 1])
@@ -276,6 +354,15 @@ with tab_comm:
         fig_bar.update_layout(height=600, xaxis_title="Volumen de Ventas ($)")
         st.plotly_chart(fig_bar, use_container_width=True)
         
+        # --- IA INTEGRATION: RANKING ---
+        if st.button("✨ Analizar Ranking con IA", key="btn_ranking"):
+            with st.spinner("Analizando desempeño de vendedores..."):
+                top_3 = df_sorted.tail(3)[['Vendedor', 'Venta_2025']].to_dict('records')
+                bottom_3 = df_sorted.head(3)[['Vendedor', 'Venta_2025']].to_dict('records')
+                promedio = df_sorted['Venta_2025'].mean()
+                datos_rank = f"Top 3 Vendedores: {top_3}\nPeores 3 Vendedores: {bottom_3}\nPromedio de Venta: ${promedio:,.0f}"
+                st.info(obtener_analisis_ia("Ranking de Ventas (Gráfico de Barras)", datos_rank))
+
     with c2:
         st.subheader("Top Performers (Pareto)")
         pareto_df = df_filtered[df_filtered['Categoria_Pareto'].str.contains('A')]
@@ -284,6 +371,14 @@ with tab_comm:
             pareto_df[['Vendedor', 'Venta_2025']].sort_values('Venta_2025', ascending=False),
             hide_index=True, use_container_width=True
         )
+        # --- IA INTEGRATION: PARETO ---
+        if st.button("✨ Analizar Pareto con IA", key="btn_pareto"):
+            with st.spinner("Analizando concentración de ventas..."):
+                total_vendedores = len(df_filtered)
+                cant_pareto = len(pareto_df)
+                porcentaje_fuerza = (cant_pareto / total_vendedores) * 100
+                datos_pareto = f"El {porcentaje_fuerza:.1f}% de la fuerza de ventas ({cant_pareto} de {total_vendedores}) hace el 80% del dinero."
+                st.info(obtener_analisis_ia("Ley de Pareto (80/20)", datos_pareto))
 
 # --- TAB 3: DINÁMICA DE CLIENTES ---
 with tab_deep:
@@ -298,6 +393,19 @@ with tab_deep:
     fig_scatter.add_hline(y=avg_growth, line_dash="dot", line_color="red")
     fig_scatter.add_vline(x=avg_vol, line_dash="dot", line_color="blue")
     st.plotly_chart(fig_scatter, use_container_width=True)
+    
+    # --- IA INTEGRATION: SCATTER ---
+    if st.button("✨ Analizar Matriz de Oportunidad con IA", key="btn_scatter"):
+        with st.spinner("Detectando anomalías y oportunidades..."):
+            alto_crec_alto_vol = df_filtered[(df_filtered['Venta_2025'] > avg_vol) & (df_filtered['Variacion_Pct'] > avg_growth)]['Vendedor'].tolist()
+            bajo_crec_alto_vol = df_filtered[(df_filtered['Venta_2025'] > avg_vol) & (df_filtered['Variacion_Pct'] < avg_growth)]['Vendedor'].tolist()
+            datos_matriz = f"""
+            Promedio Crecimiento: {avg_growth:.1f}%
+            Promedio Volumen: ${avg_vol:,.0f}
+            Vendedores 'Estrella' (Crecen más que el promedio y venden más que el promedio): {alto_crec_alto_vol}
+            Vendedores 'Estancados' (Venden mucho pero crecen poco): {bajo_crec_alto_vol}
+            """
+            st.info(obtener_analisis_ia("Matriz de Dispersión (Volumen vs Crecimiento)", datos_matriz))
     
     st.markdown("### 🚦 Desglose por Vendedor")
     sel = st.selectbox("Seleccione Vendedor:", df_filtered['Vendedor'].unique())
@@ -346,15 +454,31 @@ with tab_master:
     fig_bcg.add_vline(x=median_share, line_color="gray", line_dash="dash")
     
     # Anotaciones de Cuadrantes
-    fig_bcg.add_annotation(x=max(df_filtered['Cuota_Relativa']), y=max(df_filtered['Variacion_Pct']), text="⭐ ESTRELLAS (Alto Vol/Alto Crec)", showarrow=False, font=dict(color="green"))
-    fig_bcg.add_annotation(x=0.1, y=max(df_filtered['Variacion_Pct']), text="❓ INTERROGANTES (Bajo Vol/Alto Crec)", showarrow=False, font=dict(color="orange"))
-    fig_bcg.add_annotation(x=max(df_filtered['Cuota_Relativa']), y=min(df_filtered['Variacion_Pct']), text="🐮 VACAS (Alto Vol/Bajo Crec)", showarrow=False, font=dict(color="blue"))
-    fig_bcg.add_annotation(x=0.1, y=min(df_filtered['Variacion_Pct']), text="🐕 PERROS (Bajo Vol/Bajo Crec)", showarrow=False, font=dict(color="red"))
+    fig_bcg.add_annotation(x=max(df_filtered['Cuota_Relativa']), y=max(df_filtered['Variacion_Pct']), text="⭐ ESTRELLAS", showarrow=False, font=dict(color="green"))
+    fig_bcg.add_annotation(x=0.1, y=max(df_filtered['Variacion_Pct']), text="❓ INTERROGANTES", showarrow=False, font=dict(color="orange"))
+    fig_bcg.add_annotation(x=max(df_filtered['Cuota_Relativa']), y=min(df_filtered['Variacion_Pct']), text="🐮 VACAS", showarrow=False, font=dict(color="blue"))
+    fig_bcg.add_annotation(x=0.1, y=min(df_filtered['Variacion_Pct']), text="🐕 PERROS", showarrow=False, font=dict(color="red"))
     
     fig_bcg.update_traces(textposition='top center')
     fig_bcg.update_layout(height=600, plot_bgcolor='#f9f9f9')
     st.plotly_chart(fig_bcg, use_container_width=True)
     
+    # --- IA INTEGRATION: BCG ---
+    if st.button("✨ Analizar Matriz BCG con IA", key="btn_bcg"):
+        with st.spinner("Clasificando cartera estratégica..."):
+            estrellas = df_filtered[(df_filtered['Cuota_Relativa'] > median_share) & (df_filtered['Variacion_Pct'] > median_growth)]['Vendedor'].tolist()
+            vacas = df_filtered[(df_filtered['Cuota_Relativa'] > median_share) & (df_filtered['Variacion_Pct'] <= median_growth)]['Vendedor'].tolist()
+            interrogantes = df_filtered[(df_filtered['Cuota_Relativa'] <= median_share) & (df_filtered['Variacion_Pct'] > median_growth)]['Vendedor'].tolist()
+            perros = df_filtered[(df_filtered['Cuota_Relativa'] <= median_share) & (df_filtered['Variacion_Pct'] <= median_growth)]['Vendedor'].tolist()
+            
+            datos_bcg = f"""
+            Estrellas (Cuidar e Invertir): {estrellas}
+            Vacas (Ordeñar flujo de caja): {vacas}
+            Interrogantes (Decidir si invertir o dejar): {interrogantes}
+            Perros (Considerar reestructurar): {perros}
+            """
+            st.info(obtener_analisis_ia("Matriz BCG (Boston Consulting Group)", datos_bcg))
+
     # --- SECCIÓN 2: DESCOMPOSICIÓN DEL CRECIMIENTO (VECTORIAL) ---
     st.markdown("---")
     st.markdown("### 2. Descomposición Vectorial del Crecimiento (Price vs. Volume Effect)")
@@ -390,6 +514,12 @@ with tab_master:
     fig_vec.update_layout(barmode='relative', title="Factores de Crecimiento (Top 10 Vendedores)", height=450)
     st.plotly_chart(fig_vec, use_container_width=True)
     st.info("💡 **Interpretación:** Barras azules indican crecimiento por mejora en la venta promedio por cliente. Barras verdes indican crecimiento por captación de nuevos clientes.")
+
+    # --- IA INTEGRATION: VECTORIAL ---
+    if st.button("✨ Analizar Vectores con IA", key="btn_vector"):
+        with st.spinner("Descomponiendo el ADN de la venta..."):
+            resumen_vector = df_decomp[['Vendedor', 'Efecto_Volumen', 'Efecto_Ticket']].to_dict('records')
+            st.info(obtener_analisis_ia("Análisis Vectorial (Efecto Precio vs Efecto Volumen)", str(resumen_vector)))
 
     # --- SECCIÓN 3: ESTADÍSTICA Y RIESGO (DISTRIBUCIÓN Y GINI) ---
     st.markdown("---")
@@ -431,6 +561,12 @@ with tab_master:
         else:
             st.success(f"✅ **Equipo Balanceado:** Gini de {gini:.2f} sugiere una distribución de ventas saludable.")
 
+    # --- IA INTEGRATION: RIESGO ---
+    if st.button("✨ Analizar Riesgo Estadístico con IA", key="btn_risk"):
+        with st.spinner("Evaluando riesgo de concentración..."):
+            datos_riesgo = f"Coeficiente de Gini: {gini:.2f} (Donde 0 es igualdad perfecta y 1 es desigualdad total). Promedio Venta: {df_filtered['Venta_2025'].mean()}"
+            st.info(obtener_analisis_ia("Coeficiente de Gini y Distribución Normal", datos_riesgo))
+
     # --- SECCIÓN 4: MATRIZ DE CORRELACIÓN ---
     st.markdown("---")
     st.markdown("### 5. Factores de Correlación (Mapa de Calor)")
@@ -442,10 +578,15 @@ with tab_master:
     
     fig_corr = px.imshow(corr_matrix, text_auto=True, aspect="auto", color_continuous_scale='RdBu_r', title="Mapa de Calor de Correlaciones")
     st.plotly_chart(fig_corr, use_container_width=True)
+    
+    # --- IA INTEGRATION: CORRELACION ---
+    if st.button("✨ Analizar Correlaciones con IA", key="btn_corr"):
+        with st.spinner("Buscando patrones ocultos..."):
+            st.info(obtener_analisis_ia("Matriz de Correlación (Heatmap)", str(corr_matrix.to_dict())))
 
     # --- SECCIÓN 5: CONCLUSIONES AUTOMÁTICAS (IA GENERATIVA SIMULADA) ---
     st.markdown("---")
-    st.markdown("### 🤖 Insights Generados Automáticamente")
+    st.markdown("### 🤖 Insights Generados Automáticamente (Reglas de Negocio)")
     
     # Lógica simple de reglas para generar texto
     top_grower = df_filtered.loc[df_filtered['Variacion_Pct'].idxmax()]
@@ -453,7 +594,7 @@ with tab_master:
     
     st.markdown(f"""
     <div class="insight-box">
-        <h4>Resumen Estratégico:</h4>
+        <h4>Resumen Estratégico Rápido:</h4>
         <ul>
             <li><strong>Motor de Crecimiento:</strong> El vendedor <b>{top_grower['Vendedor']}</b> tiene la mayor aceleración ({top_grower['Variacion_Pct']:.1f}%), impulsado principalmente por una estrategia de {'captación' if top_grower['Valor_Nuevos'] > top_grower['Valor_Crecimiento'] else 'desarrollo de cartera'}.</li>
             <li><strong>Punto de Dolor:</strong> Se debe auditar la cartera de <b>{top_loser['Vendedor']}</b>, quien presenta la mayor fuga de capital (${top_loser['Valor_Perdidos']:,.0f}).</li>
