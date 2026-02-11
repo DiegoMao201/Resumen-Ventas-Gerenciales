@@ -427,7 +427,7 @@ with c1:
 with c2:
     st.subheader("🏗️ Mix por Sector")
     if not df_proyectos.empty:
-        fig_pie = px.donut(df_proyectos, values='Total_Oportunidad', names='Tipo', hole=0.4)
+        fig_pie = px.pie(df_proyectos, values='Total_Oportunidad', names='Tipo', hole=0.4)
         st.plotly_chart(fig_pie, use_container_width=True)
 
 # Sección de IA Estratégica
