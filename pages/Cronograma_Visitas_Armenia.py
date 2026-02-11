@@ -444,6 +444,10 @@ with tab1:
     st.dataframe(df_crono, use_container_width=True, hide_index=True)
 
 with tab2:
+    for col in ["Cliente", "Proyecto", "Tipo", "Etapa", "Total_Oportunidad", "Fuente"]:
+        if col not in df_proyectos.columns:
+            df_proyectos[col] = "N/A"
+
     st.dataframe(
         df_proyectos[["Cliente", "Proyecto", "Tipo", "Etapa", "Total_Oportunidad", "Fuente"]].style.format({"Total_Oportunidad": "${:,.0f}"}),
         use_container_width=True
