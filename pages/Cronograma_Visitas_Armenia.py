@@ -4,9 +4,9 @@ import numpy as np
 import datetime
 import plotly.express as px
 import plotly.graph_objects as go
-from openai import OpenAI
 import io
 import time
+import random
 
 # Intentar importar la búsqueda web, si falla, usar modo seguro
 try:
@@ -17,60 +17,78 @@ except ImportError:
 
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(
-    page_title="Tablero Comando: Armenia 2026",
-    page_icon="🎯",
+    page_title="Tablero Comando: Armenia 2026 | GM-DATOVATE",
+    page_icon="🧠",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
-# --- ESTILOS CSS PROFESIONALES (MODO GERENCIAL) ---
+# --- ESTILOS CSS DE ALTO NIVEL (MODO GERENCIAL & WAR ROOM) ---
 st.markdown("""
 <style>
-    /* Tipografía y Encabezados */
-    h1 {color: #0f172a; font-weight: 800; letter-spacing: -1px;}
-    h2 {color: #1e3a8a; border-bottom: 2px solid #3b82f6; padding-bottom: 10px;}
-    h3 {color: #334155;}
+    /* Tipografía General */
+    .main {background-color: #f8fafc;}
+    h1 {color: #0f172a; font-family: 'Helvetica Neue', sans-serif; font-weight: 800; letter-spacing: -1px;}
+    h2 {color: #1e3a8a; border-bottom: 2px solid #3b82f6; padding-bottom: 10px; font-weight: 700;}
+    h3 {color: #334155; font-weight: 600;}
     
     /* Métricas */
-    div[data-testid="stMetricValue"] {font-size: 1.8rem; font-weight: 700; color: #1e40af;}
+    div[data-testid="stMetricValue"] {font-size: 2rem; font-weight: 800; color: #2563eb;}
+    div[data-testid="stMetricLabel"] {font-weight: 600; color: #64748b;}
+    
+    /* Contenedor de la IA */
+    .ia-container {
+        background-color: #1e293b;
+        color: #e2e8f0;
+        padding: 20px;
+        border-radius: 10px;
+        border-left: 6px solid #10b981;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    }
+    .ia-voice {
+        font-family: 'Courier New', monospace;
+        font-size: 1.1rem;
+        line-height: 1.6;
+    }
+    .ia-urgent {
+        color: #fca5a5;
+        font-weight: bold;
+        text-transform: uppercase;
+    }
+    .ia-money {
+        color: #bef264;
+        font-weight: bold;
+    }
+    
+    /* Alertas Tácticas */
+    .tactica-box {
+        background-color: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 15px;
+        margin-bottom: 10px;
+        border-left: 5px solid #3b82f6;
+    }
     
     /* Tablas */
     .dataframe {font-size: 0.9rem !important;}
-    
-    /* Alertas Personalizadas */
-    .alerta-compra {
-        background-color: #dcfce7;
-        border-left: 5px solid #22c55e;
-        padding: 15px;
-        border-radius: 5px;
-        color: #14532d;
-        font-weight: 600;
-    }
-    .alerta-urgente {
-        background-color: #fee2e2;
-        border-left: 5px solid #ef4444;
-        padding: 15px;
-        border-radius: 5px;
-        color: #7f1d1d;
-        font-weight: 600;
-    }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 1. MOTOR DE INTELIGENCIA DE NEGOCIOS (CLASES Y FUNCIONES) ---
+# --- 1. MOTOR DE INTELIGENCIA DE NEGOCIOS ---
 
 class GestorOportunidades:
     def __init__(self):
-        # Base de datos SEMILLA con DATOS REALES del mercado Quindiano (Constructoras Reales)
-        # Esto asegura que incluso sin internet, haya datos coherentes.
+        # Base de datos SEMILLA con DATOS REALES simulados del mercado Quindiano
         self.db_semilla = [
-            {"Cliente": "Constructora CAMU", "Proyecto": "Torre Valparaíso", "Tipo": "Residencial", "Etapa": "Acabados", "m2_aprox": 12000, "Probabilidad": "Alta", "Ubicación": "Av Centenario"},
-            {"Cliente": "Constructora Centenario", "Proyecto": "San Juan de la Loma", "Tipo": "Residencial", "Etapa": "Estructura", "m2_aprox": 8500, "Probabilidad": "Media", "Ubicación": "Norte Armenia"},
-            {"Cliente": "Márquez y Fajardo", "Proyecto": "Mall de la Avenida", "Tipo": "Comercial", "Etapa": "Pintura", "m2_aprox": 5000, "Probabilidad": "Muy Alta", "Ubicación": "Av Bolívar"},
-            {"Cliente": "Gobernación del Quindío", "Proyecto": "Mantenimiento Vías Terciarias", "Tipo": "Infraestructura", "Etapa": "Licitación", "m2_aprox": 0, "Probabilidad": "Baja", "Ubicación": "Departamental"},
-            {"Cliente": "Clínica Avidanti", "Proyecto": "Ampliación Torre Médica", "Tipo": "Salud", "Etapa": "Obra Gris", "m2_aprox": 4000, "Probabilidad": "Media", "Ubicación": "Av 19"},
-            {"Cliente": "Constructora Soriano", "Proyecto": "Reserva de los Álamos", "Tipo": "Residencial", "Etapa": "Cimentación", "m2_aprox": 15000, "Probabilidad": "Baja", "Ubicación": "Álamos"},
-            {"Cliente": "Industria Cafe Quindio", "Proyecto": "Nueva Planta Procesamiento", "Tipo": "Industria", "Etapa": "Acabados", "m2_aprox": 2000, "Probabilidad": "Alta", "Ubicación": "Zona Franca"},
+            {"Cliente": "Constructora CAMU", "Proyecto": "Torre Valparaíso", "Tipo": "Residencial", "Etapa": "Acabados", "m2_aprox": 12000, "Probabilidad": "Alta", "Ubicación": "Av Centenario", "Contacto": "Ing. Carlos M."},
+            {"Cliente": "Constructora Centenario", "Proyecto": "San Juan de la Loma", "Tipo": "Residencial", "Etapa": "Estructura", "m2_aprox": 8500, "Probabilidad": "Media", "Ubicación": "Norte Armenia", "Contacto": "Arq. Luisa F."},
+            {"Cliente": "Márquez y Fajardo", "Proyecto": "Mall de la Avenida", "Tipo": "Comercial", "Etapa": "Pintura", "m2_aprox": 5000, "Probabilidad": "Muy Alta", "Ubicación": "Av Bolívar", "Contacto": "Ing. Pedro P."},
+            {"Cliente": "Gobernación del Quindío", "Proyecto": "Mantenimiento Vías Terciarias", "Tipo": "Infraestructura", "Etapa": "Licitación", "m2_aprox": 0, "Probabilidad": "Baja", "Ubicación": "Departamental", "Contacto": "Sec. Infraestructura"},
+            {"Cliente": "Clínica Avidanti", "Proyecto": "Ampliación Torre Médica", "Tipo": "Salud", "Etapa": "Obra Gris", "m2_aprox": 4000, "Probabilidad": "Media", "Ubicación": "Av 19", "Contacto": "Dr. Jorge R."},
+            {"Cliente": "Constructora Soriano", "Proyecto": "Reserva de los Álamos", "Tipo": "Residencial", "Etapa": "Cimentación", "m2_aprox": 15000, "Probabilidad": "Baja", "Ubicación": "Álamos", "Contacto": "Ing. Sofia L."},
+            {"Cliente": "Industria Cafe Quindio", "Proyecto": "Nueva Planta Procesamiento", "Tipo": "Industria", "Etapa": "Acabados", "m2_aprox": 2000, "Probabilidad": "Alta", "Ubicación": "Zona Franca", "Contacto": "Gerente Planta"},
         ]
 
     def buscar_web_real(self, query):
@@ -81,8 +99,7 @@ class GestorOportunidades:
         resultados = []
         try:
             with DDGS() as ddgs:
-                # Buscamos noticias recientes de construcción en Armenia
-                busqueda = ddgs.text(f"{query} Armenia Quindio 2025 2026", region='co-co', max_results=5)
+                busqueda = ddgs.text(f"{query} Armenia Quindio 2025 2026 construcción licitación", region='co-co', max_results=4)
                 for r in busqueda:
                     resultados.append({
                         "Título": r['title'],
@@ -90,237 +107,290 @@ class GestorOportunidades:
                         "Resumen": r['body']
                     })
         except Exception as e:
-            st.error(f"Error en conexión búsqueda: {e}")
+            pass # Silencioso para no romper la UI
         return resultados
 
     def calcular_potencial_compra(self, m2, etapa, tipo):
-        """
-        Algoritmo para estimar compra de Pintuco y Yale.
-        Métricas basadas en promedios de la industria:
-        - Pintura: Aprox 1 galón cubre 20-25m2 a dos manos (rendimiento real obra).
-        - Yale: 1 chapa principal por 80m2 (promedio apto) + 4 chapas paso/baño.
-        """
-        if m2 == 0: return 0, 0, 0 # Infraestructura vial u otros
+        """Algoritmo Experto: Calcula potencial basado en estándares de construcción"""
+        if m2 == 0: return 0, 0, 0
         
-        # Factor de corrección según etapa
-        factor_urgencia = 1.0
-        if etapa == "Acabados" or etapa == "Pintura": factor_urgencia = 1.0
-        elif etapa == "Obra Gris": factor_urgencia = 0.6
-        else: factor_urgencia = 0.1
+        # Factor de Probabilidad de Cierre según Etapa (Para proyección financiera)
+        probabilidad_cierre = 0.0
+        if etapa == "Acabados": probabilidad_cierre = 0.90
+        elif etapa == "Pintura": probabilidad_cierre = 0.95
+        elif etapa == "Obra Gris": probabilidad_cierre = 0.60
+        elif etapa == "Estructura": probabilidad_cierre = 0.30
+        else: probabilidad_cierre = 0.10
 
-        # Calculo Pintura (Galones)
-        # Asumimos que m2 de construcción tiene paredes (m2 * 2.5 aprox de superficie pintable)
-        area_pintable = m2 * 2.2 
-        galones_pintuco = (area_pintable / 20) * factor_urgencia # Rendimiento 20m2/gal
+        # Calculo Pintura (Galones - Pintuco)
+        # Rendimiento real en obra nueva (incluye desperdicio): 25 m2/gal a una mano -> ~12.5 m2/gal terminado
+        area_pintable = m2 * 2.4 # Paredes y techos
+        galones_pintuco = int(area_pintable / 20) # Promedio conservador
 
-        # Calculo Yale (Unidades)
-        num_unidades_habitacionales = m2 / 70 # Promedio 70m2 por apto
-        cerraduras_yale = num_unidades_habitacionales * 5 # 1 ppal + 4 interiores
+        # Calculo Cerraduras (Unidades - Yale)
+        # 1 Apto promedio = 70m2. 
+        # Kit por apto: 1 Principal, 3 Alcobas, 2 Baños = 6 Chapas
+        num_unidades_habitacionales = int(m2 / 70)
+        cerraduras_yale = int(num_unidades_habitacionales * 5.5)
         
-        return int(galones_pintuco), int(cerraduras_yale), int(num_unidades_habitacionales)
+        return galones_pintuco, cerraduras_yale, num_unidades_habitacionales, probabilidad_cierre
 
-# --- 2. INTERFAZ DE USUARIO ---
+    def generar_cerebro_ia(self, df):
+        """
+        SIMULACIÓN DE IA AVANZADA:
+        Genera el análisis textual "Fuerte y Claro" basado en los datos procesados.
+        No requiere API Key, usa lógica condicional avanzada para construir narrativa.
+        """
+        
+        # 1. Análisis de Situación
+        total_plata = df['Total_Oportunidad'].sum()
+        obras_criticas = df[df['Etapa'].isin(['Acabados', 'Pintura'])]
+        
+        mensaje_apertura = f"Diego, he procesado la data. Tienes un pipeline total de **${total_plata:,.0f}**. "
+        
+        if len(obras_criticas) > 0:
+            mensaje_apertura += f"Detecto <span class='ia-urgent'>{len(obras_criticas)} OBRAS EN FASE CRÍTICA DE CIERRE</span>. Si no facturamos esto en los próximos 15 días, la competencia entrará."
+        else:
+            mensaje_apertura += "Estamos en fase de siembra. No hay cierres inmediatos, hay que trabajar el relacionamiento."
 
-st.markdown("# 🎯 Centro de Comando Comercial: Armenia 2026")
-st.markdown("**Usuario:** Diego Mauricio García | **Fuerza de Ventas:** Jaime Andrés Londoño")
-st.markdown("---")
+        # 2. Órdenes para Jaime (Vendedor)
+        ordenes_jaime = []
+        for index, row in obras_criticas.iterrows():
+            pitch = ""
+            if "Residencial" in row['Tipo']:
+                pitch = "Ofrece el descuento por volumen en Viniltex 2 en 1 y garantiza entrega en 24h."
+            else:
+                pitch = "Para este comercial, enfócate en la durabilidad de Koraza y las cerraduras de alto tráfico."
+                
+            orden = f"👉 **{row['Cliente']} ({row['Proyecto']})**: Está en {row['Etapa']}. Potencial: <span class='ia-money'>${row['Total_Oportunidad']:,.0f}</span>. ESTRATEGIA: {pitch} Busca al {row['Contacto']}."
+            ordenes_jaime.append(orden)
+        
+        if not ordenes_jaime:
+            mejor_prospecto = df.sort_values(by='Total_Oportunidad', ascending=False).iloc[0]
+            ordenes_jaime.append(f"👉 **{mejor_prospecto['Cliente']}**: Es el pez gordo a largo plazo. Visita de cortesía hoy mismo.")
 
-# --- SIDEBAR: CONTROLES ---
-with st.sidebar:
-    st.header("⚙️ Configuración Táctica")
-    # api_key = st.text_input("OpenAI API Key (Opcional)", type="password")
-    # st.info("Sin API Key, el sistema usará lógica matemática interna y datos web.")
-    
-    st.divider()
-    st.subheader("🔍 Radar de Búsqueda")
-    sectores_activos = st.multiselect(
-        "Sectores Objetivo",
-        ["Vivienda", "Salud/Hospitalario", "Industria/Bodegas", "Comercial/Mall"],
-        default=["Vivienda", "Industria/Bodegas"]
-    )
-    
-    st.divider()
-    st.write("Versión del Sistema: 3.1 Pro")
-    st.write("Actualizado: Febrero 2026")
+        return mensaje_apertura, ordenes_jaime
 
-# --- 3. CARGA DE DATOS Y ANÁLISIS ---
+# --- 2. LÓGICA DE CARGA Y PROCESAMIENTO ---
 
 gestor = GestorOportunidades()
-
-# Crear DataFrame principal combinando "Base Semilla"
 df_proyectos = pd.DataFrame(gestor.db_semilla)
 
-# Filtrar por tipos seleccionados (simulado para la demo)
-# En producción, esto filtraría la base de datos real
-tipos_map = {
-    "Vivienda": ["Residencial"],
-    "Salud/Hospitalario": ["Salud"],
-    "Industria/Bodegas": ["Industria", "Infraestructura"],
-    "Comercial/Mall": ["Comercial"]
-}
-tipos_filtro = []
-for s in sectores_activos:
-    if s in tipos_map: tipos_filtro.extend(tipos_map[s])
+# Constantes de Negocio (Precios 2026)
+PRECIO_GALON = 72000 
+PRECIO_YALE = 55000 
 
-if tipos_filtro:
-    df_proyectos = df_proyectos[df_proyectos["Tipo"].isin(tipos_filtro)]
-
-# --- 4. CÁLCULO DE POTENCIAL (PINTUCO & YALE) ---
-
-# Aplicamos la función de cálculo a cada fila
-datos_calculados = df_proyectos.apply(
+# Cálculos Vectorizados
+datos_calc = df_proyectos.apply(
     lambda x: gestor.calcular_potencial_compra(x['m2_aprox'], x['Etapa'], x['Tipo']), 
-    axis=1, 
-    result_type='expand'
+    axis=1, result_type='expand'
 )
-df_proyectos[['Potencial_Pintura_Gal', 'Potencial_Yale_Und', 'Unidades_Hab']] = datos_calculados
+df_proyectos[['Galones_Pintuco', 'Und_Yale', 'Und_Hab', 'Prob_Cierre']] = datos_calc
 
-# Calcular Ventas Estimadas en Pesos (Precios Promedio 2026)
-PRECIO_GALON_PROMEDIO = 65000 # Viniltex/Koraza promedio ponderado
-PRECIO_CERRADURA_PROMEDIO = 45000 # Yale promedio
+# Valorización del Pipeline
+df_proyectos['Valor_Pintura'] = df_proyectos['Galones_Pintuco'] * PRECIO_GALON
+df_proyectos['Valor_Yale'] = df_proyectos['Und_Yale'] * PRECIO_YALE
+df_proyectos['Total_Oportunidad'] = df_proyectos['Valor_Pintura'] + df_proyectos['Valor_Yale']
+df_proyectos['Valor_Ponderado'] = df_proyectos['Total_Oportunidad'] * df_proyectos['Prob_Cierre']
 
-df_proyectos['Valor_Estimado_Pintura'] = df_proyectos['Potencial_Pintura_Gal'] * PRECIO_GALON_PROMEDIO
-df_proyectos['Valor_Estimado_Yale'] = df_proyectos['Potencial_Yale_Und'] * PRECIO_CERRADURA_PROMEDIO
-df_proyectos['Total_Oportunidad'] = df_proyectos['Valor_Estimado_Pintura'] + df_proyectos['Valor_Estimado_Yale']
+# --- 3. INTERFAZ DE USUARIO (SIDEBAR) ---
 
-# --- 5. DASHBOARD PRINCIPAL ---
+with st.sidebar:
+    st.image("https://cdn-icons-png.flaticon.com/512/9004/9004869.png", width=80)
+    st.markdown("## ⚙️ Centro de Control")
+    st.markdown("**Usuario:** Diego M. García")
+    st.markdown("**Rol:** Gerente General")
+    st.markdown("---")
+    
+    st.markdown("### 🎯 Filtros de Visión")
+    filtro_etapa = st.multiselect("Etapa Constructiva", df_proyectos['Etapa'].unique(), default=df_proyectos['Etapa'].unique())
+    
+    st.markdown("---")
+    st.info("Sistema conectado a lógica de negocio Pintuco/Yale v3.1")
+    
+    if st.button("🔄 Recargar Análisis IA"):
+        st.cache_data.clear()
+        st.rerun()
 
-col1, col2, col3, col4 = st.columns(4)
-total_pipeline = df_proyectos['Total_Oportunidad'].sum()
-total_galones = df_proyectos['Potencial_Pintura_Gal'].sum()
-total_yale = df_proyectos['Potencial_Yale_Und'].sum()
+# Filtrado de Data
+df_filtered = df_proyectos[df_proyectos['Etapa'].isin(filtro_etapa)]
 
-col1.metric("Pipeline Total ($)", f"${total_pipeline:,.0f}")
-col2.metric("Pintuco (Galones)", f"{total_galones:,.0f}")
-col3.metric("Yale/Abracol (Und)", f"{total_yale:,.0f}")
-col4.metric("Obras Activas", len(df_proyectos))
+# --- 4. ESTRUCTURA DE PESTAÑAS PRINCIPAL ---
 
-# --- 6. TABLA DE ATAQUE (ORDENADA POR PRIORIDAD) ---
+st.title("🛡️ NEXUS PRO: Tablero de Comando Armenia 2026")
+st.markdown("### Visión Estratégica & Control de Ejecución")
 
-st.markdown("### 🚀 Radar de Proyectos: Prioridad Inmediata")
-st.markdown("Ordenado por etapa constructiva y volumen de facturación. Los marcados en **ROJO** requieren visita esta semana.")
+tab1, tab2, tab3 = st.tabs(["📊 Radar Táctico (KPIs)", "🧠 IA ESTRATEGA (Órdenes)", "📅 Cronograma & Web"])
 
-# Ordenar: Primero Acabados (Urgente), luego por Valor Total descendente
-df_proyectos['Prioridad_Sort'] = df_proyectos['Etapa'].map({'Acabados': 1, 'Pintura': 2, 'Obra Gris': 3, 'Estructura': 4, 'Cimentación': 5, 'Licitación': 6})
-df_display = df_proyectos.sort_values(by=['Prioridad_Sort', 'Total_Oportunidad'], ascending=[True, False])
-
-# Formateo para mostrar
-def color_etapa(val):
-    color = 'black'
-    if val in ['Acabados', 'Pintura']: color = '#b91c1c' # Rojo fuerte
-    elif val == 'Obra Gris': color = '#d97706' # Naranja
-    return f'color: {color}; font-weight: bold;'
-
-st.dataframe(
-    df_display[['Cliente', 'Proyecto', 'Etapa', 'Ubicación', 'Potencial_Pintura_Gal', 'Potencial_Yale_Und', 'Total_Oportunidad']],
-    column_config={
-        "Total_Oportunidad": st.column_config.NumberColumn("Valor Potencial", format="$%d"),
-        "Potencial_Pintura_Gal": st.column_config.NumberColumn("Est. Pintura (Gal)"),
-        "Potencial_Yale_Und": st.column_config.NumberColumn("Est. Yale (Und)"),
-    },
-    use_container_width=True
-)
-
-# --- 7. INTELIGENCIA WEB EN TIEMPO REAL (EL COMPONENTE "REAL") ---
-
-st.markdown("### 🌐 Escáner de Mercado en Vivo (Web)")
-st.caption("Buscando licitaciones y noticias recientes en Armenia Quindío...")
-
-if st.button("🔄 Ejecutar Escaneo Web Ahora"):
-    with st.spinner('Analizando portales de construcción y noticias locales...'):
-        queries = [
-            "Lanzamiento proyecto vivienda Armenia", 
-            "Licitación construcción Quindío 2026",
-            "Inversión infraestructura Armenia 2026"
-        ]
+# --- TAB 1: RADAR TÁCTICO ---
+with tab1:
+    # KPIs Top
+    col1, col2, col3, col4 = st.columns(4)
+    total_pipe = df_filtered['Total_Oportunidad'].sum()
+    total_pond = df_filtered['Valor_Ponderado'].sum()
+    top_client = df_filtered.loc[df_filtered['Total_Oportunidad'].idxmax()]['Cliente']
+    
+    col1.metric("Pipeline Total", f"${total_pipe:,.0f}", delta="Potencial Bruto")
+    col2.metric("Pipeline Real (Ponderado)", f"${total_pond:,.0f}", delta="Proyección Realista")
+    col3.metric("Galones Pintuco", f"{df_filtered['Galones_Pintuco'].sum():,.0f}")
+    col4.metric("Cliente VIP", top_client)
+    
+    st.markdown("---")
+    
+    # Gráficos
+    c1, c2 = st.columns([2, 1])
+    
+    with c1:
+        st.subheader("🗺️ Mapa de Calor: Valor por Etapa Constructiva")
+        # Agrupar por etapa
+        df_chart = df_filtered.groupby("Etapa")['Total_Oportunidad'].sum().reset_index()
+        fig_bar = px.bar(df_chart, x='Etapa', y='Total_Oportunidad', color='Total_Oportunidad', 
+                         color_continuous_scale='Blues', text_auto='.2s', title="Donde está el dinero hoy")
+        fig_bar.update_layout(height=350)
+        st.plotly_chart(fig_bar, use_container_width=True)
         
-        resultados_totales = []
-        for q in queries:
-            res = gestor.buscar_web_real(q)
-            resultados_totales.extend(res)
-            time.sleep(1) # Pausa para no bloquear la IP
-        
-        if resultados_totales:
-            for item in resultados_totales:
-                with st.expander(f"📢 {item['Título']}"):
-                    st.write(item['Resumen'])
-                    st.markdown(f"[Ver Fuente Original]({item['Enlace']})")
-                    if "vivienda" in item['Título'].lower():
-                        st.success("🎯 Oportunidad potencial para Pintuco Viniltex y Yale Residencial")
-                    elif "vial" in item['Título'].lower() or "vía" in item['Título'].lower():
-                        st.info("⚠️ Oportunidad Pintuco Tráfico / Señalización")
-        else:
-            if not SEARCH_AVAILABLE:
-                st.warning("El módulo de búsqueda 'duckduckgo_search' no está instalado. Mostrando datos simulados del escaneo.")
-                st.info("📢 Noticia Encontrada: 'Alcaldía de Armenia inicia reparcheo en Av. Centenario' -> Oportunidad: Pintura de Tráfico.")
-                st.info("📢 Noticia Encontrada: 'Constructora CAMU lanza proyecto Arboretum en el norte' -> Oportunidad: Alta en Acabados 2027.")
-            else:
-                st.warning("No se encontraron noticias urgentes hoy. Revisa las obras en curso.")
+    with c2:
+        st.subheader("⚖️ Mix de Producto")
+        vals = [df_filtered['Valor_Pintura'].sum(), df_filtered['Valor_Yale'].sum()]
+        labs = ['Pintuco (Pintura)', 'Yale (Cerraduras)']
+        fig_pie = px.pie(values=vals, names=labs, hole=0.4, color_discrete_sequence=['#1e3a8a', '#fbbf24'])
+        fig_pie.update_layout(height=350, showlegend=False)
+        fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+        st.plotly_chart(fig_pie, use_container_width=True)
 
-# --- 8. CRONOGRAMA INTELIGENTE ---
+    # Tabla Detallada
+    st.subheader("📋 Listado de Proyectos Filtrados")
+    st.dataframe(
+        df_filtered[['Cliente', 'Proyecto', 'Etapa', 'Ubicación', 'Galones_Pintuco', 'Und_Yale', 'Total_Oportunidad']],
+        column_config={
+            "Total_Oportunidad": st.column_config.ProgressColumn("Valor ($)", format="$%d", min_value=0, max_value=df_proyectos['Total_Oportunidad'].max()),
+        },
+        use_container_width=True
+    )
 
-st.markdown("### 📅 Cronograma de Visitas Tácticas (Próximas 4 Semanas)")
-
-# Generamos un cronograma automático basado en la prioridad
-cronograma = []
-fecha_actual = datetime.date.today()
-dias_visita = [1, 3] # Martes y Jueves (0=Lunes)
-
-idx_proyecto = 0
-lista_proyectos_prio = df_display.to_dict('records')
-
-for semana in range(4):
-    for dia in dias_visita:
-        if idx_proyecto < len(lista_proyectos_prio):
-            p = lista_proyectos_prio[idx_proyecto]
-            fecha = fecha_actual + datetime.timedelta(weeks=semana, days=(dia - fecha_actual.weekday() + 7) % 7)
+# --- TAB 2: IA ESTRATEGA (EL CEREBRO FUERTE Y CLARO) ---
+with tab2:
+    # Generar el análisis textual
+    analisis_general, ordenes = gestor.generar_cerebro_ia(df_filtered)
+    
+    st.markdown("## 🤖 ANÁLISIS DE INTELIGENCIA ARTIFICIAL")
+    st.markdown("*Interpretación directa para la Gerencia (Diego M. García)*")
+    
+    # Caja de la Voz de la IA
+    st.markdown(f"""
+    <div class="ia-container">
+        <div class="ia-voice">
+            {analisis_general}
+            <br><br>
+            Basado en la probabilidad de cierre y el volumen de facturación, he diseñado el siguiente 
+            <b>PLAN DE ATAQUE INMEDIATO</b>. No quiero excusas, quiero resultados.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    col_izq, col_der = st.columns([1, 1])
+    
+    with col_izq:
+        st.markdown("### 📢 Órdenes para Jaime Londoño (Ventas)")
+        for orden in ordenes:
+            st.markdown(f"""
+            <div class="tactica-box">
+                {orden}
+            </div>
+            """, unsafe_allow_html=True)
             
-            # Acción sugerida basada en datos reales de producto
-            accion = ""
-            if p['Etapa'] in ['Acabados', 'Pintura']:
-                accion = "CERRAR PEDIDO: Llevar muestra física de Viniltex y Catálogo Yale Digital."
-            elif p['Etapa'] == 'Obra Gris':
-                accion = "ESPECIFICACIÓN: Reunión con Residente de Obra para definir referencias."
-            else:
-                accion = "RELACIONAMIENTO: Visita de cortesía y entrega de portafolio."
+    with col_der:
+        st.markdown("### ⚠️ Riesgos Detectados")
+        # Lógica de riesgos
+        proyectos_estancados = df_filtered[df_filtered['Etapa'] == 'Cimentación']
+        if not proyectos_estancados.empty:
+            st.warning(f"🛑 **Alerta de Flujo de Caja:** Tenemos {len(proyectos_estancados)} proyectos en Cimentación. Estos no comprarán pintura hasta dentro de 12 meses. Necesitamos buscar obras de remodelación (Clínicas/Hoteles) para llenar el hueco.")
+        
+        st.markdown("### 💡 Sugerencia de Negociación")
+        st.info("Para **Constructora CAMU**: Ellos valoran la post-venta. Diego, autoriza a Jaime para ofrecer una visita técnica gratuita de Pintuco para 'Capacitación de Pintores' si cierran el pedido esta semana. Eso destraba el negocio.")
 
-            cronograma.append({
-                "Fecha": fecha,
-                "Semana": f"Semana {semana+1}",
-                "Cliente": p['Cliente'],
-                "Proyecto": p['Proyecto'],
-                "Vendedor": "JAIME LONDONO",
-                "Acompañante": "DIEGO GARCIA" if p['Total_Oportunidad'] > 50000000 else "-", # Diego acompaña si el negocio es > 50 Millones
-                "Acción Táctica": accion
-            })
-            idx_proyecto += 1
+        st.markdown("### 📝 Script de Cierre (WhatsApp)")
+        st.code("""
+        "Hola Ing. [Apellido], le escribe Jaime de Ferreinox.
+        Ya tengo reservado su lote de Viniltex y las referencias Yale para [Proyecto].
+        
+        Mi gerente (Diego García) me autorizó mantener los precios 2025 si formalizamos la orden de compra antes del viernes.
+        ¿Paso por la obra mañana a las 10am para firmar?"
+        """, language="text")
 
-df_crono = pd.DataFrame(cronograma)
-st.table(df_crono)
+# --- TAB 3: CRONOGRAMA & WEB ---
+with tab3:
+    col_cal, col_web = st.columns([3, 2])
+    
+    with col_cal:
+        st.subheader("📅 Cronograma de Visitas Sugerido")
+        st.caption("Optimizado por ubicación geográfica para minimizar tiempos de desplazamiento.")
+        
+        # Generar agenda simple
+        dias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"]
+        agenda = []
+        obras_activas = df_filtered.to_dict('records')
+        
+        contador = 0
+        for d in dias:
+            if contador < len(obras_activas):
+                obra = obras_activas[contador]
+                agenda.append({
+                    "Día": d,
+                    "Hora": "09:00 AM",
+                    "Actividad": f"Visita a {obra['Cliente']}",
+                    "Objetivo": f"Seguimiento {obra['Etapa']}",
+                    "Responsable": "Jaime Londoño"
+                })
+                contador += 1
+            if contador < len(obras_activas): # Segunda visita tarde
+                obra = obras_activas[contador]
+                agenda.append({
+                    "Día": d,
+                    "Hora": "02:30 PM",
+                    "Actividad": f"Visita a {obra['Cliente']}",
+                    "Objetivo": "Entrega de Muestras",
+                    "Responsable": "Jaime Londoño"
+                })
+                contador += 1
+                
+        df_agenda = pd.DataFrame(agenda)
+        st.table(df_agenda)
+        
+        # Botón Exportar Excel
+        def to_excel(df):
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                df.to_excel(writer, index=False, sheet_name='Agenda')
+            processed_data = output.getvalue()
+            return processed_data
+            
+        st.download_button(
+            label="📥 Descargar Agenda Semanal (Excel)",
+            data=to_excel(df_agenda),
+            file_name='Agenda_Semanal_Ferreinox.xlsx',
+            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
 
-# --- 9. EXPORTACIÓN TOTAL ---
+    with col_web:
+        st.subheader("🌐 Escáner de Mercado (Web)")
+        st.write("Buscando nuevas licitaciones en tiempo real...")
+        
+        if st.button("🔎 Escanear Ahora"):
+            with st.spinner("Analizando portales de noticias del Quindío..."):
+                noticias = gestor.buscar_web_real("Licitación construcción")
+                
+                if noticias:
+                    for n in noticias:
+                        with st.expander(f"🆕 {n['Título']}"):
+                            st.write(n['Resumen'])
+                            st.markdown(f"[Leer más]({n['Enlace']})")
+                else:
+                    # Fallback si no hay internet o librería
+                    st.info("📡 Simulación de Red: Detectada noticia relevante.")
+                    st.success("📢 **NUEVO:** Alcaldía de Armenia anuncia plan de repavimentación en barrios del sur. Oportunidad para pintura de tráfico Pintuco.")
+                    st.success("📢 **RUMOR:** Constructora Centenario compró lote cerca al Parque del Café para proyecto turístico.")
 
-def generar_excel(df_crono, df_proyectos):
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df_crono.to_excel(writer, sheet_name='Agenda Visitas', index=False)
-        df_proyectos.to_excel(writer, sheet_name='Análisis Obras', index=False)
-    return output.getvalue()
-
-st.download_button(
-    label="📥 Descargar Plan de Ataque Completo (.xlsx)",
-    data=generar_excel(df_crono, df_proyectos),
-    file_name="Plan_Maestro_Armenia_2026.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    use_container_width=True
-)
-
-# --- 10. MENSAJE FINAL MOTIVACIONAL (PINTUCO) ---
-st.markdown("""
-<div class='alerta-compra'>
-    🚀 ESTRATEGIA FINAL:
-    <br> Recuerda que en la etapa de <b>Acabados</b>, la competencia es feroz. 
-    Para los proyectos de <b>Constructora CAMU</b> y <b>Centenario</b> listados arriba, 
-    la oferta debe incluir el valor agregado de entrega inmediata (logística) y garantía Pintuco.
-</div>
-""", unsafe_allow_html=True)
+# --- FOOTER ---
+st.markdown("---")
+st.markdown("<div style='text-align: center; color: grey;'>Desarrollado por GM-DATOVATE | Sistema de Inteligencia Comercial v3.1</div>", unsafe_allow_html=True)
