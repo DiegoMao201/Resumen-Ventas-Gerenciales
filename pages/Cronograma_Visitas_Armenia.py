@@ -371,7 +371,7 @@ with pestana_operaciones:
         for col, h in enumerate(headers_resumen):
             ws_dash.write(9, col+1, h, fmt_header)
         row = 10
-        top_proyectos = df_proyectos.sort_values('Total_Oportunidad', ascending=False).head(5)
+        top_proyectos = df_proyectos.sort_values('Total_Oportunidad', ascending=False).head(20)
         for _, p in top_proyectos.iterrows():
             ws_dash.write(row, 1, p['Cliente'], fmt_texto)
             ws_dash.write(row, 2, p['Proyecto'], fmt_texto)
@@ -456,3 +456,13 @@ with pestana_operaciones:
         use_container_width=True,
         help="Descarga un archivo Excel avanzado con listas desplegables y formato gerencial."
     )
+
+# Para el análisis IA y cronograma:
+top_clientes = (
+    df_armenia.groupby("nombre_cliente")["valor_venta"]
+    .sum().sort_values(ascending=False).head(20)  # <-- Cambia a 20
+)
+clientes_priorizados = list(top_clientes.index[:20])  # <-- Cambia a 20
+
+# Para el dashboard resumen ejecutivo en Excel:
+top_proyectos = df_proyectos.sort_values('Total_Oportunidad', ascending=False).head(20)  # <-- Cambia a 20
