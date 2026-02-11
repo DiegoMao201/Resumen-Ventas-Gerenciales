@@ -181,10 +181,15 @@ PRECIO_GALON = 72000
 PRECIO_YALE = 55000 
 
 # Cálculos Vectorizados
-datos_calc = df_proyectos.apply(
-    lambda x: gestor.calcular_potencial_compra(x['m2_aprox'], x['Etapa'], x['Tipo']), 
-    axis=1, result_type='expand'
-)
+def mi_funcion(row):
+    return {
+        "col1": row.get("col1", None),
+        "col2": row.get("col2", None),
+        "col3": row.get("col3", None),
+        # ... todas las columnas esperadas ...
+    }
+
+datos_calc = df_proyectos.apply(mi_funcion, axis=1, result_type="expand")
 df_proyectos[['Galones_Pintuco', 'Und_Yale', 'Und_Hab', 'Prob_Cierre']] = datos_calc
 
 # Valorización del Pipeline
