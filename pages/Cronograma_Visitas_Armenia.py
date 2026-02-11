@@ -361,23 +361,25 @@ def generar_excel_profesional(df_crono, df_proyectos, pipeline_total):
 # --- BOTÓN DE DESCARGA EN LA INTERFAZ ---
 st.success("✅ Sistema listo. Base de datos comercial sincronizada.")
 
+# --- GENERAR CRONOGRAMA DE VISITAS (EJEMPLO BÁSICO, AJUSTA SEGÚN TU LÓGICA) ---
+# Usamos los 20 clientes priorizados para armar el cronograma
+fecha_inicio = datetime.date(2026, 1, 8)  # Primer lunes de enero 2026
+cronograma = []
+for i, cliente in enumerate(clientes_priorizados):
+    fecha = fecha_inicio + datetime.timedelta(weeks=i)
+    proyecto = df_proyectos[df_proyectos["Cliente"] == cliente]["Proyecto"].values[0]
+    accion = "Visita Comercial y Seguimiento"
+    cronograma.append({
+        "Semana": i+1,
+        "Fecha": fecha.strftime("%Y-%m-%d"),
+        "Cliente": cliente,
+        "Proyecto": proyecto,
+        "Acción Táctica": accion
+    })
+df_crono = pd.DataFrame(cronograma)
+
+# Calcula el pipeline total para el Excel
+total_pipeline = df_proyectos['Total_Oportunidad'].sum()
+
+# --- BOTÓN DE DESCARGA EN LA INTERFAZ ---
 excel_data = generar_excel_profesional(df_crono, df_proyectos, total_pipeline)
-
-st.download_button(
-    label="📥 DESCARGAR CUADERNO DE OBRA MAESTRO (.xlsx)",
-    data=excel_data,
-    file_name=f"Plan_Comercial_Armenia_{datetime.date.today()}.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    use_container_width=True,
-    help="Descarga un archivo Excel avanzado con listas desplegables y formato gerencial."
-)
-
-# Para el análisis IA y cronograma:
-top_clientes = (
-    df_proyectos.groupby("Cliente")["Total_Oportunidad"]
-    .sum().sort_values(ascending=False).head(20)
-)
-clientes_priorizados = list(top_clientes.index[:20])
-
-# Para el dashboard resumen ejecutivo en Excel:
-top_proyectos = df_proyectos.sort_values('Total_Oportunidad', ascending=False).head(20)
