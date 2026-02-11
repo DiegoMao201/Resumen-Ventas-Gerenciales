@@ -6,6 +6,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import io
 import time
+import xlsxwriter  # <-- ESTA LÍNEA
 from openai import OpenAI
 api_key = st.secrets.get("OPENAI_API_KEY", None)
 client = OpenAI(api_key=api_key) if api_key else None
