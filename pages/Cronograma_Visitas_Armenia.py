@@ -284,18 +284,36 @@ with pestana_ia:
 with pestana_operaciones:
     st.markdown("### 🌐 Escáner de Mercado en Vivo (Web)")
     st.caption("Buscando licitaciones y noticias recientes en Armenia Quindío...")
+    def obtener_fecha_hoy():
+        return datetime.date.today().strftime("%Y-%m-%d")
+
+    def obtener_fecha_hace_7dias():
+        return (datetime.date.today() - datetime.timedelta(days=7)).strftime("%Y-%m-%d")
+
+    # Prompt personalizado para búsqueda
+    sectores_str = ", ".join(sectores_activos) if sectores_activos else "Obras, Instituciones, Industria"
+    prompt_usuario = st.text_input(
+        "¿Qué tipo de oportunidades quieres buscar en Armenia Quindío?",
+        value=f"Oportunidades para vender pintura en {sectores_str}"
+    )
+
+    fecha_inicio = obtener_fecha_hace_7dias()
+    fecha_fin = obtener_fecha_hoy()
+
     if st.button("🔄 Ejecutar Escaneo Web Ahora", key="btn_web"):
         with st.spinner('Analizando portales de construcción y noticias locales...'):
+            # El query incluye filtro de fecha para priorizar noticias recientes
+            query = f"{prompt_usuario} Armenia Quindio after:{fecha_inicio} before:{fecha_fin}"
             queries = [
-                "Lanzamiento proyecto vivienda Armenia", 
-                "Licitación construcción Quindío 2026",
-                "Inversión infraestructura Armenia 2026"
+                query,
+                f"Licitación construcción {sectores_str} Armenia Quindio after:{fecha_inicio} before:{fecha_fin}",
+                f"Inversión infraestructura {sectores_str} Armenia Quindio after:{fecha_inicio} before:{fecha_fin}"
             ]
             resultados_totales = []
             for q in queries:
                 res = gestor.buscar_web_real(q)
                 resultados_totales.extend(res)
-                time.sleep(1) 
+                time.sleep(1)
             if resultados_totales:
                 for item in resultados_totales:
                     with st.expander(f"📢 {item['Título']}"):
@@ -306,12 +324,8 @@ with pestana_operaciones:
                         elif "vial" in item['Título'].lower() or "vía" in item['Título'].lower():
                             st.info("⚠️ Oportunidad Pintuco Tráfico / Señalización")
             else:
-                if not SEARCH_AVAILABLE:
-                    st.warning("El módulo de búsqueda 'duckduckgo_search' no está instalado. Mostrando datos simulados.")
-                    st.info("📢 Noticia: 'Alcaldía inicia reparcheo Av. Centenario' -> Vende Pintura de Tráfico.")
-                    st.info("📢 Noticia: 'Camu lanza proyecto Arboretum' -> Oportunidad futura.")
-                else:
-                    st.warning("No se encontraron noticias urgentes hoy.")
+                st.warning("No se encontraron noticias recientes relevantes esta semana.")
+
     st.divider()
     st.markdown("### 📅 Cronograma de Visitas Tácticas")
     cronograma = []
