@@ -402,7 +402,10 @@ with pestana_operaciones:
             ws_agenda.write(r, 4, data['Acción Táctica'], fmt_texto)
             monto = df_proyectos[df_proyectos['Proyecto'] == data['Proyecto']]['Total_Oportunidad'].values[0]
             ws_agenda.write(r, 5, monto, fmt_moneda)
-            ws_agenda.data_validation(r, 6, {'validate': 'list', 'source': ['✅ Ejecutada - Exitosa', '⚠️ Ejecutada - Pendiente', '❌ No realizada', '📞 Gestión Telefónica']})
+            ws_agenda.data_validation(r, 6, r, 6, {
+                'validate': 'list',
+                'source': ['✅ Ejecutada - Exitosa', '⚠️ Ejecutada - Pendiente', '❌ No realizada', '📞 Gestión Telefónica']
+            })
             ws_agenda.write(r, 6, "Seleccionar...", fmt_input)
             ws_agenda.write(r, 7, "", fmt_input)
             ws_agenda.write(r, 8, "", fmt_input)
