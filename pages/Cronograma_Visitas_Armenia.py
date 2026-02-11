@@ -4,6 +4,7 @@ import numpy as np
 import datetime
 import plotly.express as px
 from openai import OpenAI
+import io
 
 st.set_page_config(page_title="Cronograma Visitas Armenia 2026", page_icon="📅", layout="wide")
 
@@ -33,7 +34,10 @@ ciudad = col1.selectbox("Ciudad", ["ARMENIA"], index=0)
 sectores = col2.multiselect("Sectores", ["OBRA", "INSTITUCION", "INDUSTRIA"], default=["OBRA", "INSTITUCION", "INDUSTRIA"])
 anio = col3.selectbox("Año", [2026], index=0)
 
-mask_ciudad = df_ventas["nombre_cliente"].str.contains(ciudad, case=False, na=False) | df_ventas["ciudad"].str.contains(ciudad, case=False, na=False)
+if "Poblacion_Real" in df_ventas.columns:
+    mask_ciudad = df_ventas["Poblacion_Real"].str.contains(ciudad, case=False, na=False)
+else:
+    mask_ciudad = df_ventas["nombre_cliente"].str.contains(ciudad, case=False, na=False)
 mask_sector = df_ventas["categoria_producto"].str.contains("|".join(sectores), case=False, na=False)
 df_armenia = df_ventas[mask_ciudad & mask_sector].copy()
 
