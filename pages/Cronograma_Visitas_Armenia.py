@@ -459,10 +459,10 @@ with pestana_operaciones:
 
 # Para el análisis IA y cronograma:
 top_clientes = (
-    df_armenia.groupby("nombre_cliente")["valor_venta"]
-    .sum().sort_values(ascending=False).head(20)  # <-- Cambia a 20
+    df_proyectos.groupby("Cliente")["Total_Oportunidad"]
+    .sum().sort_values(ascending=False).head(20)
 )
-clientes_priorizados = list(top_clientes.index[:20])  # <-- Cambia a 20
+clientes_priorizados = list(top_clientes.index[:20])
 
 # Para el dashboard resumen ejecutivo en Excel:
-top_proyectos = df_proyectos.sort_values('Total_Oportunidad', ascending=False).head(20)  # <-- Cambia a 20
+top_proyectos = df_proyectos.sort_values('Total_Oportunidad', ascending=False).head(20)
