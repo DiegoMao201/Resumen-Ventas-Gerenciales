@@ -128,8 +128,8 @@ st.markdown("---")
 # --- SIDEBAR: CONTROLES ---
 with st.sidebar:
     st.header("⚙️ Configuración Táctica")
-    api_key = st.text_input("OpenAI API Key (Opcional)", type="password")
-    st.info("Sin API Key, el sistema usará lógica matemática interna y datos web.")
+    # api_key = st.text_input("OpenAI API Key (Opcional)", type="password")
+    # st.info("Sin API Key, el sistema usará lógica matemática interna y datos web.")
     
     st.divider()
     st.subheader("🔍 Radar de Búsqueda")
