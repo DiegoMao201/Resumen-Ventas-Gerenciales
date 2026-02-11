@@ -342,16 +342,113 @@ with pestana_operaciones:
                 idx_proyecto += 1
     df_crono = pd.DataFrame(cronograma)
     st.table(df_crono)
-    def generar_excel(df_crono, df_proyectos):
+    # --- 5. GENERADOR DE EXCEL DE ALTO NIVEL (CRM TÁCTICO) ---
+    def generar_excel_profesional(df_crono, df_proyectos, pipeline_total):
         output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df_crono.to_excel(writer, sheet_name='Agenda Visitas', index=False)
-            df_proyectos.to_excel(writer, sheet_name='Análisis Obras', index=False)
+        workbook = xlsxwriter.Workbook(output, {'in_memory': True})
+
+        # --- DEFINICIÓN DE FORMATOS CORPORATIVOS ---
+        fmt_titulo = workbook.add_format({'bold': True, 'font_size': 18, 'bg_color': '#1E3A8A', 'font_color': 'white', 'align': 'center', 'valign': 'vcenter'})
+        fmt_subtitulo = workbook.add_format({'bold': True, 'font_size': 12, 'font_color': '#1E3A8A', 'bottom': 2, 'bottom_color': '#1E3A8A'})
+        fmt_header = workbook.add_format({'bold': True, 'bg_color': '#0F172A', 'font_color': 'white', 'border': 1, 'align': 'center'})
+        fmt_header_input = workbook.add_format({'bold': True, 'bg_color': '#B45309', 'font_color': 'white', 'border': 1, 'align': 'center'})
+        fmt_texto = workbook.add_format({'border': 1, 'align': 'left', 'valign': 'vcenter'})
+        fmt_fecha = workbook.add_format({'num_format': 'dd/mm/yyyy', 'border': 1, 'align': 'center'})
+        fmt_moneda = workbook.add_format({'num_format': '$ #,##0', 'border': 1})
+        fmt_numero = workbook.add_format({'num_format': '#,##0', 'border': 1, 'align': 'center'})
+        fmt_input = workbook.add_format({'bg_color': '#FEF9C3', 'border': 1, 'font_color': '#000000'})
+        fmt_alerta = workbook.add_format({'bg_color': '#FEE2E2', 'font_color': '#991B1B', 'bold': True, 'border': 1})
+
+        # HOJA 1: RESUMEN EJECUTIVO
+        ws_dash = workbook.add_worksheet('Resumen Gerencial')
+        ws_dash.hide_gridlines(2)
+        ws_dash.merge_range('B2:H3', 'TABLERO DE COMANDO COMERCIAL - ARMENIA 2026', fmt_titulo)
+        ws_dash.write('B5', f"Generado el: {datetime.date.today()}", fmt_subtitulo)
+        ws_dash.write('B6', f"Pipeline Total Detectado: ${pipeline_total:,.0f}", fmt_subtitulo)
+        ws_dash.write('B8', "TOP PROYECTOS PARA CIERRE INMEDIATO", fmt_subtitulo)
+        headers_resumen = ['Cliente', 'Proyecto', 'Etapa', 'Potencial Total ($)']
+        for col, h in enumerate(headers_resumen):
+            ws_dash.write(9, col+1, h, fmt_header)
+        row = 10
+        top_proyectos = df_proyectos.sort_values('Total_Oportunidad', ascending=False).head(5)
+        for _, p in top_proyectos.iterrows():
+            ws_dash.write(row, 1, p['Cliente'], fmt_texto)
+            ws_dash.write(row, 2, p['Proyecto'], fmt_texto)
+            ws_dash.write(row, 3, p['Etapa'], fmt_texto)
+            ws_dash.write(row, 4, p['Total_Oportunidad'], fmt_moneda)
+            row += 1
+        ws_dash.set_column('B:C', 25)
+        ws_dash.set_column('D:D', 15)
+        ws_dash.set_column('E:E', 20)
+
+        # HOJA 2: BITÁCORA DE CAMPO
+        ws_agenda = workbook.add_worksheet('Agenda de Visitas (Campo)')
+        ws_agenda.freeze_panes(1, 0)
+        cols_fijas = ['Semana', 'Fecha', 'Cliente', 'Proyecto', 'Objetivo Táctico', 'Meta ($)']
+        cols_input = ['Estado Visita (Seleccionar)', 'Bitácora / Resultado', 'Compromiso Pintuco/Yale', 'Fecha Prox. Seguimiento']
+        full_headers = cols_fijas + cols_input
+        for col_num, header in enumerate(full_headers):
+            if header in cols_input:
+                ws_agenda.write(0, col_num, header, fmt_header_input)
+            else:
+                ws_agenda.write(0, col_num, header, fmt_header)
+        for i, data in df_crono.iterrows():
+            r = i + 1
+            ws_agenda.write(r, 0, data['Semana'], fmt_texto)
+            ws_agenda.write(r, 1, data['Fecha'], fmt_fecha)
+            ws_agenda.write(r, 2, data['Cliente'], fmt_texto)
+            ws_agenda.write(r, 3, data['Proyecto'], fmt_texto)
+            ws_agenda.write(r, 4, data['Acción Táctica'], fmt_texto)
+            monto = df_proyectos[df_proyectos['Proyecto'] == data['Proyecto']]['Total_Oportunidad'].values[0]
+            ws_agenda.write(r, 5, monto, fmt_moneda)
+            ws_agenda.data_validation(r, 6, {'validate': 'list', 'source': ['✅ Ejecutada - Exitosa', '⚠️ Ejecutada - Pendiente', '❌ No realizada', '📞 Gestión Telefónica']})
+            ws_agenda.write(r, 6, "Seleccionar...", fmt_input)
+            ws_agenda.write(r, 7, "", fmt_input)
+            ws_agenda.write(r, 8, "", fmt_input)
+            ws_agenda.write(r, 9, "", fmt_input)
+        ws_agenda.set_column('A:A', 10)
+        ws_agenda.set_column('B:B', 12)
+        ws_agenda.set_column('C:D', 25)
+        ws_agenda.set_column('E:E', 35)
+        ws_agenda.set_column('F:F', 18)
+        ws_agenda.set_column('G:G', 22)
+        ws_agenda.set_column('H:I', 40)
+        ws_agenda.set_column('J:J', 15)
+
+        # HOJA 3: BASE MAESTRA
+        ws_data = workbook.add_worksheet('Base Maestra Proyectos')
+        columnas_exportar = ['Cliente', 'Proyecto', 'Ubicación', 'Etapa', 'Contacto', 'm2_aprox', 'Potencial_Pintura_Gal', 'Potencial_Yale_Und', 'Valor_Estimado_Pintura', 'Valor_Estimado_Yale', 'Total_Oportunidad']
+        for col, h in enumerate(columnas_exportar):
+            ws_data.write(0, col, h, fmt_header)
+        for row_idx, row_data in df_proyectos[columnas_exportar].iterrows():
+            ws_data.write(row_idx+1, 0, row_data['Cliente'], fmt_texto)
+            ws_data.write(row_idx+1, 1, row_data['Proyecto'], fmt_texto)
+            ws_data.write(row_idx+1, 2, row_data['Ubicación'], fmt_texto)
+            ws_data.write(row_idx+1, 3, row_data['Etapa'], fmt_texto)
+            ws_data.write(row_idx+1, 4, row_data.get('Contacto', '-'), fmt_texto)
+            ws_data.write(row_idx+1, 5, row_data['m2_aprox'], fmt_numero)
+            ws_data.write(row_idx+1, 6, row_data['Potencial_Pintura_Gal'], fmt_numero)
+            ws_data.write(row_idx+1, 7, row_data['Potencial_Yale_Und'], fmt_numero)
+            ws_data.write(row_idx+1, 8, row_data['Valor_Estimado_Pintura'], fmt_moneda)
+            ws_data.write(row_idx+1, 9, row_data['Valor_Estimado_Yale'], fmt_moneda)
+            ws_data.write(row_idx+1, 10, row_data['Total_Oportunidad'], fmt_moneda)
+        ws_data.set_column('A:E', 20)
+        ws_data.set_column('F:H', 12)
+        ws_data.set_column('I:K', 18)
+
+        workbook.close()
         return output.getvalue()
+
+    # --- BOTÓN DE DESCARGA EN LA INTERFAZ ---
+    st.success("✅ Sistema listo. Base de datos comercial sincronizada.")
+
+    excel_data = generar_excel_profesional(df_crono, df_proyectos, total_pipeline)
+
     st.download_button(
-        label="📥 Descargar Plan de Ataque Completo (.xlsx)",
-        data=generar_excel(df_crono, df_proyectos),
-        file_name="Plan_Maestro_Armenia_2026.xlsx",
+        label="📥 DESCARGAR CUADERNO DE OBRA MAESTRO (.xlsx)",
+        data=excel_data,
+        file_name=f"Plan_Comercial_Armenia_{datetime.date.today()}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True
+        use_container_width=True,
+        help="Descarga un archivo Excel avanzado con listas desplegables y formato gerencial."
     )
