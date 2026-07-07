@@ -44,7 +44,7 @@ APP_CONFIG = {
 }
 
 DATA_CONFIG = {
-    "presupuestos": {'154033':{'presupuesto':123873239, 'presupuestocartera':94889366}, '154044':{'presupuesto':80000000, 'presupuestocartera':82620165}, '154034':{'presupuesto':82753045, 'presupuestocartera':70298231}, '154014':{'presupuesto':268214737, 'presupuestocartera':263008179}, '154046':{'presupuesto':85469798, 'presupuestocartera':31213146}, '154012':{'presupuesto':246616193, 'presupuestocartera':254682345}, '154043':{'presupuesto':124885413, 'presupuestocartera':143216208}, '154035':{'presupuesto':80000000, 'presupuestocartera':30809266}, '154006':{'presupuesto':81250000, 'presupuestocartera':120188057}, '154049':{'presupuesto':0, 'presupuestocartera':0}, '154013':{'presupuesto':303422639, 'presupuestocartera':373451829}, '154011':{'presupuesto':447060250, 'presupuestocartera':470517341}, '154029':{'presupuesto':50000000, 'presupuestocartera':14799022}, '154040':{'presupuesto':0, 'presupuestocartera':0},'154053':{'presupuesto':0, 'presupuestocartera':0},'154048':{'presupuesto':0, 'presupuestocartera':0},'154042':{'presupuesto':30000000, 'presupuestocartera':606989},'154031':{'presupuesto':0, 'presupuestocartera':0},'154039':{'presupuesto':0, 'presupuestocartera':0},'154051':{'presupuesto':0, 'presupuestocartera':0},'154008':{'presupuesto':0, 'presupuestocartera':0},'154052':{'presupuesto':30000000, 'presupuestocartera':38891610},'154055':{'presupuesto':40000000, 'presupuestocartera':87707319},'154050':{'presupuesto':0, 'presupuestocartera':0}},
+    "presupuestos": {'154033':{'presupuesto':123873239, 'presupuestocartera':121955931}, '154044':{'presupuesto':80000000, 'presupuestocartera':64853530}, '154034':{'presupuesto':82753045, 'presupuestocartera':35242575}, '154014':{'presupuesto':268214737, 'presupuestocartera':283458406}, '154046':{'presupuesto':85469798, 'presupuestocartera':37112627}, '154012':{'presupuesto':246616193, 'presupuestocartera':301988912}, '154043':{'presupuesto':124885413, 'presupuestocartera':183134333}, '154035':{'presupuesto':80000000, 'presupuestocartera':39077583}, '154006':{'presupuesto':81250000, 'presupuestocartera':146638108}, '154049':{'presupuesto':0, 'presupuestocartera':0}, '154013':{'presupuesto':303422639, 'presupuestocartera':379543527}, '154011':{'presupuesto':447060250, 'presupuestocartera':484588896}, '154029':{'presupuesto':50000000, 'presupuestocartera':2172522}, '154040':{'presupuesto':0, 'presupuestocartera':18312455}, '154053':{'presupuesto':0, 'presupuestocartera':0}, '154048':{'presupuesto':0, 'presupuestocartera':4129945}, '154042':{'presupuesto':30000000, 'presupuestocartera':669842}, '154031':{'presupuesto':0, 'presupuestocartera':0}, '154039':{'presupuesto':0, 'presupuestocartera':0}, '154051':{'presupuesto':0, 'presupuestocartera':0}, '154008':{'presupuesto':0, 'presupuestocartera':0}, '154052':{'presupuesto':30000000, 'presupuestocartera':8161068}, '154055':{'presupuesto':40000000, 'presupuestocartera':90519052}, '154050':{'presupuesto':0, 'presupuestocartera':783906}},
     "grupos_vendedores": {"MOSTRADOR PEREIRA": ["ALEJANDRO CARBALLO MARQUEZ", "GEORGINA A. GALVIS HERRERA"], "MOSTRADOR ARMENIA": ["CRISTIAN CAMILO RENDON MONTES", "FANDRY JOHANA ABRIL PENHA", "JAVIER ORLANDO PATINO HURTADO"], "MOSTRADOR MANIZALES": ["DAVID FELIPE MARTINEZ RIOS", "JHON JAIRO CASTAÑO MONTES"], "MOSTRADOR LAURELES": ["MAURICIO RIOS MORALES"], "MOSTRADOR OPALO": ["MARIA PAULA DEL JESUS GALVIS HERRERA"]},
     "metas_cl4_individual": {
         '154033': 15, '154044': 2, '154034': 2, '154014': 30, '154046': 2, '154012': 30,
@@ -358,8 +358,27 @@ def calcular_presupuesto_dinamico_global(df_ventas_historicas):
     
     # Normalizar nombres para facilitar el merge posterior
     df_presupuesto_mensual['nomvendedor'] = df_presupuesto_mensual['nomvendedor'].apply(normalizar_texto)
-    
+
     return df_presupuesto_mensual
+
+def calcular_mejor_venta_semestre(df_ventas_historicas, anio, meses=range(1, 7)):
+    """
+    EXCEPCIÓN JULIO: por cada vendedor devuelve su MEJOR venta NETA mensual
+    (facturas + notas crédito) dentro de los meses indicados del año dado.
+    Retorna un dict {nomvendedor_normalizado: mejor_venta_mensual}.
+    """
+    filtro_ventas_netas = 'FACTURA|NOTA.*CREDITO'
+    df = df_ventas_historicas[
+        (df_ventas_historicas['anio'] == anio) &
+        (df_ventas_historicas['mes'].isin(list(meses))) &
+        (df_ventas_historicas['TipoDocumento'].str.contains(filtro_ventas_netas, na=False, case=False, regex=True))
+    ]
+    if df.empty:
+        return {}
+    # Venta neta por vendedor y mes, luego el mejor mes de cada vendedor
+    ventas_mes = df.groupby(['nomvendedor', 'mes'])['valor_venta'].sum().reset_index()
+    mejor = ventas_mes.groupby('nomvendedor')['valor_venta'].max()
+    return {normalizar_texto(k): v for k, v in mejor.items()}
 
 def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_historicas, anio_sel, mes_sel):
     filtro_ventas_netas = 'FACTURA|NOTA.*CREDITO'
@@ -427,7 +446,20 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     
     # Asignamos el presupuesto dinámico a la columna 'presupuesto' (y manejamos nulos)
     df_resumen['presupuesto'] = df_resumen['presupuesto_dinamico'].fillna(0)
-    
+
+    # ==============================================================================
+    # EXCEPCIÓN ÚNICA: JULIO 2026
+    # El presupuesto de ventas de julio/2026 = la MEJOR venta neta mensual de cada
+    # vendedor entre enero y junio 2026. Solo aplica a este mes; los demás meses
+    # siguen usando el presupuesto dinámico normal.
+    # ==============================================================================
+    if anio_sel == 2026 and mes_sel == 7:
+        mejor_venta = calcular_mejor_venta_semestre(df_ventas_historicas, 2026, meses=range(1, 7))
+        if mejor_venta:
+            override = df_resumen['nomvendedor'].apply(normalizar_texto).map(mejor_venta)
+            # Solo reemplaza donde hay dato de ene-jun; si no, conserva el dinámico
+            df_resumen['presupuesto'] = override.fillna(df_resumen['presupuesto'])
+
     # Limpieza
     if 'presupuesto_dinamico' in df_resumen.columns: df_resumen.drop(columns=['presupuesto_dinamico'], inplace=True)
     if 'nomvendedor_y' in df_resumen.columns: df_resumen.drop(columns=['nomvendedor_y'], inplace=True)
