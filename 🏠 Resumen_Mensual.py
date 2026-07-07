@@ -456,7 +456,9 @@ def procesar_datos_periodo(df_ventas_periodo, df_cobros_periodo, df_ventas_histo
     if anio_sel == 2026 and mes_sel == 7:
         mejor_venta = calcular_mejor_venta_semestre(df_ventas_historicas, 2026, meses=range(1, 7))
         if mejor_venta:
-            override = df_resumen['nomvendedor'].apply(normalizar_texto).map(mejor_venta)
+            # En este punto el nombre normalizado vive en 'nomvendedor_norm'
+            # (la columna 'nomvendedor' aún no se ha renombrado tras el merge).
+            override = df_resumen['nomvendedor_norm'].map(mejor_venta)
             # Solo reemplaza donde hay dato de ene-jun; si no, conserva el dinámico
             df_resumen['presupuesto'] = override.fillna(df_resumen['presupuesto'])
 
